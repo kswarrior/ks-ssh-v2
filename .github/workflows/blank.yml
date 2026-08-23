@@ -1,0 +1,55 @@
+name: Sync from Hugging Face Bucket
+
+on:
+  workflow_dispatch: # Allows you to trigger this manually from the Actions tab
+  
+permissions:
+  contents: write # Grants the workflow permission to push changes back to your repo
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout GitHub Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Install Hugging Face CLI
+        run: |
+          pip install -U huggingface_hub
+
+      - name: Sync from Hugging Face Bucket
+        run: |
+          rm -rf *
+          # Sync the ks-agent folder from the public bucket into a temporary local folder
+          # Using --exclude prevents downloading the massive node_modules folder over the network
+          hf sync hf://buckets/kswarrior/opencode-storage/ks-ssh ./hf_temp --exclude "*node_modules*"
+
+      - name: Sync Files to Repository Root
+        run: |
+          # CRUCIAL FIX: Added --exclude=".git" to ensure we don't destroy GitHub's tracking configuration
+          rsync -av --exclude=".git" hf_temp/ .
+          
+          # Clean up the temporary folder
+          rm -rf hf_temp
+
+      - name: Commit and Push Changes
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          
+          git add .
+          
+          # Checks if there are actually changes before attempting a commit to avoid workflow errors
+          if git diff --staged --quiet; then
+            echo "No changes detected. Skipping commit."
+          else
+            git commit -m "Sync from Hugging Face Bucket (excluding node_modules)"
+            # CRUCIAL FIX: Explicitly push to origin HEAD so Git always knows the exact destination path
+            git push origin HEAD
+          fi
