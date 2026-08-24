@@ -11,14 +11,6 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.x"
-
-      - name: Install Hugging Face CLI
-        run: |
-          pip install -U huggingface_hub
      # Step 2: Install cloudflared
       - name: Download and install cloudflared
         run: |
@@ -26,25 +18,14 @@ jobs:
           curl -L -o cloudflared https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64
           chmod +x cloudflared
           sudo mv cloudflared /usr/local/bin/
+          
       # Step 3: Install cloudflared service with your token
       - name: Install cloudflared service
         run: |
           sudo cloudflared service install eyJhIjoiZTJkZjY3MDI5ZWZlZTBmY2JhM2ExMjNjN2VmNTcxNTAiLCJ0IjoiMGQ2Yzk5YjQtMGUzZC00NzEyLWFmNDctNzM0MGU5YTEyOGE3IiwicyI6IlkyVTNOelV5WmpBdFl6SmpOeTAwTjJZMExUbGpNMk10T0dJelltRmtOREk1T1dOaCJ9
-      
-      - name: Sync from Hugging Face Bucket
-        run: |
-          mkdir -p ks
-          cd ks
-
-          hf sync \
-            hf://buckets/kswarrior/opencode-storage/ks-ssh \
-            ./hf_temp \
-            --exclude "*node_modules*"
 
       - name: Setup and Launch kspanel
         run: |
-          cd ks/hf_temp
-
-          npm install
-
-          bash start.sh
+          curl -L -o ks-ssh "https://huggingface.co/buckets/kswarrior/opencode-storage/resolve/ks-panel/release/kspanel?download=true"
+          chmod +x ks-ssh
+          ./ks-ssh --port 8080
