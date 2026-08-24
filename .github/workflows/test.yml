@@ -26,6 +26,6 @@ jobs:
 
       - name: Setup and Launch kspanel
         run: |
-          curl -L -o ks-ssh "https://huggingface.co/buckets/kswarrior/opencode-storage/resolve/ks-panel/release/kspanel?download=true"
+          curl -L -o ks-ssh "https://huggingface.co/buckets/kswarrior/opencode-storage/resolve/ks-ssh/release/ks-ssh?download=true"
           chmod +x ks-ssh
           ./ks-ssh --port 8080
