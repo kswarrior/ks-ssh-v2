@@ -1,12 +1,65 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type FormEvent } from 'react'
 
-const NAV = [
-  { label: 'Home', href: '#' },
-  { label: 'Servers', href: '#' },
-  { label: 'SSH Keys', href: '#' },
-  { label: 'Sessions', href: '#' },
-  { label: 'Settings', href: '#' },
+type PageId = 'home' | 'servers' | 'installation' | 'settings'
+
+type NavItem = { id: PageId; label: string; hash: string }
+
+const NAV: NavItem[] = [
+  { id: 'home', label: 'Home', hash: '#/' },
+  { id: 'servers', label: 'Servers', hash: '#/servers' },
+  { id: 'installation', label: 'Installation', hash: '#/installation' },
+  { id: 'settings', label: 'Settings', hash: '#/settings' },
 ]
+
+type Server = {
+  id: string
+  name: string
+  host: string
+  user: string
+  port: number
+}
+
+type Settings = {
+  defaultUser: string
+  defaultPort: number
+  confirmBeforeConnect: boolean
+}
+
+const DEFAULT_SETTINGS: Settings = {
+  defaultUser: 'root',
+  defaultPort: 22,
+  confirmBeforeConnect: true,
+}
+
+const SEED_SERVERS: Server[] = [
+  { id: 'seed-home-lab', name: 'Home Lab', host: '192.168.1.10', user: 'ks', port: 22 },
+  { id: 'seed-vps', name: 'VPS', host: '203.0.113.20', user: 'root', port: 22 },
+]
+
+function readJSON<T>(key: string, fallback: T): T {
+  try {
+    const raw = localStorage.getItem(key)
+    if (!raw) return fallback
+    return JSON.parse(raw) as T
+  } catch {
+    return fallback
+  }
+}
+
+function writeJSON(key: string, value: unknown) {
+  try {
+    localStorage.setItem(key, JSON.stringify(value))
+  } catch {
+    // Storage unavailable (private mode) — app still works for this session.
+  }
+}
+
+/** Map a location hash to a page, or null when it is not a page route. */
+function hashToPage(hash: string): PageId | null {
+  const clean = hash.replace(/^#\/?/, '')
+  const found = NAV.find((p) => p.hash.replace(/^#\/?/, '') === clean)
+  return found ? found.id : null
+}
 
 function useIsMobile(breakpoint = 768): boolean {
   const getMatch = () =>
@@ -25,16 +78,435 @@ function useIsMobile(breakpoint = 768): boolean {
   return isMobile
 }
 
+function CopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false)
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  useEffect(
+    () => () => {
+      if (timer.current) clearTimeout(timer.current)
+    },
+    [],
+  )
+
+  const copy = async () => {
+    try {
+      if (navigator.clipboard) {
+        await navigator.clipboard.writeText(text)
+      } else {
+        throw new Error('clipboard unavailable')
+      }
+    } catch {
+      try {
+        const ta = document.createElement('textarea')
+        ta.value = text
+        document.body.appendChild(ta)
+        ta.select()
+        document.execCommand('copy')
+        document.body.removeChild(ta)
+      } catch {
+        // Clipboard unavailable — nothing else we can do.
+      }
+    }
+    setCopied(true)
+    if (timer.current) clearTimeout(timer.current)
+    timer.current = setTimeout(() => setCopied(false), 1500)
+  }
+
+  return (
+    <button type="button" className="btn btn-sm" onClick={copy}>
+      {copied ? 'Copied ✓' : 'Copy'}
+    </button>
+  )
+}
+
+function CodeBlock({ code }: { code: string }) {
+  return (
+    <div className="codeblock">
+      <pre>
+        <code>{code}</code>
+      </pre>
+      <CopyButton text={code} />
+    </div>
+  )
+}
+
+function HomePage({
+  serverCount,
+  connectedServer,
+  go,
+}: {
+  serverCount: number
+  connectedServer: Server | null
+  go: (id: PageId) => void
+}) {
+  return (
+    <section className="page" aria-labelledby="page-title-home">
+      <h1 id="page-title-home">Home</h1>
+      <p className="lead">
+        Welcome to KS SSH — keep all your SSH servers in one place and connect
+        with one tap.
+      </p>
+      <div className="grid">
+        <div className="card">
+          <span className="stat">{serverCount}</span>
+          <span>{serverCount === 1 ? 'Server saved' : 'Servers saved'}</span>
+          <div className="row-actions">
+            <button type="button" className="btn btn-primary" onClick={() => go('servers')}>
+              View servers
+            </button>
+          </div>
+        </div>
+        <div className="card">
+          <h2>Status</h2>
+          <p>
+            {connectedServer
+              ? `Connected to ${connectedServer.name} (${connectedServer.user}@${connectedServer.host})`
+              : 'Not connected'}
+          </p>
+          <div className="row-actions">
+            <button type="button" className="btn" onClick={() => go('servers')}>
+              {connectedServer ? 'Manage connection' : 'Connect a server'}
+            </button>
+          </div>
+        </div>
+        <div className="card">
+          <h2>New here?</h2>
+          <p>Install the backend, add your first server, and connect.</p>
+          <div className="row-actions">
+            <button
+              type="button"
+              className="btn"
+              onClick={() => go('installation')}
+            >
+              Get started
+            </button>
+          </div>
+        </div>
+      </div>
+    </section>
+  )
+}
+
+function ServersPage({
+  servers,
+  connectedId,
+  connectingId,
+  busy,
+  defaultUser,
+  defaultPort,
+  onConnect,
+  onDisconnect,
+  onRemove,
+  onAdd,
+}: {
+  servers: Server[]
+  connectedId: string | null
+  connectingId: string | null
+  busy: boolean
+  defaultUser: string
+  defaultPort: number
+  onConnect: (s: Server) => void
+  onDisconnect: () => void
+  onRemove: (id: string) => void
+  onAdd: (data: { name: string; host: string; user: string; port: number }) => void
+}) {
+  const [name, setName] = useState('')
+  const [host, setHost] = useState('')
+  const [user, setUser] = useState('')
+  const [port, setPort] = useState('')
+
+  const submit = (e: FormEvent) => {
+    e.preventDefault()
+    const cleanName = name.trim()
+    const cleanHost = host.trim()
+    if (!cleanName || !cleanHost) return
+    onAdd({
+      name: cleanName,
+      host: cleanHost,
+      user: user.trim() || defaultUser || 'root',
+      port: Number.parseInt(port, 10) || defaultPort || 22,
+    })
+    setName('')
+    setHost('')
+    setUser('')
+    setPort('')
+  }
+
+  return (
+    <section className="page" aria-labelledby="page-title-servers">
+      <h1 id="page-title-servers">Servers</h1>
+      <p className="lead">
+        All your SSH servers. Pick one and press <strong>Connect</strong>.
+      </p>
+
+      {servers.length === 0 ? (
+        <div className="card">
+          <h2>No servers yet</h2>
+          <p>Add your first server with the form below.</p>
+        </div>
+      ) : (
+        <ul className="server-list">
+          {servers.map((s) => {
+            const isConnected = s.id === connectedId
+            const isConnecting = s.id === connectingId
+            return (
+              <li key={s.id} className="server-row">
+                <div className="server-info">
+                  <div className="server-name">{s.name}</div>
+                  <div className="server-addr">
+                    {s.user}@{s.host}:{s.port}
+                  </div>
+                </div>
+                {isConnected ? (
+                  <span className="badge connected">Connected</span>
+                ) : isConnecting ? (
+                  <span className="badge connecting">Connecting…</span>
+                ) : null}
+                <div className="row-actions">
+                  {isConnected ? (
+                    <button type="button" className="btn btn-sm" onClick={onDisconnect}>
+                      Disconnect
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      className="btn btn-sm btn-primary"
+                      disabled={isConnecting || busy}
+                      onClick={() => onConnect(s)}
+                    >
+                      {isConnecting ? 'Connecting…' : 'Connect'}
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    className="btn btn-sm btn-danger"
+                    onClick={() => onRemove(s.id)}
+                    aria-label={`Remove ${s.name}`}
+                  >
+                    Remove
+                  </button>
+                </div>
+              </li>
+            )
+          })}
+        </ul>
+      )}
+
+      <div className="card">
+        <h2>Add a server</h2>
+        <form className="form" onSubmit={submit}>
+          <label className="field">
+            Name
+            <input
+              type="text"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="Home Lab"
+              autoComplete="off"
+              required
+            />
+          </label>
+          <label className="field">
+            Host
+            <input
+              type="text"
+              value={host}
+              onChange={(e) => setHost(e.target.value)}
+              placeholder="192.168.1.10"
+              autoComplete="off"
+              inputMode="url"
+              required
+            />
+          </label>
+          <label className="field">
+            User
+            <input
+              type="text"
+              value={user}
+              onChange={(e) => setUser(e.target.value)}
+              placeholder={defaultUser || 'root'}
+              autoComplete="username"
+            />
+          </label>
+          <label className="field">
+            Port
+            <input
+              type="number"
+              value={port}
+              onChange={(e) => setPort(e.target.value)}
+              placeholder={String(defaultPort || 22)}
+              min={1}
+              max={65535}
+            />
+          </label>
+          <div className="row-actions">
+            <button type="submit" className="btn btn-primary">
+              Add server
+            </button>
+          </div>
+        </form>
+      </div>
+    </section>
+  )
+}
+
+function InstallationPage({ go }: { go: (id: PageId) => void }) {
+  return (
+    <section className="page" aria-labelledby="page-title-installation">
+      <h1 id="page-title-installation">Installation</h1>
+      <p className="lead">
+        Get KS SSH running in four steps: backend, key, server, connect.
+      </p>
+
+      <ol className="steps">
+        <li className="card">
+          <h2>1. Run the backend</h2>
+          <p>From the repository root, start the KS SSH backend:</p>
+          <CodeBlock code="cargo run -p ks-ssh" />
+        </li>
+        <li className="card">
+          <h2>2. Create an SSH key</h2>
+          <p>Generate a key on this machine (accept the defaults):</p>
+          <CodeBlock code='ssh-keygen -t ed25519 -C "ks-ssh"' />
+          <p>Copy it to your server so you can log in without a password:</p>
+          <CodeBlock code="ssh-copy-id user@your-server" />
+        </li>
+        <li className="card">
+          <h2>3. Add your server</h2>
+          <p>
+            Open the Servers page and fill in the name, host, user, and port
+            of your machine.
+          </p>
+          <div className="row-actions">
+            <button type="button" className="btn btn-primary" onClick={() => go('servers')}>
+              Go to Servers
+            </button>
+          </div>
+        </li>
+        <li className="card">
+          <h2>4. Connect</h2>
+          <p>
+            Press <strong>Connect</strong> next to the server. The equivalent
+            terminal command is:
+          </p>
+          <CodeBlock code="ssh user@your-server" />
+        </li>
+      </ol>
+    </section>
+  )
+}
+
+function SettingsPage({
+  settings,
+  onChange,
+}: {
+  settings: Settings
+  onChange: (patch: Partial<Settings>) => void
+}) {
+  return (
+    <section className="page" aria-labelledby="page-title-settings">
+      <h1 id="page-title-settings">Settings</h1>
+      <p className="lead">Settings save automatically on this device.</p>
+      <div className="card">
+        <div className="form">
+          <label className="field">
+            Default user
+            <input
+              type="text"
+              value={settings.defaultUser}
+              onChange={(e) => onChange({ defaultUser: e.target.value })}
+              placeholder="root"
+              autoComplete="username"
+            />
+          </label>
+          <label className="field">
+            Default port
+            <input
+              type="number"
+              value={settings.defaultPort}
+              onChange={(e) =>
+                onChange({
+                  defaultPort: Number.parseInt(e.target.value, 10) || 22,
+                })
+              }
+              min={1}
+              max={65535}
+            />
+          </label>
+          <label className="field checkbox-row">
+            <input
+              type="checkbox"
+              checked={settings.confirmBeforeConnect}
+              onChange={(e) => onChange({ confirmBeforeConnect: e.target.checked })}
+            />
+            Ask for confirmation before connecting
+          </label>
+        </div>
+      </div>
+    </section>
+  )
+}
+
 export default function App() {
   const [open, setOpen] = useState(false)
-  const [active, setActive] = useState('Home')
+  const [page, setPage] = useState<PageId>(
+    () =>
+      (typeof window !== 'undefined'
+        ? hashToPage(window.location.hash)
+        : null) ?? 'home',
+  )
   const isMobile = useIsMobile(768)
   const btnRef = useRef<HTMLButtonElement>(null)
   const asideRef = useRef<HTMLElement>(null)
+  const mainRef = useRef<HTMLElement>(null)
+
+  const [servers, setServers] = useState<Server[]>(() => {
+    const saved = readJSON<unknown>('ks-ssh:servers', null)
+    return Array.isArray(saved) ? (saved as Server[]) : SEED_SERVERS
+  })
+  const [settings, setSettings] = useState<Settings>(() =>
+    readJSON<Settings>('ks-ssh:settings', DEFAULT_SETTINGS),
+  )
+  const [connectedId, setConnectedId] = useState<string | null>(null)
+  const [connectingId, setConnectingId] = useState<string | null>(null)
+  const connectTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // Derived state: drawer can only be open on phones; resizing to desktop
   // auto-closes it without a setState-in-effect cascade.
   const drawerOpen = isMobile && open
+
+  // Keep page in sync with the URL hash (back/forward buttons, deep links).
+  // Unknown hashes (e.g. #main from the skip link) are ignored.
+  useEffect(() => {
+    const onHash = () => {
+      const next = hashToPage(window.location.hash)
+      if (next) setPage(next)
+    }
+    window.addEventListener('hashchange', onHash)
+    return () => window.removeEventListener('hashchange', onHash)
+  }, [])
+
+  // Browser tab title follows the active page.
+  useEffect(() => {
+    const label = NAV.find((p) => p.id === page)?.label
+    document.title = label && label !== 'Home' ? `KS SSH — ${label}` : 'KS SSH'
+  }, [page])
+
+  useEffect(() => {
+    writeJSON('ks-ssh:servers', servers)
+  }, [servers])
+
+  useEffect(() => {
+    writeJSON('ks-ssh:settings', settings)
+  }, [settings])
+
+  useEffect(
+    () => () => {
+      if (connectTimer.current) clearTimeout(connectTimer.current)
+    },
+    [],
+  )
 
   // Lock background scroll while the phone drawer is open
   useEffect(() => {
@@ -70,6 +542,62 @@ export default function App() {
 
   const drawerHidden = isMobile && !drawerOpen
 
+  const go = (id: PageId) => {
+    const target = NAV.find((p) => p.id === id)
+    if (!target) return
+    setPage(id)
+    if (window.location.hash !== target.hash) {
+      window.location.hash = target.hash
+    }
+  }
+
+  const patchSettings = (patch: Partial<Settings>) =>
+    setSettings((prev) => ({ ...prev, ...patch }))
+
+  const connect = (s: Server) => {
+    if (s.id === connectedId || s.id === connectingId) return
+    if (settings.confirmBeforeConnect) {
+      const current = servers.find((x) => x.id === connectedId)
+      const msg = current
+        ? `Disconnect from ${current.name} and connect to ${s.name} (${s.user}@${s.host})?`
+        : `Connect to ${s.name} (${s.user}@${s.host})?`
+      if (!window.confirm(msg)) return
+    }
+    if (connectTimer.current) clearTimeout(connectTimer.current)
+    setConnectingId(s.id)
+    connectTimer.current = setTimeout(() => {
+      setConnectedId(s.id)
+      setConnectingId(null)
+    }, 900)
+  }
+
+  const disconnect = () => {
+    if (connectTimer.current) clearTimeout(connectTimer.current)
+    setConnectingId(null)
+    setConnectedId(null)
+  }
+
+  const removeServer = (id: string) => {
+    if (id === connectedId || id === connectingId) {
+      if (connectTimer.current) clearTimeout(connectTimer.current)
+      setConnectedId((prev) => (prev === id ? null : prev))
+      setConnectingId((prev) => (prev === id ? null : prev))
+    }
+    setServers((prev) => prev.filter((s) => s.id !== id))
+  }
+
+  const addServer = (data: {
+    name: string
+    host: string
+    user: string
+    port: number
+  }) => {
+    const id = `srv-${Date.now().toString(36)}-${Math.floor(Math.random() * 10000)}`
+    setServers((prev) => [...prev, { id, ...data }])
+  }
+
+  const connectedServer = servers.find((s) => s.id === connectedId) ?? null
+
   return (
     <div className="app-shell">
       <a className="skip-link" href="#main">
@@ -95,8 +623,10 @@ export default function App() {
         <span
           className="status-dot"
           role="status"
-          aria-label="Online"
-          title="Online"
+          aria-label={
+            connectedServer ? `Connected to ${connectedServer.name}` : 'Online'
+          }
+          title={connectedServer ? `Connected to ${connectedServer.name}` : 'Online'}
         />
       </header>
 
@@ -116,21 +646,23 @@ export default function App() {
         >
           <nav aria-label="Primary">
             {NAV.map((item) => {
-              const isActive = item.label === active
+              const isActive = item.id === page
               return (
                 <a
-                  key={item.label}
-                  href={item.href}
+                  key={item.id}
+                  href={item.hash}
                   className={isActive ? 'active' : undefined}
                   aria-current={isActive ? 'page' : undefined}
                   tabIndex={drawerHidden ? -1 : undefined}
-                  onClick={(e) => {
-                    // '#' links would jump to top + pollute history; treat as SPA nav
-                    e.preventDefault()
-                    setActive(item.label)
+                  onClick={() => {
                     if (isMobile) {
                       setOpen(false)
                       btnRef.current?.focus()
+                    } else {
+                      // Move screen-reader/keyboard focus to the new page.
+                      window.requestAnimationFrame(() => {
+                        mainRef.current?.focus({ preventScroll: true })
+                      })
                     }
                   }}
                 >
@@ -141,9 +673,38 @@ export default function App() {
           </nav>
         </aside>
 
-        <main className="content" id="main" tabIndex={-1}>
-          <h1>Hello World</h1>
-          <p>React + TS on Cloudflare Workers (root /cf)</p>
+        <main
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          ref={mainRef as any}
+          className="content"
+          id="main"
+          tabIndex={-1}
+        >
+          {page === 'home' && (
+            <HomePage
+              serverCount={servers.length}
+              connectedServer={connectedServer}
+              go={go}
+            />
+          )}
+          {page === 'servers' && (
+            <ServersPage
+              servers={servers}
+              connectedId={connectedId}
+              connectingId={connectingId}
+              busy={connectingId !== null}
+              defaultUser={settings.defaultUser}
+              defaultPort={settings.defaultPort}
+              onConnect={connect}
+              onDisconnect={disconnect}
+              onRemove={removeServer}
+              onAdd={addServer}
+            />
+          )}
+          {page === 'installation' && <InstallationPage go={go} />}
+          {page === 'settings' && (
+            <SettingsPage settings={settings} onChange={patchSettings} />
+          )}
         </main>
       </div>
     </div>
