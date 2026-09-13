@@ -49,16 +49,14 @@ pub struct ShellQuery {
 }
 
 #[derive(Deserialize)]
-struct KillQuery {
-    id: String,
+pub struct KillQuery {
+    pub id: String,
 }
 
 /// DELETE /v1/shell?id=<session> — kill a terminal session immediately
 /// (used when the user closes a tab and confirms; otherwise the shell
 /// would linger detached until the reaper TTL).
-pub async fn api_kill_session(
-    Query(q): Query<KillQuery>,
-) -> axum::response::Response {
+pub async fn api_kill_session(Query(q): Query<KillQuery>) -> axum::response::Response {
     use axum::{Json, http::StatusCode, response::IntoResponse};
     if !valid_session_id(&q.id) {
         return (StatusCode::BAD_REQUEST, "bad id").into_response();
