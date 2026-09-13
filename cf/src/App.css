@@ -207,21 +207,12 @@
     display: block;
     position: fixed;
     top: 56px;
+    top: calc(56px + env(safe-area-inset-top, 0px));
     right: 0;
     bottom: 0;
     left: 0;
     z-index: 10;
     background: rgba(0, 0, 0, 0.4);
-  }
-}
-
-/* Account for iOS notch in drawer offset */
-@supports (top: env(safe-area-inset-top)) {
-  @media (max-width: 768px) {
-    .sidebar,
-    .overlay.show {
-      top: calc(56px + env(safe-area-inset-top));
-    }
   }
 }
 
