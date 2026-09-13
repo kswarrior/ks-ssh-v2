@@ -223,7 +223,11 @@ export default function App() {
           />
         </header>
 
-        <main className="content" id="main" tabIndex={-1}>
+        <main
+          className={`content${tab === 'terminal' ? ' content-term' : ''}`}
+          id="main"
+          tabIndex={-1}
+        >
           <div hidden={tab !== 'terminal'}>
             <TerminalPage entries={entries} onChange={setEntries} />
           </div>

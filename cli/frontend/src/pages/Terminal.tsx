@@ -8,6 +8,8 @@ export type SshEntry = {
   online: boolean
 }
 
+type TermSession = { id: string; name: string }
+
 /** Strip ANSI escape sequences but keep printable text. */
 function stripAnsi(s: string): string {
   // eslint-disable-next-line no-control-regex
@@ -16,29 +18,16 @@ function stripAnsi(s: string): string {
 
 /** Apply a PTY output chunk to the visible buffer. Handles clear-screen. */
 function applyChunk(prev: string, chunk: string): string {
-  // Full-screen clear? Start fresh.
   if (chunk.includes('\x1b[2J') || chunk.includes('\x1b[H\x1b[2J')) {
-    const clean = stripAnsi(chunk)
-    return clean.slice(-20000)
+    return stripAnsi(chunk).slice(-20000)
   }
   let out = prev + stripAnsi(chunk)
-  // Handle carriage returns + backspaces simply.
   out = out.replace(/\r(?!\n)/g, '\n')
   if (out.length > 20000) out = out.slice(-20000)
   return out
 }
 
-export default function TerminalPage({
-  entries: _entries,
-  onChange: _onChange,
-}: {
-  entries: SshEntry[]
-  onChange: (fn: (prev: SshEntry[]) => SshEntry[]) => void
-}) {
-  void _entries
-  void _onChange
-
-  const [opened, setOpened] = useState(false)
+function ShellSession({ name }: { name: string }) {
   const [output, setOutput] = useState('')
   const [status, setStatus] = useState<'connecting' | 'online' | 'offline'>('offline')
 
@@ -47,7 +36,6 @@ export default function TerminalPage({
   const keyRef = useRef<HTMLInputElement | null>(null)
 
   const focusKeys = () => {
-    // Timeout so mobile keyboards open reliably after tap.
     setTimeout(() => keyRef.current?.focus({ preventScroll: true }), 30)
   }
 
@@ -61,34 +49,12 @@ export default function TerminalPage({
   const sendResize = () => {
     const ws = wsRef.current
     if (!ws || ws.readyState !== WebSocket.OPEN) return
-    // Rough cols/rows from viewport — backend clamps to sane bounds.
     const cols = Math.max(20, Math.min(500, Math.floor(window.innerWidth / 9)))
     const rows = Math.max(5, Math.min(300, Math.floor(window.innerHeight / 19)))
     ws.send(JSON.stringify({ type: 'resize', cols, rows }))
   }
 
-  // Open shell.
-  const openTerminal = () => {
-    setOpened(true)
-    setOutput('')
-    setStatus('connecting')
-  }
-
-  const close = () => {
-    try {
-      wsRef.current?.close()
-    } catch {
-      // Already closed — ignore.
-    }
-    wsRef.current = null
-    setOpened(false)
-    setOutput('')
-    setStatus('offline')
-  }
-
-  // Connect WS when the terminal window appears.
   useEffect(() => {
-    if (!opened) return
     const scheme = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
     const ws = new WebSocket(`${scheme}//${window.location.host}/v1/shell`)
     wsRef.current = ws
@@ -104,7 +70,7 @@ export default function TerminalPage({
       try {
         const msg = JSON.parse(text) as { type?: string }
         if (msg?.type === 'exit') {
-          setOutput((prev) => prev + '\n[shell exited — tap × to close]\n')
+          setOutput((prev) => prev + '\n[shell exited]\n')
           setStatus('offline')
           return
         }
@@ -140,15 +106,13 @@ export default function TerminalPage({
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [opened])
+  }, [])
 
-  // Auto-scroll.
   useEffect(() => {
     const el = bodyRef.current
     if (el) el.scrollTop = el.scrollHeight
-  }, [output, opened])
+  }, [output])
 
-  // Char-mode keyboard: every key goes straight to the PTY.
   const onKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter') {
       e.preventDefault()
@@ -189,8 +153,88 @@ export default function TerminalPage({
     }
   }
 
+  return (
+    <div className="term-window" onClick={focusKeys}>
+      <div className="term-titlebar">
+        <span className="term-dots" aria-hidden="true">
+          <i />
+          <i />
+          <i />
+        </span>
+        <span className="term-title">
+          {name} — {status}
+        </span>
+        <span
+          className={`term-status${status === 'online' ? ' on' : status === 'connecting' ? ' wait' : ''}`}
+          role="status"
+          title={status}
+        />
+      </div>
+      <div className="term-body" ref={bodyRef} aria-live="polite">
+        <pre className="term-output">{output}</pre>
+        <span className="term-cursor" aria-hidden="true">
+          █
+        </span>
+        <input
+          ref={keyRef}
+          className="term-keycapture"
+          type="text"
+          autoComplete="off"
+          autoCapitalize="off"
+          autoCorrect="off"
+          spellCheck={false}
+          aria-label="Shell input — tap terminal then type"
+          onKeyDown={onKeyDown}
+          onChange={() => {
+            const el = keyRef.current
+            if (el && el.value) {
+              send(el.value)
+              el.value = ''
+            }
+          }}
+        />
+      </div>
+    </div>
+  )
+}
+
+let termCounter = 0
+function nextTerm(): TermSession {
+  termCounter += 1
+  return { id: `term-${Date.now().toString(36)}-${termCounter}`, name: `terminal ${termCounter}` }
+}
+
+export default function TerminalPage({
+  entries: _entries,
+  onChange: _onChange,
+}: {
+  entries: SshEntry[]
+  onChange: (fn: (prev: SshEntry[]) => SshEntry[]) => void
+}) {
+  void _entries
+  void _onChange
+
+  const [sessions, setSessions] = useState<TermSession[]>([])
+  const [activeId, setActiveId] = useState<string | null>(null)
+
+  const addTerminal = () => {
+    const t = nextTerm()
+    setSessions((prev) => [...prev, t])
+    setActiveId(t.id)
+  }
+
+  const closeTerminal = (id: string) => {
+    setSessions((prev) => {
+      const next = prev.filter((t) => t.id !== id)
+      if (activeId === id) {
+        setActiveId(next.length > 0 ? next[next.length - 1].id : null)
+      }
+      return next
+    })
+  }
+
   // First run: complete blank + centered button only.
-  if (!opened) {
+  if (sessions.length === 0) {
     return (
       <section
         className="page terminal-blank"
@@ -202,7 +246,7 @@ export default function TerminalPage({
         <button
           type="button"
           className="btn btn-primary terminal-add-btn"
-          onClick={openTerminal}
+          onClick={addTerminal}
           autoFocus
         >
           <svg
@@ -222,64 +266,63 @@ export default function TerminalPage({
     )
   }
 
+  const active = sessions.find((t) => t.id === activeId) ?? sessions[0]
+
   return (
     <section className="page term-page" aria-labelledby="page-title-terminal">
       <h1 id="page-title-terminal" className="sr-only">
         Terminal
       </h1>
-      <div className="term-window" onClick={focusKeys}>
-        <div className="term-titlebar">
-          <span className="term-dots" aria-hidden="true">
-            <i />
-            <i />
-            <i />
-          </span>
-          <span className="term-title">shell — {status}</span>
-          <span
-            className={`term-status${status === 'online' ? ' on' : status === 'connecting' ? ' wait' : ''}`}
-            role="status"
-            title={status}
-          />
-          <button
-            type="button"
-            className="term-close"
-            onClick={(e) => {
-              e.stopPropagation()
-              close()
-            }}
-            aria-label="Close terminal"
-            title="Close terminal"
-          >
-            ×
-          </button>
-        </div>
-        <div className="term-body" ref={bodyRef} aria-live="polite">
-          <pre className="term-output">{output}</pre>
-          <span className="term-cursor" aria-hidden="true">
-            █
-          </span>
-          {/* Invisible capture input — opens the mobile keyboard and
-              funnels every keystroke to the PTY (char mode, sshx.io style). */}
-          <input
-            ref={keyRef}
-            className="term-keycapture"
-            type="text"
-            autoComplete="off"
-            autoCapitalize="off"
-            autoCorrect="off"
-            spellCheck={false}
-            aria-label="Shell input — tap terminal then type"
-            onKeyDown={onKeyDown}
-            onChange={() => {
-              // IME / autocomplete fallback: flush any composed text.
-              const el = keyRef.current
-              if (el && el.value) {
-                send(el.value)
-                el.value = ''
-              }
-            }}
-          />
-        </div>
+      <div className="term-bar" role="tablist" aria-label="Terminals">
+        {sessions.map((t) => {
+          const isActive = t.id === active.id
+          return (
+            <div
+              key={t.id}
+              role="tab"
+              aria-selected={isActive}
+              tabIndex={0}
+              className={`term-tab${isActive ? ' active' : ''}`}
+              onClick={() => setActiveId(t.id)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault()
+                  setActiveId(t.id)
+                }
+              }}
+            >
+              <span className="term-tab-name">{t.name}</span>
+              <button
+                type="button"
+                className="term-tab-close"
+                aria-label={`Close ${t.name}`}
+                title={`Close ${t.name}`}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  closeTerminal(t.id)
+                }}
+              >
+                ×
+              </button>
+            </div>
+          )
+        })}
+        <button
+          type="button"
+          className="term-tab-add"
+          onClick={addTerminal}
+          aria-label="New terminal"
+          title="New terminal"
+        >
+          +
+        </button>
+      </div>
+      <div className="term-opened">
+        {sessions.map((t) => (
+          <div key={t.id} hidden={t.id !== active.id}>
+            <ShellSession name={t.name} />
+          </div>
+        ))}
       </div>
     </section>
   )

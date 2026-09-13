@@ -1111,17 +1111,107 @@
 .page.term-page {
   max-width: none;
   flex: 1;
-  padding-top: 12px;
+  padding: 0;
+  gap: 0;
+}
+
+/* Terminal tab: full-bleed, no outer gaps left/right. */
+.content-term {
+  padding-left: 0;
+  padding-right: 0;
+  padding-top: 0;
+}
+
+/* Terminal bar: [terminal 1][terminal 2][+] */
+.term-bar {
+  display: flex;
+  align-items: stretch;
+  gap: 6px;
+  padding: 8px 0 0;
+  overflow-x: auto;
+  background: transparent;
+}
+
+.term-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 8px 8px 14px;
+  min-height: 40px;
+  border: 1px solid var(--glass-border);
+  border-bottom: none;
+  border-radius: 8px 8px 0 0;
+  background: var(--field-bg);
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  user-select: none;
+}
+
+.term-tab.active {
+  background: #111318;
+  color: #e6edf3;
+  border-color: #22262e;
+}
+
+.term-tab-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.term-tab-close {
+  border: none;
+  background: transparent;
+  color: inherit;
+  font-size: 16px;
+  line-height: 1;
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  cursor: pointer;
+  opacity: 0.7;
+}
+
+.term-tab-close:hover {
+  background: rgba(255, 255, 255, 0.1);
+  opacity: 1;
+}
+
+.term-tab-add {
+  min-width: 44px;
+  min-height: 40px;
+  border: 1px dashed var(--glass-border);
+  border-radius: 8px 8px 0 0;
+  background: transparent;
+  color: var(--text-h);
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.term-tab-add:hover {
+  background: var(--hover-bg);
+}
+
+.term-opened {
+  flex: 1;
+  min-width: 0;
 }
 
 .term-window {
   display: flex;
   flex-direction: column;
   min-height: 70svh;
-  border-radius: 12px;
+  border-radius: 0;
+  border-left: none;
+  border-right: none;
   overflow: hidden;
   background: #000;
-  border: 1px solid var(--glass-border);
+  border-top: 1px solid var(--glass-border);
+  border-bottom: 1px solid var(--glass-border);
   box-shadow: var(--shadow-lg);
 }
 
