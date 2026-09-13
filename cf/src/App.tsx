@@ -463,23 +463,11 @@ function ActiveSession({
     }
 
     const handleRelayMessage = async (text: string) => {
-      let msg: {
-        type?: string
-        agent?: boolean
-        online?: boolean
-        data?: unknown
-        hasUi?: boolean
-        size?: number
-        e2e?: string
-        role?: string
-        token?: string
-        v?: number
-        seq?: number
-        nonce?: string
-        ct?: string
-      } | null = null
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      let msg: any = null
       try {
-        msg = JSON.parse(text) as typeof msg
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+        msg = JSON.parse(text)
       } catch {
         push(text)
         return
