@@ -9,7 +9,7 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::net::{Ipv4Addr, Ipv6Addr};
 
@@ -322,6 +322,115 @@ pub async fn api_list_ports() -> Response {
         hostname: hostname(),
     };
     (StatusCode::OK, Json(res)).into_response()
+}
+
+#[derive(Deserialize)]
+pub struct KillRequest {
+    pub pid: u32,
+}
+
+#[derive(Serialize)]
+struct KillResponse {
+    pub ok: bool,
+    pub pid: u32,
+}
+
+fn pid_alive(pid: u32) -> bool {
+    #[cfg(target_os = "linux")]
+    {
+        std::path::Path::new(&format!("/proc/{pid}")).exists()
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        std::process::Command::new("kill")
+            .args(["-0", &pid.to_string()])
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(true)
+    }
+}
+
+fn run_kill(pid: u32, signal: Option<&str>) -> Result<(), String> {
+    let pid_s = pid.to_string();
+    let mut cmd = std::process::Command::new("kill");
+    if let Some(sig) = signal {
+        cmd.arg(format!("-{sig}"));
+    }
+    match cmd.arg(&pid_s).output() {
+        Ok(out) if out.status.success() => Ok(()),
+        Ok(out) => {
+            let err = String::from_utf8_lossy(&out.stderr).trim().to_string();
+            Err(if err.is_empty() {
+                format!("kill {pid} failed (exit {})", out.status)
+            } else {
+                err
+            })
+        }
+        Err(e) => Err(format!("cannot run kill: {e}")),
+    }
+}
+
+/// POST /api/ports/kill — kill the process holding a port (by pid).
+/// Sends SIGTERM, waits briefly, then escalates to SIGKILL if needed.
+pub async fn api_kill_port(Json(req): Json<KillRequest>) -> Response {
+    if req.pid <= 1 {
+        return (
+            StatusCode::BAD_REQUEST,
+            format!("refusing to kill pid {}", req.pid),
+        )
+            .into_response();
+    }
+    if req.pid == std::process::id() {
+        return (
+            StatusCode::FORBIDDEN,
+            "refusing to kill ks-ssh itself",
+        )
+            .into_response();
+    }
+    if !pid_alive(req.pid) {
+        return (
+            StatusCode::NOT_FOUND,
+            format!("no such process (pid {})", req.pid),
+        )
+            .into_response();
+    }
+    if let Err(e) = run_kill(req.pid, Some("TERM")) {
+        return (StatusCode::INTERNAL_SERVER_ERROR, e).into_response();
+    }
+    // Give it up to ~1.5s to exit after SIGTERM.
+    for _ in 0..15 {
+        if !pid_alive(req.pid) {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    // Escalate to SIGKILL if it survived SIGTERM.
+    if pid_alive(req.pid)
+        && let Err(e) = run_kill(req.pid, Some("KILL"))
+    {
+        return (StatusCode::INTERNAL_SERVER_ERROR, e).into_response();
+    }
+    for _ in 0..10 {
+        if !pid_alive(req.pid) {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    if pid_alive(req.pid) {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("process {} did not exit", req.pid),
+        )
+            .into_response();
+    }
+    (
+        StatusCode::OK,
+        Json(KillResponse {
+            ok: true,
+            pid: req.pid,
+        }),
+    )
+        .into_response()
 }
 
 #[cfg(test)]

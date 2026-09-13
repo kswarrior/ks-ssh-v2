@@ -73,6 +73,9 @@ export default function PortsPage() {
   const [error, setError] = useState<string | null>(null)
   const [filter, setFilter] = useState<ProtoFilter>('all')
   const [query, setQuery] = useState('')
+  const [confirmKill, setConfirmKill] = useState<string | null>(null)
+  const [killing, setKilling] = useState<string | null>(null)
+  const [killError, setKillError] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -99,6 +102,32 @@ export default function PortsPage() {
   useEffect(() => {
     void load()
   }, [load])
+
+  const killPort = useCallback(
+    async (p: PortEntry, key: string) => {
+      if (p.pid == null) return
+      setKilling(key)
+      setKillError(null)
+      try {
+        const res = await fetch('/api/ports/kill', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ pid: p.pid }),
+        })
+        if (!res.ok) {
+          const text = await res.text().catch(() => '')
+          throw new Error(text || `kill failed (${res.status})`)
+        }
+        setConfirmKill(null)
+        await load()
+      } catch (e) {
+        setKillError(e instanceof Error ? e.message : 'Kill failed.')
+      } finally {
+        setKilling(null)
+      }
+    },
+    [load],
+  )
 
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase()
@@ -189,6 +218,12 @@ export default function PortsPage() {
               : `${visible.length} of ${data?.ports.length ?? 0} open ports on ${data?.hostname ?? 'host'} · ${tcpCount} TCP · ${udpCount} UDP`}
         </p>
 
+        {killError && !error && (
+          <div className="banner-error" role="alert">
+            <p>{killError}</p>
+          </div>
+        )}
+
         {error ? (
           <div className="banner-error" role="alert">
             <p>{error}</p>
@@ -244,12 +279,15 @@ export default function PortsPage() {
             {visible.map((p, i) => {
               const svc = serviceName(p.port)
               const tcp = isTcp(p.proto)
+              const key = `${p.proto}-${p.addr}-${p.port}-${i}`
               const proc = p.process
                 ? ` · ${p.process}${p.pid != null ? ` (pid ${p.pid})` : ''}`
                 : ''
+              const isConfirm = confirmKill === key
+              const isKilling = killing === key
               return (
                 <li
-                  key={`${p.proto}-${p.addr}-${p.port}-${i}`}
+                  key={key}
                   className="file-card"
                   title={`Port ${p.port} (${p.proto}) on ${p.addr}${p.process ? ` — ${p.process}` : ''}`}
                 >
@@ -278,11 +316,72 @@ export default function PortsPage() {
                     >
                       {p.proto}
                     </span>
+                    <button
+                      type="button"
+                      className="ports-kill"
+                      disabled={p.pid == null || killing != null}
+                      title={
+                        p.pid != null
+                          ? `Kill ${p.process ?? 'process'} (pid ${p.pid}) — frees port ${p.port}`
+                          : 'No process info — cannot kill'
+                      }
+                      aria-label={
+                        p.pid != null
+                          ? `Kill process on port ${p.port} (pid ${p.pid})`
+                          : `Cannot kill port ${p.port} — no process info`
+                      }
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        setKillError(null)
+                        setConfirmKill(isConfirm ? null : key)
+                      }}
+                    >
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                        <path d="M3 6h18" />
+                        <path d="M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2" />
+                        <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+                        <path d="M10 11v6M14 11v6" />
+                      </svg>
+                    </button>
                   </div>
                   <div className="file-meta">
                     {p.addr}:{p.port} · {p.state}
                     {proc}
                   </div>
+                  {isConfirm && p.pid != null && (
+                    <div
+                      className="file-confirm"
+                      role="alertdialog"
+                      aria-label={`Kill process on port ${p.port}?`}
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <p>
+                        Kill{' '}
+                        <strong>
+                          {p.process ?? 'process'} (pid {p.pid})
+                        </strong>{' '}
+                        on port <strong>{p.port}</strong>?
+                      </p>
+                      <div className="file-inline-actions">
+                        <button
+                          type="button"
+                          className="btn btn-sm btn-danger"
+                          disabled={isKilling}
+                          onClick={() => void killPort(p, key)}
+                        >
+                          {isKilling ? 'Killing…' : 'Kill'}
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-sm"
+                          disabled={isKilling}
+                          onClick={() => setConfirmKill(null)}
+                        >
+                          Keep
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </li>
               )
             })}

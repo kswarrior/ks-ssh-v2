@@ -79,6 +79,7 @@ async fn serve(host: String, port: u16) {
         .route("/api/files/upload-url", post(files::api_upload_url))
         .route("/api/files/download", get(files::api_download_file))
         .route("/api/ports", get(ports::api_list_ports))
+        .route("/api/ports/kill", post(ports::api_kill_port))
         .route("/api/host", get(host::api_host_info))
         .route(
             "/api/files/content",
