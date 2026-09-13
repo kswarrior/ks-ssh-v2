@@ -1,7 +1,7 @@
 {
-	"name": "<WORKER_NAME>",
+	"name": "ks-ssh-v2",
 	"main": "worker/index.ts",
-	"compatibility_date": "<COMPATIBILITY_DATE>",
+	"compatibility_date": "2026-09-01",
 	"assets": { "not_found_handling": "single-page-application" },
 	"observability": {
 		"enabled": true
