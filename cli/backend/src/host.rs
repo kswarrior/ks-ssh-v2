@@ -344,7 +344,7 @@ fn parse_df(text: &str) -> Vec<DiskInfo> {
 }
 
 fn disk_info() -> Vec<DiskInfo> {
-    for args in [&["-kP", "-T"], &["-kP"]] {
+    for args in [&["-kP", "-T"][..], &["-kP"][..]] {
         if let Ok(out) = std::process::Command::new("df").args(args).output()
             && out.status.success()
         {
