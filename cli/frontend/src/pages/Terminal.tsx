@@ -539,6 +539,13 @@ export default function TerminalPage({
     setStatuses((prev) => (prev[id] === s ? prev : { ...prev, [id]: s }))
   }, [])
 
+  // Child reports its backend session id so tabs reattach after refresh.
+  const handleReady = useCallback((id: string, sid: string | null) => {
+    setSessions((prev) =>
+      prev.map((t) => (t.id === id && t.sid !== sid ? { ...t, sid } : t)),
+    )
+  }, [])
+
   // First run: complete blank + centered button only.
   if (sessions.length === 0) {
     return (
@@ -677,7 +684,9 @@ export default function TerminalPage({
             <ShellSession
               id={t.id}
               active={t.id === active.id}
+              sid={t.sid}
               onStatus={handleStatus}
+              onReady={handleReady}
             />
           </div>
         ))}
