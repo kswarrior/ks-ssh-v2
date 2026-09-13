@@ -4,6 +4,9 @@
 // EXCEPT the agent UI bundle (ui-begin/ui-chunk/ui-end) which is cached
 // per room so CF can serve it fullscreen over HTTPS (/v/TOKEN) and replay
 // it to late-joining clients.
+//
+// E2E: `{"type":"enc",...}` carries AES-256-GCM ciphertext (see
+// cli/backend/src/e2e.rs, cf/src/e2e.ts). The room routes by token only.
 
 type Role = 'agent' | 'client'
 
@@ -123,6 +126,29 @@ export class TunnelRoom implements DurableObject {
   }
 
   async webSocketMessage(ws: WebSocket, message: ArrayBuffer | string) {
+    // E2E opaque — do not inspect. `enc` envelopes are AES-256-GCM
+    // ciphertext: forward by room only, never parse `ct`, never
+    // storage.put() payloads, never log bodies. Only the UI bundle
+    // (ui-begin/ui-chunk/ui-end, public build output) is cached below.
+    if (typeof message === 'string') {
+      // Fast path: avoid JSON parsing ciphertext bodies more than needed.
+      // We only peek at the outer `type` to route; `ct` bytes are never
+      // decoded, stored, or logged.
+      try {
+        const peek = JSON.parse(message) as { type?: string }
+        if (peek?.type === 'enc') {
+          // E2E opaque — do not inspect. Fall through to relay below.
+          this.relay(ws, message)
+          return
+        }
+      } catch {
+        // Not JSON — treat as opaque payload below.
+      }
+    } else {
+      // Binary — opaque, relay directly.
+      this.relay(ws, message)
+      return
+    }
     // Answer keepalive without needing the other side.
     if (typeof message === 'string') {
       try {
@@ -223,6 +249,23 @@ export class TunnelRoom implements DurableObject {
         // Not JSON — treat as opaque payload below.
       }
     }
+    const role = this.roleOf(ws)
+    // E2E opaque — do not inspect. Generic passthrough (including legacy
+    // `data` and any future sealed types): route by room only.
+    const targets: WebSocket[] =
+      role === 'agent' ? [...this.clients] : this.agent ? [this.agent] : []
+    for (const t of targets) {
+      try {
+        t.send(message)
+      } catch {
+        // Dead socket — cleaned up on close/error.
+      }
+    }
+  }
+
+  /** Opaque relay: forward without inspecting, storing, or logging bodies. */
+  private relay(ws: WebSocket, message: ArrayBuffer | string) {
+    // E2E opaque — do not inspect.
     const role = this.roleOf(ws)
     const targets: WebSocket[] =
       role === 'agent' ? [...this.clients] : this.agent ? [this.agent] : []

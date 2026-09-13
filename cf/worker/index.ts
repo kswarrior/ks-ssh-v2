@@ -26,6 +26,17 @@ export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url)
 
+    // E2E secret `k` lives ONLY in the URL fragment (never sent to the
+    // server). If it ever shows up in the query string, reject loudly —
+    // the caller pasted the full link into a fetch URL by mistake.
+    if (url.searchParams.has('k')) {
+      console.warn('rejected request with E2E secret in query (?k=) — use fragment #k= only')
+      return Response.json(
+        { ok: false, error: 'E2E secret must stay in the URL fragment (#k=), never in query' },
+        { status: 400 },
+      )
+    }
+
     // WSS relay: CLI agent registers, web clients join — by token.
     if (url.pathname === '/v1/agent' || url.pathname === '/v1/client') {
       if (request.headers.get('Upgrade') !== 'websocket') {
