@@ -36,6 +36,20 @@ const SEED_SERVERS: Server[] = [
   { id: 'seed-vps', name: 'VPS', host: '203.0.113.20', user: 'root', port: 22 },
 ]
 
+type Theme = 'light' | 'dark'
+
+function initialTheme(): Theme {
+  try {
+    const saved = localStorage.getItem('ks-ssh:theme')
+    if (saved === 'light' || saved === 'dark') return saved
+  } catch {
+    // Storage unavailable — fall through to system preference.
+  }
+  return window.matchMedia('(prefers-color-scheme: dark)').matches
+    ? 'dark'
+    : 'light'
+}
+
 function readJSON<T>(key: string, fallback: T): T {
   try {
     const raw = localStorage.getItem(key)
@@ -471,6 +485,7 @@ export default function App() {
   const [connectedId, setConnectedId] = useState<string | null>(null)
   const [connectingId, setConnectingId] = useState<string | null>(null)
   const connectTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const [theme, setTheme] = useState<Theme>(initialTheme)
 
   // Derived state: drawer can only be open on phones; resizing to desktop
   // auto-closes it without a setState-in-effect cascade.
@@ -492,6 +507,17 @@ export default function App() {
     const label = NAV.find((p) => p.id === page)?.label
     document.title = label && label !== 'Home' ? `KS SSH — ${label}` : 'KS SSH'
   }, [page])
+
+  // Apply + persist the neumorphic light/dark theme.
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme
+    document.documentElement.style.colorScheme = theme
+    try {
+      localStorage.setItem('ks-ssh:theme', theme)
+    } catch {
+      // Storage unavailable — theme still applies for this session.
+    }
+  }, [theme])
 
   useEffect(() => {
     writeJSON('ks-ssh:servers', servers)
@@ -618,8 +644,45 @@ export default function App() {
           <span aria-hidden="true" />
           <span aria-hidden="true" />
         </button>
+        <span className="brand-mark" aria-hidden="true">
+          S
+        </span>
         <span className="brand">KS SSH</span>
         <span className="header-spacer" />
+        <button
+          type="button"
+          className="icon-btn"
+          aria-label={theme === 'light' ? 'Switch to dark mode' : 'Switch to light mode'}
+          title={theme === 'light' ? 'Switch to dark mode' : 'Switch to light mode'}
+          onClick={() => setTheme((t) => (t === 'light' ? 'dark' : 'light'))}
+        >
+          {theme === 'light' ? (
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
+            </svg>
+          ) : (
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <circle cx="12" cy="12" r="4" />
+              <path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" />
+            </svg>
+          )}
+        </button>
         <span
           className="status-dot"
           role="status"

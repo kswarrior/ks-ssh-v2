@@ -1,3 +1,5 @@
+/* ================= Neumorphic app shell ================= */
+
 .app-shell {
   flex: 1;
   display: flex;
@@ -5,47 +7,68 @@
   min-height: 100svh;
   min-width: 0;
   text-align: left;
+  background: var(--bg);
 }
 
 /* Skip link: hidden until keyboard focus */
 .skip-link {
   position: absolute;
   left: 12px;
-  top: -48px;
+  top: -56px;
   z-index: 100;
-  padding: 10px 14px;
-  border-radius: 8px;
+  padding: 10px 16px;
+  border-radius: 12px;
   background: var(--text-h);
   color: var(--bg);
   text-decoration: none;
   font-size: 14px;
+  font-weight: 600;
   transition: top 0.15s ease;
 }
 
 .skip-link:focus-visible {
   top: 8px;
-  outline-offset: 2px;
 }
+
+/* ---------- Header: soft bar floating over the page ---------- */
 
 .app-header {
   position: sticky;
   top: 0;
   z-index: 30;
-  min-height: 56px;
+  min-height: 64px;
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 0 max(16px, env(safe-area-inset-right)) 0 max(16px, env(safe-area-inset-left));
-  padding-top: env(safe-area-inset-top);
+  padding: 8px max(16px, env(safe-area-inset-right)) 8px max(16px, env(safe-area-inset-left));
+  padding-top: calc(8px + env(safe-area-inset-top));
   background: var(--bg);
-  border-bottom: 1px solid var(--border);
+  box-shadow: 0 10px 22px -14px var(--neu-dark);
   min-width: 0;
 }
 
+.brand-mark {
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 12px;
+  font-size: 18px;
+  font-weight: 800;
+  color: #fff;
+  background: linear-gradient(145deg, var(--accent-hi), var(--accent-lo));
+  box-shadow:
+    3px 3px 8px var(--accent-shadow),
+    -2px -2px 6px var(--neu-light);
+}
+
 .brand {
-  font-weight: 600;
+  font-weight: 700;
+  letter-spacing: 0.4px;
   color: var(--text-h);
-  font-size: 17px;
+  font-size: 18px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -58,30 +81,74 @@
 }
 
 .status-dot {
-  width: 10px;
-  height: 10px;
+  width: 12px;
+  height: 12px;
   flex-shrink: 0;
   border-radius: 50%;
   background: #22c55e;
+  box-shadow:
+    0 0 0 3px var(--bg),
+    2px 2px 6px var(--neu-dark),
+    0 0 12px rgba(34, 197, 94, 0.7);
 }
 
-/* Hamburger: 3 lines, phone only */
+/* Round neumorphic icon button (theme toggle) */
+.icon-btn {
+  width: 42px;
+  height: 42px;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: var(--bg);
+  color: var(--text-h);
+  box-shadow: var(--neu-sm);
+  cursor: pointer;
+  transition: box-shadow 0.18s ease, transform 0.18s ease;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.icon-btn:hover {
+  box-shadow: var(--neu-md);
+  transform: translateY(-1px);
+}
+
+.icon-btn:active {
+  box-shadow: var(--neu-inset-sm);
+  transform: translateY(0);
+}
+
+.icon-btn svg {
+  width: 20px;
+  height: 20px;
+}
+
+/* Hamburger: soft raised tile, phone only */
 .hamburger {
   display: none;
   flex-direction: column;
   justify-content: center;
   align-items: stretch;
   gap: 5px;
-  width: 40px;
-  height: 40px;
+  width: 42px;
+  height: 42px;
   flex-shrink: 0;
-  padding: 8px;
-  background: transparent;
-  border: 1px solid var(--border);
-  border-radius: 8px;
+  padding: 11px;
+  background: var(--bg);
+  border: none;
+  border-radius: 12px;
+  box-shadow: var(--neu-sm);
   cursor: pointer;
   color: inherit;
+  transition: box-shadow 0.18s ease;
   -webkit-tap-highlight-color: transparent;
+}
+
+.hamburger:active {
+  box-shadow: var(--neu-inset-sm);
 }
 
 .hamburger span {
@@ -103,46 +170,63 @@
   transform: translateY(-7px) rotate(-45deg);
 }
 
+/* ---------- Body + floating sidebar ---------- */
+
 .app-body {
   flex: 1;
   display: flex;
+  align-items: stretch;
   min-height: 0;
   min-width: 0;
 }
 
 .sidebar {
-  width: 240px;
+  width: 250px;
   flex-shrink: 0;
-  border-right: 1px solid var(--border);
-  padding: 16px 12px;
-  padding-bottom: calc(16px + env(safe-area-inset-bottom));
+  align-self: flex-start;
+  position: sticky;
+  top: calc(64px + 16px + env(safe-area-inset-top, 0px));
+  max-height: calc(
+    100svh - 64px - 32px - env(safe-area-inset-top, 0px) -
+      env(safe-area-inset-bottom, 0px)
+  );
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  margin: 16px 0 16px 16px;
+  border-radius: 22px;
+  padding: 14px 12px calc(14px + env(safe-area-inset-bottom, 0px));
   background: var(--bg);
+  box-shadow: var(--neu-md);
 }
 
 .sidebar nav {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 6px;
 }
 
 .sidebar a {
   color: var(--text);
   text-decoration: none;
   font-size: 15px;
+  font-weight: 500;
   line-height: 1.4;
-  padding: 10px 12px;
-  border-radius: 8px;
+  padding: 12px 14px;
+  border-radius: 14px;
   overflow-wrap: anywhere;
+  transition: box-shadow 0.18s ease, color 0.18s ease, background 0.18s ease;
 }
 
 .sidebar a:hover {
-  background: var(--social-bg);
+  background: var(--hover-bg);
   color: var(--text-h);
 }
 
 .sidebar a.active {
-  background: var(--accent-bg);
-  color: var(--text-h);
+  background: var(--bg);
+  box-shadow: var(--neu-inset-sm);
+  color: var(--accent-strong);
+  font-weight: 700;
 }
 
 .overlay {
@@ -166,14 +250,14 @@
   max-width: 70ch;
 }
 
-/* Narrow desktop / small laptop: give content more room */
+/* Narrow desktop / small laptop: slimmer floating panel */
 @media (max-width: 1024px) {
   .sidebar {
-    width: 210px;
+    width: 216px;
   }
 }
 
-/* Phone: sidebar becomes drawer */
+/* Phone: sidebar becomes a soft floating drawer */
 @media (max-width: 768px) {
   .hamburger {
     display: flex;
@@ -181,21 +265,22 @@
 
   .sidebar {
     position: fixed;
-    top: 56px;
-    /* Notch-aware override: ignored by browsers without env(), falls back to 56px */
-    top: calc(56px + env(safe-area-inset-top, 0px));
+    top: calc(64px + env(safe-area-inset-top, 0px));
     bottom: 0;
     left: 0;
-    width: min(260px, 84vw);
+    margin: 0;
+    width: min(280px, 86vw);
+    max-height: none;
+    border-radius: 0 24px 24px 0;
     z-index: 20;
     overflow-y: auto;
     overscroll-behavior: contain;
     -webkit-overflow-scrolling: touch;
-    transform: translateX(-102%);
+    transform: translateX(-105%);
     visibility: hidden;
     transition: transform 0.25s ease, visibility 0.25s ease;
-    border-right: 1px solid var(--border);
-    box-shadow: var(--shadow);
+    box-shadow: var(--neu-lg);
+    padding-bottom: calc(16px + env(safe-area-inset-bottom));
   }
 
   .sidebar.open {
@@ -206,51 +291,33 @@
   .overlay.show {
     display: block;
     position: fixed;
-    top: 56px;
-    top: calc(56px + env(safe-area-inset-top, 0px));
+    top: calc(64px + env(safe-area-inset-top, 0px));
     right: 0;
     bottom: 0;
     left: 0;
     z-index: 10;
-    background: rgba(0, 0, 0, 0.4);
-  }
-}
-
-/* Desktop: sidebar sticks while content scrolls; drawer state is force-reset */
-@media (min-width: 769px) {
-  .sidebar {
-    position: sticky;
-    top: 56px;
-    height: calc(100svh - 56px);
-    overflow-y: auto;
-    overscroll-behavior: contain;
-    transform: none;
-    visibility: visible;
-  }
-
-  .overlay {
-    display: none;
-  }
-
-  .hamburger {
-    display: none;
+    background: rgba(30, 34, 48, 0.35);
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .hamburger span,
+  .hamburger,
   .sidebar,
-  .skip-link {
+  .skip-link,
+  .btn,
+  .icon-btn,
+  .sidebar a {
     transition: none;
   }
 }
 
-/* ---- Pages ---- */
+/* ================= Neumorphic pages & components ================= */
 
 .page {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 18px;
   width: 100%;
   max-width: 900px;
 }
@@ -267,17 +334,19 @@
 .grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: 12px;
+  gap: 16px;
 }
 
+/* Raised soft card */
 .card {
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 16px;
+  border: none;
+  border-radius: 20px;
+  padding: 20px;
   background: var(--bg);
+  box-shadow: var(--neu-md);
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
   min-width: 0;
 }
 
@@ -290,65 +359,94 @@
 }
 
 .stat {
-  font-size: 28px;
-  font-weight: 650;
+  font-size: 30px;
+  font-weight: 750;
   color: var(--text-h);
   line-height: 1.2;
 }
 
 .row-actions {
   display: flex;
-  gap: 8px;
+  gap: 10px;
   flex-wrap: wrap;
   margin-top: auto;
-  padding-top: 8px;
+  padding-top: 10px;
 }
 
+/* Raised soft button; press it and it dents in */
 .btn {
   font: inherit;
   font-size: 14px;
+  font-weight: 600;
   line-height: 1.3;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  padding: 9px 14px;
-  min-height: 40px;
-  border-radius: 8px;
-  border: 1px solid var(--border);
-  background: transparent;
+  padding: 11px 18px;
+  min-height: 44px;
+  border-radius: 14px;
+  border: none;
+  background: var(--bg);
   color: var(--text-h);
+  box-shadow: var(--neu-sm);
   cursor: pointer;
+  transition: box-shadow 0.18s ease, transform 0.18s ease, opacity 0.18s ease;
 }
 
 .btn:hover {
-  background: var(--social-bg);
+  box-shadow: var(--neu-md);
+  transform: translateY(-1px);
+}
+
+.btn:active {
+  box-shadow: var(--neu-inset-sm);
+  transform: translateY(0);
 }
 
 .btn-primary {
-  background: var(--text-h);
-  border-color: transparent;
-  color: var(--bg);
+  background: linear-gradient(145deg, var(--accent-hi), var(--accent-lo));
+  color: #fff;
+  box-shadow:
+    5px 5px 14px var(--accent-shadow),
+    -4px -4px 10px var(--neu-light);
 }
 
 .btn-primary:hover {
-  opacity: 0.88;
-  background: var(--text-h);
+  opacity: 0.94;
+  box-shadow:
+    6px 6px 18px var(--accent-shadow),
+    -4px -4px 10px var(--neu-light);
+}
+
+.btn-primary:active {
+  box-shadow:
+    inset 4px 4px 9px rgba(0, 0, 0, 0.3),
+    inset -3px -3px 7px rgba(255, 255, 255, 0.25);
 }
 
 .btn-danger {
-  color: #dc2626;
+  color: var(--danger);
+}
+
+.btn-danger:hover {
+  background: var(--danger-soft);
+  box-shadow: var(--neu-md);
 }
 
 .btn-sm {
-  padding: 6px 12px;
-  min-height: 34px;
+  padding: 8px 14px;
+  min-height: 36px;
   font-size: 13px;
+  border-radius: 12px;
 }
 
 .btn:disabled {
   opacity: 0.55;
   cursor: wait;
+  transform: none;
 }
+
+/* ---------- Server list ---------- */
 
 .server-list {
   list-style: none;
@@ -356,7 +454,7 @@
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 14px;
 }
 
 .server-row {
@@ -364,10 +462,16 @@
   align-items: center;
   gap: 12px;
   flex-wrap: wrap;
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 12px 14px;
+  border: none;
+  border-radius: 18px;
+  padding: 14px 16px;
   background: var(--bg);
+  box-shadow: var(--neu-sm);
+  transition: box-shadow 0.18s ease;
+}
+
+.server-row:hover {
+  box-shadow: var(--neu-md);
 }
 
 .server-row .row-actions {
@@ -382,7 +486,7 @@
 }
 
 .server-name {
-  font-weight: 600;
+  font-weight: 700;
   color: var(--text-h);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -398,28 +502,34 @@
 
 .badge {
   font-size: 12px;
+  font-weight: 700;
   line-height: 1.4;
-  padding: 3px 10px;
+  padding: 5px 12px;
   border-radius: 999px;
-  border: 1px solid var(--border);
+  border: none;
+  background: var(--bg);
+  box-shadow: var(--neu-inset-sm);
   color: var(--text);
   white-space: nowrap;
 }
 
 .badge.connected {
-  background: #16a34a;
-  border-color: transparent;
+  background: linear-gradient(145deg, #34c77b, #1da35c);
   color: #fff;
+  box-shadow:
+    3px 3px 8px rgba(29, 163, 92, 0.45),
+    -3px -3px 8px var(--neu-light);
 }
 
 .badge.connecting {
-  border-color: var(--accent-border);
-  color: var(--accent);
+  color: var(--accent-strong);
 }
+
+/* ---------- Forms: concave (pressed-in) fields ---------- */
 
 .form {
   display: grid;
-  gap: 12px;
+  gap: 14px;
   grid-template-columns: 1fr 1fr;
 }
 
@@ -430,8 +540,9 @@
 .field {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
   font-size: 14px;
+  font-weight: 600;
   color: var(--text-h);
   min-width: 0;
 }
@@ -439,46 +550,81 @@
 .field input[type='text'],
 .field input[type='number'] {
   font: inherit;
+  font-weight: 400;
   width: 100%;
-  min-height: 44px;
-  padding: 10px 12px;
-  border-radius: 8px;
-  border: 1px solid var(--border);
+  min-height: 48px;
+  padding: 12px 16px;
+  border-radius: 14px;
+  border: none;
   background: var(--bg);
   color: var(--text-h);
+  box-shadow: var(--neu-inset-sm);
+  transition: box-shadow 0.18s ease;
+}
+
+.field input[type='text']::placeholder,
+.field input[type='number']::placeholder {
+  color: var(--text);
+  opacity: 0.8;
 }
 
 .field.checkbox-row {
   flex-direction: row;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
 }
 
 .field input[type='checkbox'] {
-  width: 20px;
-  height: 20px;
-  accent-color: var(--accent);
+  appearance: none;
+  -webkit-appearance: none;
+  width: 26px;
+  height: 26px;
+  margin: 0;
   flex-shrink: 0;
+  border-radius: 9px;
+  background: var(--bg);
+  box-shadow: var(--neu-inset-sm);
+  cursor: pointer;
+  display: inline-grid;
+  place-content: center;
+  transition: box-shadow 0.18s ease;
 }
+
+.field input[type='checkbox']::before {
+  content: '';
+  width: 14px;
+  height: 14px;
+  border-radius: 5px;
+  transform: scale(0);
+  transition: transform 0.15s ease;
+  background: linear-gradient(145deg, var(--accent-hi), var(--accent-lo));
+  box-shadow: 1px 1px 4px var(--accent-shadow);
+}
+
+.field input[type='checkbox']:checked::before {
+  transform: scale(1);
+}
+
+/* ---------- Installation steps + code ---------- */
 
 .steps {
   list-style: none;
-  counter-reset: step;
   margin: 0;
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 16px;
 }
 
 .codeblock {
   display: flex;
-  gap: 8px;
+  gap: 10px;
   align-items: flex-start;
-  border: 1px solid var(--border);
-  background: var(--code-bg);
-  border-radius: 10px;
-  padding: 10px 10px 10px 14px;
+  border: none;
+  background: var(--bg);
+  box-shadow: var(--neu-inset);
+  border-radius: 14px;
+  padding: 12px 12px 12px 16px;
   min-width: 0;
 }
 
@@ -487,13 +633,19 @@
   flex: 1;
   min-width: 0;
   overflow-x: auto;
+  align-self: center;
 }
 
 .codeblock code {
   background: transparent;
+  box-shadow: none;
   padding: 0;
   display: block;
   white-space: pre;
+}
+
+.codeblock .btn {
+  flex-shrink: 0;
 }
 
 @media (max-width: 560px) {
@@ -509,10 +661,8 @@
   .server-row .row-actions .btn {
     flex: 1 1 auto;
   }
-}
 
-@media (prefers-color-scheme: dark) {
-  .btn-danger {
-    color: #f87171;
+  .card {
+    padding: 18px;
   }
 }
