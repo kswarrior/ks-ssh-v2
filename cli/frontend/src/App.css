@@ -2206,6 +2206,59 @@ a.file-link {
   color: var(--text);
 }
 
+/* ---------- Ports loading skeleton ---------- */
+
+.skeleton {
+  display: inline-block;
+  height: 14px;
+  border-radius: 999px;
+  background: linear-gradient(
+    90deg,
+    var(--field-bg) 25%,
+    var(--hover-bg) 50%,
+    var(--field-bg) 75%
+  );
+  background-size: 200% 100%;
+  animation: skeleton-shimmer 1.4s ease-in-out infinite;
+  vertical-align: middle;
+}
+
+.skeleton-port {
+  width: 64px;
+}
+
+.skeleton-pill {
+  width: 58px;
+  height: 22px;
+}
+
+.skeleton-addr {
+  width: min(160px, 100%);
+}
+
+.skeleton-proc {
+  width: min(120px, 100%);
+}
+
+.ports-skeleton-row td {
+  pointer-events: none;
+}
+
+@keyframes skeleton-shimmer {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skeleton {
+    animation: none;
+  }
+}
+
 @media (max-width: 560px) {
   .ports-actions {
     width: 100%;
