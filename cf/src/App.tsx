@@ -176,64 +176,8 @@ function StatusTag({
   )
 }
 
-function HomePage({
-  go,
-  entries,
-}: {
-  go: (id: PageId) => void
-  entries: SshEntry[]
-}) {
-  const total = entries.length
-  const online = entries.filter((e) => e.online).length
-  const recent = entries.slice(-3).reverse()
-  return (
-    <section className="page" aria-labelledby="page-title-home">
-      <h1 id="page-title-home">Home</h1>
-      <div className="grid">
-        <div className="card">
-          <span className="stat">{total}</span>
-          <span>Total SSH</span>
-        </div>
-        <div className="card">
-          <span className="stat">{online}</span>
-          <span>Online</span>
-        </div>
-        <div className="card">
-          <span className="stat">{total - online}</span>
-          <span>Offline</span>
-        </div>
-      </div>
-      <div className="card">
-        <h2>Recent</h2>
-        {recent.length === 0 ? (
-          <p>No connections yet. Press Connect on the SSH page to add one.</p>
-        ) : (
-          <ul className="recent-list">
-            {recent.map((e) => (
-              <li key={e.id}>
-                <button
-                  type="button"
-                  className="recent-row"
-                  onClick={() => go('ssh')}
-                >
-                  <span className="ssh-icon" aria-hidden="true">
-                    <SshGlyph />
-                  </span>
-                  <span className="recent-info">
-                    <span className="recent-name">{e.name}</span>
-                    {e.note ? (
-                      <span className="recent-note">{e.note}</span>
-                    ) : null}
-                  </span>
-                  <StatusTag online={e.online} />
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
-    </section>
-  )
+function HomePage() {
+  return <section className="page" aria-label="Home" />
 }
 
 type SshEntry = {
@@ -720,11 +664,13 @@ function SSHPage({
     onChange((prev) => prev.filter((x) => x.id !== id))
   }
 
+  const total = entries.length
+  const online = entries.filter((x) => x.online).length
+
   return (
     <section className="page" aria-labelledby="page-title-ssh">
       <div className="page-head">
-        <h1 id="page-title-ssh">SSH</h1>
-        <button
+        <h1 id="page-title-ssh">SSH</h1>        <button
           type="button"
           className="btn btn-primary ssh-connect-btn"
           onClick={openNew}
@@ -742,6 +688,21 @@ function SSHPage({
           </svg>
           <span className="btn-label">Connect</span>
         </button>
+      </div>
+
+      <div className="grid">
+        <div className="card">
+          <span className="stat">{total}</span>
+          <span>Total SSH</span>
+        </div>
+        <div className="card">
+          <span className="stat">{online}</span>
+          <span>Online</span>
+        </div>
+        <div className="card">
+          <span className="stat">{total - online}</span>
+          <span>Offline</span>
+        </div>
       </div>
 
       {banner && (
@@ -1090,15 +1051,6 @@ export default function App() {
 
   const drawerHidden = isMobile && !drawerOpen
 
-  const go = (id: PageId) => {
-    const target = NAV.find((p) => p.id === id)
-    if (!target) return
-    setPage(id)
-    if (window.location.hash !== target.hash) {
-      window.location.hash = target.hash
-    }
-  }
-
   const patchSettings = (patch: Partial<Settings>) =>
     setSettings((prev) => ({ ...prev, ...patch }))
 
@@ -1246,7 +1198,7 @@ export default function App() {
           id="main"
           tabIndex={-1}
         >
-          {page === 'home' && <HomePage go={go} entries={entries} />}
+          {page === 'home' && <HomePage />}
           {page === 'ssh' && <SSHPage entries={entries} onChange={setEntries} />}
           {page === 'installation' && <InstallationPage />}
           {page === 'session' && <SessionPage />}
