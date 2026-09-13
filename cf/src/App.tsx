@@ -176,8 +176,142 @@ function StatusTag({
   )
 }
 
+function Icon({ children }: { children: ReactNode }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      {children}
+    </svg>
+  )
+}
+
+function FeatureTile({
+  icon,
+  title,
+  text,
+}: {
+  icon: ReactNode
+  title: string
+  text: string
+}) {
+  return (
+    <div className="card feature">
+      <span className="feature-icon" aria-hidden="true">
+        <Icon>{icon}</Icon>
+      </span>
+      <h3>{title}</h3>
+      <p>{text}</p>
+    </div>
+  )
+}
+
 function HomePage() {
-  return <section className="page" aria-label="Home" />
+  return (
+    <section className="page" aria-labelledby="page-title-home">
+      <div className="hero card">
+        <span className="eyebrow">KS SSH</span>
+        <h1 id="page-title-home">Shell access, minus the hassle.</h1>
+        <p className="lead">
+          Save your connections, see live status, and reconnect in one tap —
+          from your phone or desktop.
+        </p>
+        <div className="row-actions">
+          <a className="btn btn-primary" href="#/ssh">
+            Open SSH
+          </a>
+          <a className="btn" href="#/installation">
+            Install
+          </a>
+        </div>
+      </div>
+
+      <h2>Why us</h2>
+      <div className="grid">
+        <FeatureTile
+          icon={<polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />}
+          title="Fast"
+          text="Connect in one tap with your saved token. No typing addresses twice."
+        />
+        <FeatureTile
+          icon={<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />}
+          title="Private"
+          text="Tokens stay in your browser. Nothing is uploaded or tracked."
+        />
+        <FeatureTile
+          icon={
+            <>
+              <rect x="5" y="2" width="14" height="20" rx="2" />
+              <path d="M12 18h.01" />
+            </>
+          }
+          title="Everywhere"
+          text="The same interface on phone and desktop, with offline-first data."
+        />
+      </div>
+
+      <h2>Features</h2>
+      <div className="grid">
+        <FeatureTile
+          icon={
+            <>
+              <rect x="3" y="11" width="18" height="11" rx="2" />
+              <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+            </>
+          }
+          title="Token auth"
+          text="Paste your token once, connect anytime."
+        />
+        <FeatureTile
+          icon={<polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />}
+          title="Live status"
+          text="Green means go. See what is online at a glance."
+        />
+        <FeatureTile
+          icon={
+            <>
+              <path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z" />
+              <path d="M6 16h.01M10 16h.01" />
+            </>
+          }
+          title="Local-first"
+          text="Your list persists on this device. No account needed."
+        />
+        <FeatureTile
+          icon={
+            <>
+              <polyline points="23 4 23 10 17 10" />
+              <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
+            </>
+          }
+          title="One-tap reconnect"
+          text="Dropped? Reconnect straight from the card."
+        />
+      </div>
+
+      <h2>Screenshots</h2>
+      <div className="shot-grid">
+        {['Home', 'SSH list', 'Installation'].map((label) => (
+          <div key={label} className="shot">
+            <Icon>
+              <rect x="3" y="3" width="18" height="18" rx="2" />
+              <circle cx="8.5" cy="8.5" r="1.5" />
+              <polyline points="21 15 16 10 5 21" />
+            </Icon>
+            <span>
+              {label} — your screenshot here
+            </span>
+          </div>
+        ))}
+      </div>
+    </section>
+  )
 }
 
 type SshEntry = {
