@@ -26,6 +26,12 @@ pub struct DownloadQuery {
     pub path: String,
 }
 
+#[derive(Deserialize)]
+pub struct RenameBody {
+    pub from: String,
+    pub to: String,
+}
+
 #[derive(Serialize)]
 pub struct FileEntry {
     pub name: String,
