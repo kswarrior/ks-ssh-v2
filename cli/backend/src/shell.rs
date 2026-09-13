@@ -80,7 +80,7 @@ enum Out {
 
 struct Session {
     id: String,
-    master: StdMutex<Box<dyn portable_pty::MasterPty + Send>>,
+    master: StdMutex<Option<Box<dyn portable_pty::MasterPty + Send>>>,
     child: StdMutex<Option<Box<dyn portable_pty::Child + Send + Sync>>>,
     /// Input path to the PTY writer thread (lives as long as the session).
     writer_tx: tokio::sync::mpsc::Sender<Vec<u8>>,
@@ -147,74 +147,32 @@ fn spawn_shell(
     Ok((pair.master, child))
 }
 
-async fn handle_socket(socket: WebSocket) {
-    let (mut ws_tx, mut ws_rx) = socket.split();
+/// Spawn the PTY + shell threads for a brand-new session.
+fn spawn_session(id: String) -> anyhow::Result<Arc<Session>> {
+    let (master, child) = spawn_shell(80, 24)?;
 
-    let (master, child) = match spawn_shell(80, 24) {
-        Ok(v) => v,
-        Err(e) => {
-            let _ = ws_tx
-                .send(Message::Text(
-                    format!("ks-ssh: cannot spawn shell: {e}").into(),
-                ))
-                .await;
-            return;
-        }
-    };
-    // Shared so the session end always reaps the shell — a tab that is
-    // closed must never leave an orphaned bash behind.
-    let child = std::sync::Arc::new(std::sync::Mutex::new(Some(child)));
+    let mut reader = master.try_clone_reader()?;
+    let writer = master.take_writer()?;
+    let (writer_tx, writer_rx) = tokio::sync::mpsc::channel::<Vec<u8>>(128);
 
-    // PTY reader runs on a blocking thread, pushes raw bytes through a
-    // bounded channel. `blocking_send` applies backpressure into the PTY
-    // so `cat` on a huge file slows the reader instead of OOMing us.
-    // Bytes go over the socket untouched (Binary frames) — the xterm.js
-    // frontend decodes UTF-8/ANSI itself, so split multi-byte runes and
-    // escape sequences always survive chunk boundaries.
-    let mut reader = match master.try_clone_reader() {
-        Ok(r) => r,
-        Err(e) => {
-            let _ = ws_tx
-                .send(Message::Text(
-                    format!("ks-ssh: cannot read pty: {e}").into(),
-                ))
-                .await;
-            return;
-        }
-    };
-    let (out_tx, mut out_rx) = tokio::sync::mpsc::channel::<Vec<u8>>(64);
-    std::thread::spawn(move || {
-        let mut buf = [0u8; 8192];
-        loop {
-            match reader.read(&mut buf) {
-                Ok(0) => break,
-                Ok(n) => {
-                    if out_tx.blocking_send(buf[..n].to_vec()).is_err() {
-                        break;
-                    }
-                }
-                Err(_) => break,
-            }
-        }
+    let session = Arc::new(Session {
+        id,
+        master: StdMutex::new(Some(master)),
+        child: StdMutex::new(Some(child)),
+        writer_tx,
+        sub: StdMutex::new(None),
+        ring: StdMutex::new(VecDeque::new()),
+        dead: AtomicBool::new(false),
+        gen: AtomicU64::new(0),
+        last_active: StdMutex::new(Instant::now()),
     });
 
     // PTY writer lives on its own blocking thread so big pastes never
-    // stall the tokio executor. The WS loop just queues bytes.
-    let writer = match master.take_writer() {
-        Ok(w) => w,
-        Err(e) => {
-            let _ = ws_tx
-                .send(Message::Text(
-                    format!("ks-ssh: cannot write pty: {e}").into(),
-                ))
-                .await;
-            return;
-        }
-    };
-    let (in_tx, in_rx) = tokio::sync::mpsc::channel::<Vec<u8>>(128);
+    // stall the tokio executor. It lives as long as the session, so input
+    // works across reattaches.
     std::thread::spawn(move || {
         let mut w = writer;
-        let mut rx = in_rx;
+        let mut rx = writer_rx;
         use std::io::Write as _;
         while let Some(data) = rx.blocking_recv() {
             let _ = w.write_all(&data);
@@ -222,58 +180,275 @@ async fn handle_socket(socket: WebSocket) {
         }
     });
 
-    // Watch child exit (polled — lets the session end kill the shell
-    // through the same handle instead of leaking it).
-    let child_watch = child.clone();
-    let (exit_tx, mut exit_rx) = tokio::sync::oneshot::channel::<()>();
+    // PTY reader: feeds the replay ring forever and forwards to whoever
+    // is currently attached. `blocking_send` applies backpressure into
+    // the PTY so `cat` on a huge file slows the reader instead of OOMing.
+    let reader_session = session.clone();
     std::thread::spawn(move || {
+        let mut buf = [0u8; 8192];
         loop {
-            let exited = child_watch
-                .lock()
-                .map(|mut guard| match guard.as_mut() {
-                    Some(c) => matches!(c.try_wait(), Ok(Some(_))),
-                    None => true,
-                })
-                .unwrap_or(true);
-            if exited {
-                break;
+            match reader.read(&mut buf) {
+                Ok(0) => break,
+                Ok(n) => {
+                    let bytes = &buf[..n];
+                    if let Ok(mut ring) = reader_session.ring.lock() {
+                        push_ring(&mut ring, bytes);
+                    }
+                    let tx = reader_session
+                        .sub
+                        .lock()
+                        .ok()
+                        .and_then(|g| g.clone());
+                    if let Some(tx) = tx {
+                        // Detached (or taken over) — ring keeps the bytes.
+                        let _ = tx.blocking_send(Out::Data(bytes.to_vec()));
+                    }
+                }
+                Err(_) => break,
             }
-            std::thread::sleep(std::time::Duration::from_millis(200));
         }
-        let _ = exit_tx.send(());
+        reader_session.dead.store(true, Ordering::SeqCst);
+        if let Some(tx) = reader_session.sub.lock().ok().and_then(|g| g.clone()) {
+            let _ = tx.try_send(Out::Eof);
+        }
     });
 
+    // Watch child exit (polled backup for EOF, which usually wins).
+    let watch_session = session.clone();
+    std::thread::spawn(move || loop {
+        let exited = watch_session
+            .child
+            .lock()
+            .map(|mut guard| match guard.as_mut() {
+                Some(c) => matches!(c.try_wait(), Ok(Some(_))),
+                None => true,
+            })
+            .unwrap_or(true);
+        if exited {
+            watch_session.dead.store(true, Ordering::SeqCst);
+            if let Some(tx) = watch_session.sub.lock().ok().and_then(|g| g.clone()) {
+                let _ = tx.try_send(Out::Eof);
+            }
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(200));
+    });
+
+    Ok(session)
+}
+
+fn reap_child(session: &Session) {
+    if let Ok(mut guard) = session.child.lock()
+        && let Some(mut c) = guard.take()
+    {
+        let _ = c.kill();
+        let _ = c.wait();
+    }
+}
+
+/// Look up a session by id, or spawn a fresh one (honouring a valid
+/// requested id so a reattach after a backend restart keeps working).
+async fn get_or_create_session(want: Option<String>) -> Arc<Session> {
+    let id = want
+        .filter(|t| valid_session_id(t))
+        .unwrap_or_else(new_session_id);
+    let mut map = SESSIONS.lock().await;
+    if let Some(s) = map.get(&id) {
+        return s.clone();
+    }
+    let session = match spawn_session(id.clone()) {
+        Ok(s) => s,
+        Err(e) => {
+            // PTY spawn failed — hand back a dead placeholder so the
+            // socket still gets a clean error + close instead of hanging.
+            let (writer_tx, _) = tokio::sync::mpsc::channel::<Vec<u8>>(1);
+            let s = Arc::new(Session {
+                id,
+                master: StdMutex::new(None),
+                child: StdMutex::new(None),
+                writer_tx,
+                sub: StdMutex::new(None),
+                ring: StdMutex::new(VecDeque::from(
+                    format!("ks-ssh: cannot spawn shell: {e}\r\n").into_bytes(),
+                )),
+                dead: AtomicBool::new(true),
+                gen: AtomicU64::new(0),
+                last_active: StdMutex::new(Instant::now()),
+            });
+            // Don't even store it — nothing to reattach to.
+            return s;
+        }
+    };
+    map.insert(id, session.clone());
+    // Enforce the cap outside the lock (reaping blocks).
+    let victims: Vec<Arc<Session>> = if map.len() > MAX_SESSIONS {
+        let mut cands: Vec<(Instant, bool, Arc<Session>)> = map
+            .values()
+            .map(|s| {
+                let t = s.last_active.lock().ok().map(|t| *t).unwrap_or(Instant::now());
+                let detached = s.sub.lock().map(|g| g.is_none()).unwrap_or(true);
+                (t, detached, s.clone())
+            })
+            .collect();
+        cands.sort_by_key(|(t, _, _)| *t);
+        cands
+            .into_iter()
+            .filter(|(_, detached, _)| *detached)
+            .take(map.len() - MAX_SESSIONS)
+            .map(|(_, _, s)| s)
+            .collect()
+    } else {
+        Vec::new()
+    };
+    let victim_ids: Vec<String> = victims.iter().map(|s| s.id.clone()).collect();
+    for vid in &victim_ids {
+        map.remove(vid);
+    }
+    drop(map);
+    for s in victims {
+        reap_child(&s);
+    }
+    session
+}
+
+/// Detach bookkeeping when a socket goes away — the shell keeps running.
+fn release(session: &Session, my_gen: u64) {
+    if session.gen.load(Ordering::SeqCst) == my_gen
+        && let Ok(mut slot) = session.sub.lock()
+    {
+        slot.take();
+    }
+    if let Ok(mut t) = session.last_active.lock() {
+        *t = Instant::now();
+    }
+}
+
+/// Reap detached sessions past their TTL. Spawn once from `serve()`.
+pub fn spawn_reaper() {
+    tokio::spawn(async move {
+        loop {
+            tokio::time::sleep(Duration::from_secs(60)).await;
+            let now = Instant::now();
+            let victims: Vec<Arc<Session>> = {
+                let mut map = SESSIONS.lock().await;
+                let ids: Vec<String> = map
+                    .iter()
+                    .filter(|(_, s)| {
+                        let detached =
+                            s.sub.lock().map(|g| g.is_none()).unwrap_or(true);
+                        let idle = s
+                            .last_active
+                            .lock()
+                            .map(|t| now.duration_since(*t) > SESSION_TTL)
+                            .unwrap_or(true);
+                        detached && idle
+                    })
+                    .map(|(id, _)| id.clone())
+                    .collect();
+                let mut out = Vec::new();
+                for id in ids {
+                    if let Some(s) = map.remove(&id) {
+                        out.push(s);
+                    }
+                }
+                out
+            };
+            for s in victims {
+                reap_child(&s);
+            }
+        }
+    });
+}
+
+async fn handle_socket(socket: WebSocket, req_id: Option<String>) {
+    let (mut ws_tx, mut ws_rx) = socket.split();
+
+    let session = get_or_create_session(req_id).await;
+    if let Ok(mut t) = session.last_active.lock() {
+        *t = Instant::now();
+    }
+    let my_gen = session.gen.fetch_add(1, Ordering::SeqCst) + 1;
+    let (sub_tx, mut sub_rx) = tokio::sync::mpsc::channel::<Out>(256);
+    // Take over: boot the previous subscriber, if any.
+    if let Ok(mut slot) = session.sub.lock()
+        && let Some(old) = slot.replace(sub_tx)
+    {
+        let _ = old.try_send(Out::Takeover);
+    }
+
+    // Tell the tab which session it holds (new tabs learn their id here).
+    let ready = serde_json::json!({"type": "ready", "id": session.id}).to_string();
+    if ws_tx
+        .send(Message::Text(ready.into()))
+        .await
+        .is_err()
+    {
+        release(&session, my_gen);
+        return;
+    }
+    // Replay the scrollback ring so a refreshed page sees what it missed.
+    let backlog: Vec<u8> = session
+        .ring
+        .lock()
+        .map(|r| r.iter().copied().collect())
+        .unwrap_or_default();
+    if !backlog.is_empty()
+        && ws_tx
+            .send(Message::Binary(backlog.into()))
+            .await
+            .is_err()
+    {
+        release(&session, my_gen);
+        return;
+    }
+    if session.dead.load(Ordering::SeqCst) {
+        // Shell already gone — show the tail, announce, close.
+        let _ = ws_tx
+            .send(Message::Text(r#"{"type":"exit"}"#.to_string().into()))
+            .await;
+        let _ = ws_tx.send(Message::Close(None)).await;
+        release(&session, my_gen);
+        return;
+    }
+
     // PTY -> WebSocket.
+    let send_session = session.clone();
     let mut send_task = tokio::spawn(async move {
-        // Helper: announce exit then close so the UI can distinguish a
-        // real exit (JSON + close) from shell output that merely looks
-        // like JSON (e.g. `echo '{"type":"exit"}'` keeps the socket open).
+        // Announce exit then close so the UI can distinguish a real exit
+        // (JSON + close) from output that merely looks like JSON.
         let send_exit = async |ws_tx: &mut futures_util::stream::SplitSink<WebSocket, Message>| {
             let _ = ws_tx
                 .send(Message::Text(r#"{"type":"exit"}"#.to_string().into()))
                 .await;
             let _ = ws_tx.send(Message::Close(None)).await;
         };
+        let send_takeover =
+            async |ws_tx: &mut futures_util::stream::SplitSink<WebSocket, Message>| {
+                let _ = ws_tx
+                    .send(Message::Close(Some(CloseFrame {
+                        code: CLOSE_SUPERSEDED,
+                        reason: "attached elsewhere".into(),
+                    })))
+                    .await;
+            };
         loop {
-            tokio::select! {
-                chunk = out_rx.recv() => {
-                    match chunk {
-                        Some(bytes) => {
-                            if ws_tx.send(Message::Binary(bytes.into())).await.is_err() {
-                                break;
-                            }
-                        }
-                        // Reader hit EOF — the shell is gone. Tell the UI
-                        // (the exit watcher is only a backup: EOF usually
-                        // wins the race against its 200ms poll).
-                        None => {
-                            send_exit(&mut ws_tx).await;
-                            break;
-                        }
+            // Lost a takeover race while idle — stand down.
+            if send_session.gen.load(Ordering::SeqCst) != my_gen {
+                send_takeover(&mut ws_tx).await;
+                break;
+            }
+            match sub_rx.recv().await {
+                Some(Out::Data(bytes)) => {
+                    if ws_tx.send(Message::Binary(bytes.into())).await.is_err() {
+                        break;
                     }
                 }
-                _ = &mut exit_rx => {
+                Some(Out::Eof) => {
                     send_exit(&mut ws_tx).await;
+                    break;
+                }
+                Some(Out::Takeover) | None => {
+                    send_takeover(&mut ws_tx).await;
                     break;
                 }
             }
@@ -281,8 +456,14 @@ async fn handle_socket(socket: WebSocket) {
     });
 
     // WebSocket -> PTY.
+    let recv_session = session.clone();
+    let writer_tx = session.writer_tx.clone();
     let mut recv_task = tokio::spawn(async move {
         while let Some(msg) = ws_rx.next().await {
+            // Superseded — stop feeding a shell that has a new owner.
+            if recv_session.gen.load(Ordering::SeqCst) != my_gen {
+                break;
+            }
             let msg = match msg {
                 Ok(m) => m,
                 Err(_) => break,
@@ -299,22 +480,26 @@ async fn handle_socket(socket: WebSocket) {
                         if is_resize {
                             let cols = v.get("cols").and_then(|c| c.as_u64()).unwrap_or(80) as u16;
                             let rows = v.get("rows").and_then(|r| r.as_u64()).unwrap_or(24) as u16;
-                            let _ = master.resize(PtySize {
-                                rows: rows.clamp(2, 300),
-                                cols: cols.clamp(2, 500),
-                                pixel_width: 0,
-                                pixel_height: 0,
-                            });
+                            if let Ok(master) = recv_session.master.lock()
+                                && let Some(master) = master.as_ref()
+                            {
+                                let _ = master.resize(PtySize {
+                                    rows: rows.clamp(2, 300),
+                                    cols: cols.clamp(2, 500),
+                                    pixel_width: 0,
+                                    pixel_height: 0,
+                                });
+                            }
                             continue;
                         }
                     }
                     // Queue for the blocking writer thread (backpressure ok).
-                    if in_tx.send(s.as_bytes().to_vec()).await.is_err() {
+                    if writer_tx.send(s.as_bytes().to_vec()).await.is_err() {
                         break;
                     }
                 }
                 Message::Binary(bin) => {
-                    if in_tx.send(bin.to_vec()).await.is_err() {
+                    if writer_tx.send(bin.to_vec()).await.is_err() {
                         break;
                     }
                 }
@@ -328,11 +513,34 @@ async fn handle_socket(socket: WebSocket) {
         _ = (&mut send_task) => { recv_task.abort(); }
         _ = (&mut recv_task) => { send_task.abort(); }
     }
-    // Session over — reap the shell so a closed tab never leaks a process.
-    if let Ok(mut guard) = child.lock()
-        && let Some(mut c) = guard.take()
-    {
-        let _ = c.kill();
-        let _ = c.wait();
+    // Socket over — detach only. The shell keeps running for reattach;
+    // the reaper (TTL) or an explicit kill reaps it later.
+    release(&session, my_gen);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn session_ids_validated() {
+        assert!(valid_session_id("abc123"));
+        assert!(valid_session_id("a-B_c9"));
+        assert!(!valid_session_id(""));
+        assert!(!valid_session_id("has space"));
+        assert!(!valid_session_id("semi;colon"));
+        assert!(!valid_session_id(&"x".repeat(65)));
+    }
+
+    #[test]
+    fn ring_keeps_tail() {
+        let mut ring = VecDeque::new();
+        push_ring(&mut ring, b"hello ");
+        push_ring(&mut ring, b"world");
+        assert_eq!(ring.iter().copied().collect::<Vec<u8>>(), b"hello world");
+        // A burst bigger than the cap keeps exactly the tail.
+        push_ring(&mut ring, &vec![b'z'; RING_CAP + 10]);
+        assert_eq!(ring.len(), RING_CAP);
+        assert!(ring.iter().all(|&b| b == b'z'));
     }
 }
