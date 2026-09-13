@@ -9,6 +9,19 @@ function validToken(url: URL): string | null {
   return TOKEN_RE.test(t) ? t : null
 }
 
+function pathToken(pathname: string, prefix: string): string | null {
+  // prefix like "/v/" or "/api/ui/" — token is the next segment.
+  if (!pathname.startsWith(prefix)) return null
+  const rest = pathname.slice(prefix.length).split('/')[0] ?? ''
+  const t = rest.toUpperCase()
+  return TOKEN_RE.test(t) ? t : null
+}
+
+function stubFor(env: Env, token: string) {
+  const id = env.TUNNEL.idFromName(`pair:${token}`)
+  return env.TUNNEL.get(id)
+}
+
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url)
@@ -29,11 +42,45 @@ export default {
         )
       }
       const role = url.pathname === '/v1/client' ? 'client' : 'agent'
-      const id = env.TUNNEL.idFromName(`pair:${token}`)
-      const stub = env.TUNNEL.get(id)
+      const stub = stubFor(env, token)
       const relayUrl = new URL(request.url)
       relayUrl.searchParams.set('role', role)
       return stub.fetch(new Request(relayUrl, request))
+    }
+
+    // Fullscreen UI pushed by the CLI over WSS, cached per token.
+    //   GET /v/ABCDE            -> single-file HTML (iframe / fullscreen)
+    //   GET /api/ui/ABCDE/html  -> same HTML (fetch + srcdoc friendly)
+    //   GET /api/ui/ABCDE/meta  -> { ok, hasUi, size, updatedAt }
+    if (url.pathname === '/v' || url.pathname.startsWith('/v/')) {
+      const token =
+        pathToken(url.pathname + '/', '/v/') ?? validToken(url)
+      if (!token) {
+        return Response.json(
+          { ok: false, error: 'bad token (want /v/ABCDE)' },
+          { status: 400 },
+        )
+      }
+      const stub = stubFor(env, token)
+      const inner = new URL(request.url)
+      inner.searchParams.set('role', 'ui-http')
+      return stub.fetch(new Request(inner, request))
+    }
+    if (url.pathname.startsWith('/api/ui/')) {
+      const token = pathToken(url.pathname + '/', '/api/ui/')
+      if (!token) {
+        return Response.json(
+          { ok: false, error: 'bad token (want /api/ui/ABCDE/…)' },
+          { status: 400 },
+        )
+      }
+      const stub = stubFor(env, token)
+      const inner = new URL(request.url)
+      inner.searchParams.set('role', 'ui-http')
+      if (url.pathname.endsWith('/meta')) {
+        inner.searchParams.set('ui', 'meta')
+      }
+      return stub.fetch(new Request(inner, request))
     }
 
     if (url.pathname === '/api/health') {
