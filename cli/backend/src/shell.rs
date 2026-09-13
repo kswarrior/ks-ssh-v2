@@ -5,11 +5,12 @@
 //! prompts, colors, `clear`, `vim`, etc. behave like a real terminal.
 //!
 //! Protocol:
-//! * client -> server: raw keystrokes. Only the exact JSON
-//!   `{"type":"resize","cols":N,"rows":N}` is control traffic —
+//! * client -> server: raw keystrokes (`onData` from xterm.js). Only the
+//!   exact JSON `{"type":"resize","cols":N,"rows":N}` is control traffic —
 //!   everything else (even typed JSON) goes to the shell as input.
-//! * server -> client: raw PTY output (UTF-8 lossy). `{"type":"exit"}`
-//!   is sent once when the shell process exits.
+//! * server -> client: raw PTY bytes (Binary frames) for xterm.js, plus
+//!   the exact Text `{"type":"exit"}` once when the shell exits
+//!   (followed by a Close frame).
 
 use axum::{
     extract::ws::{Message, WebSocket, WebSocketUpgrade},
@@ -181,8 +182,8 @@ async fn handle_socket(socket: WebSocket) {
             tokio::select! {
                 chunk = out_rx.recv() => {
                     match chunk {
-                        Some(text) => {
-                            if ws_tx.send(Message::Text(text.into())).await.is_err() {
+                        Some(bytes) => {
+                            if ws_tx.send(Message::Binary(bytes.into())).await.is_err() {
                                 break;
                             }
                         }
@@ -257,37 +258,5 @@ async fn handle_socket(socket: WebSocket) {
     {
         let _ = c.kill();
         let _ = c.wait();
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn utf8_split_rune_survives_chunk_boundary() {
-        // "é" is 2 bytes; split it across two reads.
-        let full = "héllo 🌍".as_bytes().to_vec();
-        // Split inside the emoji (4-byte rune).
-        let split_at = full.len() - 2;
-        let (a, b) = full.split_at(split_at);
-        let mut carry = Vec::new();
-        let first = a.to_vec();
-        let t1 = decode_with_carry(&first, &mut carry);
-        let mut second = carry.clone();
-        second.extend_from_slice(b);
-        // carry from first decode feeds the second
-        let mut carry2 = carry;
-        let t2 = decode_with_carry(&second.clone(), &mut carry2);
-        assert_eq!(format!("{t1}{t2}"), "héllo 🌍");
-    }
-
-    #[test]
-    fn invalid_bytes_become_replacement_not_panic() {
-        let data = vec![0x66, 0x6f, 0xff, 0x6f]; // fo\xffo
-        let mut carry = Vec::new();
-        let s = decode_with_carry(&data, &mut carry);
-        assert!(s.contains('\u{FFFD}'));
-        assert!(carry.is_empty());
     }
 }
