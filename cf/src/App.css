@@ -244,3 +244,275 @@
     transition: none;
   }
 }
+
+/* ---- Pages ---- */
+
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  width: 100%;
+  max-width: 900px;
+}
+
+.page > h1:first-child {
+  margin: 0 0 4px;
+}
+
+.lead {
+  color: var(--text);
+  max-width: 62ch;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+.card {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 16px;
+  background: var(--bg);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.card h2 {
+  margin: 0;
+}
+
+.card p {
+  max-width: 62ch;
+}
+
+.stat {
+  font-size: 28px;
+  font-weight: 650;
+  color: var(--text-h);
+  line-height: 1.2;
+}
+
+.row-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: auto;
+  padding-top: 8px;
+}
+
+.btn {
+  font: inherit;
+  font-size: 14px;
+  line-height: 1.3;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 9px 14px;
+  min-height: 40px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-h);
+  cursor: pointer;
+}
+
+.btn:hover {
+  background: var(--social-bg);
+}
+
+.btn-primary {
+  background: var(--text-h);
+  border-color: transparent;
+  color: var(--bg);
+}
+
+.btn-primary:hover {
+  opacity: 0.88;
+  background: var(--text-h);
+}
+
+.btn-danger {
+  color: #dc2626;
+}
+
+.btn-sm {
+  padding: 6px 12px;
+  min-height: 34px;
+  font-size: 13px;
+}
+
+.btn:disabled {
+  opacity: 0.55;
+  cursor: wait;
+}
+
+.server-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.server-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 12px 14px;
+  background: var(--bg);
+}
+
+.server-row .row-actions {
+  margin-top: 0;
+  padding-top: 0;
+  margin-left: auto;
+}
+
+.server-info {
+  min-width: 0;
+  flex: 1 1 180px;
+}
+
+.server-name {
+  font-weight: 600;
+  color: var(--text-h);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.server-addr {
+  font-family: var(--mono);
+  font-size: 13px;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+.badge {
+  font-size: 12px;
+  line-height: 1.4;
+  padding: 3px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  color: var(--text);
+  white-space: nowrap;
+}
+
+.badge.connected {
+  background: #16a34a;
+  border-color: transparent;
+  color: #fff;
+}
+
+.badge.connecting {
+  border-color: var(--accent-border);
+  color: var(--accent);
+}
+
+.form {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: 1fr 1fr;
+}
+
+.form .row-actions {
+  grid-column: 1 / -1;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 14px;
+  color: var(--text-h);
+  min-width: 0;
+}
+
+.field input[type='text'],
+.field input[type='number'] {
+  font: inherit;
+  width: 100%;
+  min-height: 44px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text-h);
+}
+
+.field.checkbox-row {
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+}
+
+.field input[type='checkbox'] {
+  width: 20px;
+  height: 20px;
+  accent-color: var(--accent);
+  flex-shrink: 0;
+}
+
+.steps {
+  list-style: none;
+  counter-reset: step;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.codeblock {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  border: 1px solid var(--border);
+  background: var(--code-bg);
+  border-radius: 10px;
+  padding: 10px 10px 10px 14px;
+  min-width: 0;
+}
+
+.codeblock pre {
+  margin: 0;
+  flex: 1;
+  min-width: 0;
+  overflow-x: auto;
+}
+
+.codeblock code {
+  background: transparent;
+  padding: 0;
+  display: block;
+  white-space: pre;
+}
+
+@media (max-width: 560px) {
+  .form {
+    grid-template-columns: 1fr;
+  }
+
+  .server-row .row-actions {
+    margin-left: 0;
+    width: 100%;
+  }
+
+  .server-row .row-actions .btn {
+    flex: 1 1 auto;
+  }
+}
+
+@media (prefers-color-scheme: dark) {
+  .btn-danger {
+    color: #f87171;
+  }
+}
