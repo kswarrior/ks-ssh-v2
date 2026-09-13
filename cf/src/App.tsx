@@ -188,42 +188,6 @@ type SshEntry = {
   online: boolean
 }
 
-async function apiConnect(
-  entry: { name: string; token: string },
-  signal: AbortSignal,
-): Promise<{ online: boolean; message?: string }> {
-  try {
-    const res = await fetch('/api/ssh/connect', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ name: entry.name, token: entry.token }),
-      signal,
-    })
-    const data = (await res.json().catch(() => null)) as {
-      ok?: boolean
-      online?: boolean
-      error?: string
-    } | null
-    if (res.ok && data && data.ok && data.online !== false) {
-      return { online: true }
-    }
-    return {
-      online: false,
-      message:
-        (data && data.error) ||
-        `Backend refused the connection (HTTP ${res.status}).`,
-    }
-  } catch (err) {
-    if (err instanceof DOMException && err.name === 'AbortError') {
-      return { online: false, message: 'aborted' }
-    }
-    return {
-      online: false,
-      message: 'Cannot reach the KS SSH backend. Start it, then try again.',
-    }
-  }
-}
-
 type RelaySession = { name: string; token: string }
 
 function readRelaySession(): RelaySession | null {
@@ -362,175 +326,6 @@ function SessionPage() {
   )
 }
 
-function RelayCard() {
-  const [name, setName] = useState('')
-  const [code, setCode] = useState('')
-  const [status, setStatus] = useState<'idle' | 'connecting' | 'connected' | 'error'>('idle')
-  const [error, setError] = useState<string | null>(null)
-  const wsRef = useRef<WebSocket | null>(null)
-
-  useEffect(
-    () => () => {
-      wsRef.current?.close()
-    },
-    [],
-  )
-
-  const [session, setSession] = useState<RelaySession | null>(() =>
-    readRelaySession(),
-  )
-
-  const disconnect = () => {
-    const ws = wsRef.current
-    wsRef.current = null
-    try {
-      ws?.close()
-    } catch {
-      // Already closed — ignore.
-    }
-    setStatus('idle')
-    setError(null)
-  }
-
-  const forget = () => {
-    disconnect()
-    try {
-      localStorage.removeItem('ks-ssh:relay')
-    } catch {
-      // Storage unavailable — nothing to clear.
-    }
-    setSession(null)
-    setName('')
-    setCode('')
-  }
-
-  const connect = () => {
-    const t = code.trim().toUpperCase()
-    if (!/^[A-Z0-9]{5}$/.test(t)) {
-      setError('Token is 5 letters/numbers — run `ks-ssh --token=` to get one.')
-      return
-    }
-    disconnect()
-    setError(null)
-    setStatus('connecting')
-    const scheme = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    const ws = new WebSocket(
-      `${scheme}//${window.location.host}/v1/client?token=${t}`,
-    )
-    wsRef.current = ws
-    ws.onopen = () => {
-      ws.send(JSON.stringify({ type: 'hello', role: 'client', token: t }))
-    }
-    ws.onmessage = (e) => {
-      try {
-        const msg = JSON.parse(String(e.data)) as {
-          type?: string
-          agent?: boolean
-          online?: boolean
-        }
-        if (msg?.type === 'paired' || msg?.type === 'registered') {
-          setStatus('connected')
-          setError(null)
-          const next = { name: name.trim() || 'Relay', token: t }
-          writeJSON('ks-ssh:relay', next)
-          setSession(next)
-        }
-      } catch {
-        // Binary relay payloads are ignored in v1.
-      }
-    }
-    ws.onerror = () => {
-      if (wsRef.current !== ws) return
-      setStatus('error')
-      setError('Relay connection failed. Is the Worker deployed with WSS support?')
-    }
-    ws.onclose = () => {
-      if (wsRef.current !== ws) return
-      wsRef.current = null
-      setStatus((s) => {
-        if (s === 'connected') {
-          setError('Relay closed by the agent.')
-          return 'idle'
-        }
-        setError((prev) => prev ?? 'Relay closed before pairing.')
-        return 'error'
-      })
-    }
-  }
-
-  return (
-    <div className="card">
-      <h2>Relay</h2>
-      <p>
-        No open port needed — on the machine run <code>ks-ssh --token=</code>,
-        then enter a name and its 5-char token here.
-      </p>
-      {session ? (
-        <div className="row-actions">
-          <span className="ssh-name">{session.name}</span>
-          <code>{session.token}</code>
-          <a className="btn btn-sm btn-primary" href="#/session">
-            Visit
-          </a>
-          <button type="button" className="btn btn-sm" onClick={forget}>
-            Disconnect
-          </button>
-        </div>
-      ) : (
-        <form
-          className="form"
-          onSubmit={(e) => {
-            e.preventDefault()
-            connect()
-          }}
-        >
-          <label className="field">
-            Name
-            <input
-              type="text"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="Home Lab"
-              autoComplete="off"
-            />
-          </label>
-          <label className="field">
-            Token
-            <input
-              type="text"
-              value={code}
-              onChange={(e) => setCode(e.target.value.toUpperCase().slice(0, 5))}
-              placeholder="A3K9Q"
-              autoComplete="off"
-              inputMode="text"
-              maxLength={5}
-            />
-          </label>
-          <div className="row-actions">
-            <button
-              type="submit"
-              className="btn btn-primary"
-              disabled={status === 'connecting'}
-            >
-              {status === 'connecting' ? 'Connecting…' : 'Connect via relay'}
-            </button>
-            {status === 'connecting' && (
-              <button type="button" className="btn" onClick={disconnect}>
-                Cancel
-              </button>
-            )}
-          </div>
-        </form>
-      )}
-      {status === 'error' && error && (
-        <div className="banner-error" role="alert">
-          <p>{error}</p>
-        </div>
-      )}
-    </div>
-  )
-}
-
 function SSHPage({
   entries,
   onChange,
@@ -545,14 +340,31 @@ function SSHPage({
   const [note, setNote] = useState('')
   const [connectingId, setConnectingId] = useState<string | null>(null)
   const [banner, setBanner] = useState<string | null>(null)
-  const abortRef = useRef<AbortController | null>(null)
+  const socketsRef = useRef(new Map<string, WebSocket>())
 
   useEffect(
     () => () => {
-      abortRef.current?.abort()
+      for (const ws of socketsRef.current.values()) {
+        try {
+          ws.close()
+        } catch {
+          // Already closed — ignore.
+        }
+      }
+      socketsRef.current.clear()
     },
     [],
   )
+
+  const closeSocket = (id: string) => {
+    const ws = socketsRef.current.get(id)
+    socketsRef.current.delete(id)
+    try {
+      ws?.close()
+    } catch {
+      // Already closed — ignore.
+    }
+  }
 
   const resetForm = () => {
     setEditingId(null)
