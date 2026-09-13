@@ -1409,15 +1409,28 @@
   font-size: 16px; /* stops iOS zoom-on-focus */
 }
 
-/* ---------- Files: host HOME browser ---------- */
+/* ---------- Files: host HOME browser (flush top like Terminal) ---------- */
+
+.content-files {
+  padding-top: 8px;
+}
+
+.content-files .tab-panel {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
 
 .files-page {
   max-width: none;
   flex: 1;
+  padding-top: 0;
+  gap: 8px;
 }
 
 .files-head {
-  min-height: 44px;
+  min-height: 0;
 }
 
 .files-actions {
@@ -1430,14 +1443,14 @@
 .files-body {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 8px;
   min-width: 0;
 }
 
 .files-pathrow {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 8px;
   flex-wrap: wrap;
 }
 
@@ -1449,7 +1462,7 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 13px;
-  padding: 10px 12px;
+  padding: 6px 12px;
 }
 
 /* Clickable breadcrumb path: ~/docs/project — each parent navigates. */
@@ -1538,6 +1551,11 @@
 .files-sub {
   font-size: 13px;
   color: var(--text);
+  margin: 0;
+}
+
+.files-body .file-grid {
+  margin: 0;
 }
 
 .file-grid {
