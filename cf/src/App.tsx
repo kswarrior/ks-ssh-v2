@@ -192,23 +192,8 @@ function InstallationPage() {
           <CodeBlock code="ssh-copy-id user@your-server" />
         </li>
         <li className="card">
-          <h2>3. Add your server</h2>
-          <p>
-            Open the Servers page and fill in the name, host, user, and port
-            of your machine.
-          </p>
-          <div className="row-actions">
-            <button type="button" className="btn btn-primary" onClick={() => go('servers')}>
-              Go to Servers
-            </button>
-          </div>
-        </li>
-        <li className="card">
-          <h2>4. Connect</h2>
-          <p>
-            Press <strong>Connect</strong> next to the server. The equivalent
-            terminal command is:
-          </p>
+          <h2>3. Connect</h2>
+          <p>Open a terminal and connect to your server:</p>
           <CodeBlock code="ssh user@your-server" />
         </li>
       </ol>
@@ -280,16 +265,9 @@ export default function App() {
   const asideRef = useRef<HTMLElement>(null)
   const mainRef = useRef<HTMLElement>(null)
 
-  const [servers, setServers] = useState<Server[]>(() => {
-    const saved = readJSON<unknown>('ks-ssh:servers', null)
-    return Array.isArray(saved) ? (saved as Server[]) : SEED_SERVERS
-  })
   const [settings, setSettings] = useState<Settings>(() =>
     readJSON<Settings>('ks-ssh:settings', DEFAULT_SETTINGS),
   )
-  const [connectedId, setConnectedId] = useState<string | null>(null)
-  const [connectingId, setConnectingId] = useState<string | null>(null)
-  const connectTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [theme, setTheme] = useState<Theme>(initialTheme)
 
   // Derived state: drawer can only be open on phones; resizing to desktop
@@ -325,19 +303,8 @@ export default function App() {
   }, [theme])
 
   useEffect(() => {
-    writeJSON('ks-ssh:servers', servers)
-  }, [servers])
-
-  useEffect(() => {
     writeJSON('ks-ssh:settings', settings)
   }, [settings])
-
-  useEffect(
-    () => () => {
-      if (connectTimer.current) clearTimeout(connectTimer.current)
-    },
-    [],
-  )
 
   // Lock background scroll while the phone drawer is open
   useEffect(() => {
