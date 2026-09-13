@@ -130,10 +130,107 @@ function CodeBlock({ code }: { code: string }) {
   )
 }
 
-function HomePage({ go }: { go: (id: PageId) => void }) {
+function SshGlyph() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="#fff"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <rect x="3" y="4" width="18" height="16" rx="2" />
+      <path d="M7 9l3 3-3 3M12 15h5" />
+    </svg>
+  )
+}
+
+function StatusTag({
+  online,
+  connecting,
+}: {
+  online: boolean
+  connecting?: boolean
+}) {
+  if (connecting) {
+    return (
+      <span className="tag connecting">
+        <span className="tag-dot" aria-hidden="true" />
+        Connecting…
+      </span>
+    )
+  }
+  return online ? (
+    <span className="tag online">
+      <span className="tag-dot" aria-hidden="true" />
+      Online
+    </span>
+  ) : (
+    <span className="tag offline">
+      <span className="tag-dot" aria-hidden="true" />
+      Offline
+    </span>
+  )
+}
+
+function HomePage({
+  go,
+  entries,
+}: {
+  go: (id: PageId) => void
+  entries: SshEntry[]
+}) {
+  const total = entries.length
+  const online = entries.filter((e) => e.online).length
+  const recent = entries.slice(-3).reverse()
   return (
     <section className="page" aria-labelledby="page-title-home">
       <h1 id="page-title-home">Home</h1>
+      <div className="grid">
+        <div className="card">
+          <span className="stat">{total}</span>
+          <span>Total SSH</span>
+        </div>
+        <div className="card">
+          <span className="stat">{online}</span>
+          <span>Online</span>
+        </div>
+        <div className="card">
+          <span className="stat">{total - online}</span>
+          <span>Offline</span>
+        </div>
+      </div>
+      <div className="card">
+        <h2>Recent</h2>
+        {recent.length === 0 ? (
+          <p>No connections yet. Press Connect on the SSH page to add one.</p>
+        ) : (
+          <ul className="recent-list">
+            {recent.map((e) => (
+              <li key={e.id}>
+                <button
+                  type="button"
+                  className="recent-row"
+                  onClick={() => go('ssh')}
+                >
+                  <span className="ssh-icon" aria-hidden="true">
+                    <SshGlyph />
+                  </span>
+                  <span className="recent-info">
+                    <span className="recent-name">{e.name}</span>
+                    {e.note ? (
+                      <span className="recent-note">{e.note}</span>
+                    ) : null}
+                  </span>
+                  <StatusTag online={e.online} />
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
       <div className="grid">
         <div className="card">
           <h2>New here?</h2>
