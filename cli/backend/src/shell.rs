@@ -44,8 +44,8 @@ const MAX_SESSIONS: usize = 64;
 const CLOSE_SUPERSEDED: u16 = 4000;
 
 #[derive(Deserialize)]
-struct ShellQuery {
-    id: Option<String>,
+pub struct ShellQuery {
+    pub id: Option<String>,
 }
 
 fn valid_session_id(t: &str) -> bool {
@@ -89,7 +89,7 @@ struct Session {
     ring: StdMutex<VecDeque<u8>>,
     dead: AtomicBool,
     /// Bumped on every attach; lets stale sockets notice a takeover.
-    gen: AtomicU64,
+    epoch: AtomicU64,
     last_active: StdMutex<Instant>,
 }
 
@@ -163,7 +163,7 @@ fn spawn_session(id: String) -> anyhow::Result<Arc<Session>> {
         sub: StdMutex::new(None),
         ring: StdMutex::new(VecDeque::new()),
         dead: AtomicBool::new(false),
-        gen: AtomicU64::new(0),
+        epoch: AtomicU64::new(0),
         last_active: StdMutex::new(Instant::now()),
     });
 
@@ -272,7 +272,7 @@ async fn get_or_create_session(want: Option<String>) -> Arc<Session> {
                     format!("ks-ssh: cannot spawn shell: {e}\r\n").into_bytes(),
                 )),
                 dead: AtomicBool::new(true),
-                gen: AtomicU64::new(0),
+                epoch: AtomicU64::new(0),
                 last_active: StdMutex::new(Instant::now()),
             });
             // Don't even store it — nothing to reattach to.
@@ -312,8 +312,8 @@ async fn get_or_create_session(want: Option<String>) -> Arc<Session> {
 }
 
 /// Detach bookkeeping when a socket goes away — the shell keeps running.
-fn release(session: &Session, my_gen: u64) {
-    if session.gen.load(Ordering::SeqCst) == my_gen
+fn release(session: &Session, my_epoch: u64) {
+    if session.epoch.load(Ordering::SeqCst) == my_epoch
         && let Ok(mut slot) = session.sub.lock()
     {
         slot.take();
@@ -367,7 +367,7 @@ async fn handle_socket(socket: WebSocket, req_id: Option<String>) {
     if let Ok(mut t) = session.last_active.lock() {
         *t = Instant::now();
     }
-    let my_gen = session.gen.fetch_add(1, Ordering::SeqCst) + 1;
+    let my_epoch = session.epoch.fetch_add(1, Ordering::SeqCst) + 1;
     let (sub_tx, mut sub_rx) = tokio::sync::mpsc::channel::<Out>(256);
     // Take over: boot the previous subscriber, if any.
     if let Ok(mut slot) = session.sub.lock()
@@ -383,7 +383,7 @@ async fn handle_socket(socket: WebSocket, req_id: Option<String>) {
         .await
         .is_err()
     {
-        release(&session, my_gen);
+        release(&session, my_epoch);
         return;
     }
     // Replay the scrollback ring so a refreshed page sees what it missed.
@@ -398,7 +398,7 @@ async fn handle_socket(socket: WebSocket, req_id: Option<String>) {
             .await
             .is_err()
     {
-        release(&session, my_gen);
+        release(&session, my_epoch);
         return;
     }
     if session.dead.load(Ordering::SeqCst) {
@@ -407,7 +407,7 @@ async fn handle_socket(socket: WebSocket, req_id: Option<String>) {
             .send(Message::Text(r#"{"type":"exit"}"#.to_string().into()))
             .await;
         let _ = ws_tx.send(Message::Close(None)).await;
-        release(&session, my_gen);
+        release(&session, my_epoch);
         return;
     }
 
@@ -433,7 +433,7 @@ async fn handle_socket(socket: WebSocket, req_id: Option<String>) {
             };
         loop {
             // Lost a takeover race while idle — stand down.
-            if send_session.gen.load(Ordering::SeqCst) != my_gen {
+            if send_session.epoch.load(Ordering::SeqCst) != my_epoch {
                 send_takeover(&mut ws_tx).await;
                 break;
             }
@@ -461,7 +461,7 @@ async fn handle_socket(socket: WebSocket, req_id: Option<String>) {
     let mut recv_task = tokio::spawn(async move {
         while let Some(msg) = ws_rx.next().await {
             // Superseded — stop feeding a shell that has a new owner.
-            if recv_session.gen.load(Ordering::SeqCst) != my_gen {
+            if recv_session.epoch.load(Ordering::SeqCst) != my_epoch {
                 break;
             }
             let msg = match msg {
@@ -515,7 +515,7 @@ async fn handle_socket(socket: WebSocket, req_id: Option<String>) {
     }
     // Socket over — detach only. The shell keeps running for reattach;
     // the reaper (TTL) or an explicit kill reaps it later.
-    release(&session, my_gen);
+    release(&session, my_epoch);
 }
 
 #[cfg(test)]

@@ -93,6 +93,7 @@ async fn serve(host: String, port: u16) {
         .await
         .expect("bind port");
     println!("KS SSH serving at http://{addr}");
+    shell::spawn_reaper();
     axum::serve(listener, app.into_make_service())
         .await
         .expect("serve");
