@@ -174,27 +174,61 @@ type SshEntry = {
   online: boolean
 }
 
-const SEED_SSH: SshEntry[] = [
-  {
-    id: 'seed-ssh-lab',
-    name: 'Home Lab',
-    token: '',
-    note: 'Local dev machine over Tailscale',
-    online: true,
-  },
-  {
-    id: 'seed-ssh-vps',
-    name: 'VPS EU',
-    token: '',
-    note: 'Production box in Frankfurt',
-    online: false,
-  },
-]
+async function apiConnect(
+  entry: { name: string; token: string },
+  signal: AbortSignal,
+): Promise<{ online: boolean; message?: string }> {
+  try {
+    const res = await fetch('/api/ssh/connect', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: entry.name, token: entry.token }),
+      signal,
+    })
+    const data = (await res.json().catch(() => null)) as {
+      ok?: boolean
+      online?: boolean
+      error?: string
+    } | null
+    if (res.ok && data && data.ok && data.online !== false) {
+      return { online: true }
+    }
+    return {
+      online: false,
+      message:
+        (data && data.error) ||
+        `Backend refused the connection (HTTP ${res.status}).`,
+    }
+  } catch (err) {
+    if (err instanceof DOMException && err.name === 'AbortError') {
+      return { online: false, message: 'aborted' }
+    }
+    return {
+      online: false,
+      message: 'Cannot reach the KS SSH backend. Start it, then try again.',
+    }
+  }
+}
 
 function SSHPage() {
   const [entries, setEntries] = useState<SshEntry[]>(() => {
+    try {
+      // Drop the legacy demo store if it exists.
+      localStorage.removeItem('ks-ssh:servers')
+    } catch {
+      // Storage unavailable — nothing to clean.
+    }
     const saved = readJSON<unknown>('ks-ssh:ssh', null)
-    return Array.isArray(saved) ? (saved as SshEntry[]) : SEED_SSH
+    if (!Array.isArray(saved)) return []
+    // Drop demo seeds and malformed rows — only real user data survives.
+    return (saved as SshEntry[]).filter(
+      (x) =>
+        x &&
+        typeof x.id === 'string' &&
+        !x.id.startsWith('seed-') &&
+        typeof x.name === 'string' &&
+        x.name.trim() !== '',
+    )
   })
   const [formOpen, setFormOpen] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
@@ -202,7 +236,8 @@ function SSHPage() {
   const [token, setToken] = useState('')
   const [note, setNote] = useState('')
   const [connectingId, setConnectingId] = useState<string | null>(null)
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const [banner, setBanner] = useState<string | null>(null)
+  const abortRef = useRef<AbortController | null>(null)
 
   useEffect(() => {
     writeJSON('ks-ssh:ssh', entries)
@@ -210,7 +245,7 @@ function SSHPage() {
 
   useEffect(
     () => () => {
-      if (timer.current) clearTimeout(timer.current)
+      abortRef.current?.abort()
     },
     [],
   )
@@ -240,15 +275,54 @@ function SSHPage() {
     resetForm()
   }
 
-  const markOnline = (id: string) => {
-    if (timer.current) clearTimeout(timer.current)
+  const attemptConnect = async (id: string) => {
+    const entry = entries.find((x) => x.id === id)
+    if (!entry || entry.online || connectingId) return
+    abortRef.current?.abort()
+    const ctrl = new AbortController()
+    abortRef.current = ctrl
+    let timedOut = false
+    const timeout = setTimeout(() => {
+      timedOut = true
+      ctrl.abort()
+    }, 8000)
     setConnectingId(id)
-    timer.current = setTimeout(() => {
+    setBanner(null)
+    let result: { online: boolean; message?: string }
+    try {
+      result = await apiConnect(
+        { name: entry.name, token: entry.token },
+        ctrl.signal,
+      )
+    } finally {
+      clearTimeout(timeout)
+    }
+    if (abortRef.current !== ctrl) return // superseded or unmounted
+    abortRef.current = null
+    setConnectingId(null)
+    if (result.online) {
       setEntries((prev) =>
         prev.map((x) => (x.id === id ? { ...x, online: true } : x)),
       )
+    } else if (result.message === 'aborted') {
+      if (timedOut) {
+        setBanner('Connection timed out after 8s. Check the backend and try again.')
+      }
+      // Otherwise silenced: superseded by a newer attempt or unmounted.
+    } else {
+      setEntries((prev) =>
+        prev.map((x) => (x.id === id ? { ...x, online: false } : x)),
+      )
+      setBanner(result.message ?? 'Connection failed.')
+    }
+  }
+
+  const stopPending = (id: string) => {
+    if (id === connectingId) {
+      abortRef.current?.abort()
+      abortRef.current = null
       setConnectingId(null)
-    }, 900)
+    }
   }
 
   const submit = (e: FormEvent) => {
