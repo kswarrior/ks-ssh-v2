@@ -228,13 +228,13 @@ export default function App() {
           id="main"
           tabIndex={-1}
         >
-          <div hidden={tab !== 'terminal'}>
+          <div hidden={tab !== 'terminal'} className="tab-panel">
             <TerminalPage entries={entries} onChange={setEntries} />
           </div>
-          <div hidden={tab !== 'files'}>
+          <div hidden={tab !== 'files'} className="tab-panel">
             <FilesPage />
           </div>
-          <div hidden={tab !== 'ports'}>
+          <div hidden={tab !== 'ports'} className="tab-panel">
             <PortsPage />
           </div>
         </main>
