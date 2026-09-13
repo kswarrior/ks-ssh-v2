@@ -11,7 +11,10 @@ use rust_embed::RustEmbed;
 #[derive(Parser)]
 #[command(name = "ks-ssh", version)]
 struct Cli {
-    /// Port to serve the web UI on (127.0.0.1).
+    /// Interface to bind (127.0.0.1 = local only, 0.0.0.0 = all interfaces).
+    #[arg(long, default_value = "127.0.0.1")]
+    host: String,
+    /// Port to serve the web UI on.
     #[arg(long, default_value_t = 8080)]
     port: u16,
 }
@@ -45,7 +48,7 @@ async fn main() {
         .route("/api/hello", get(api_hello))
         .fallback(serve_ui);
 
-    let addr = format!("127.0.0.1:{}", cli.port);
+    let addr = format!("{}:{}", cli.host, cli.port);
     let listener = tokio::net::TcpListener::bind(&addr)
         .await
         .expect("bind port");
