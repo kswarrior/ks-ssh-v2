@@ -85,10 +85,10 @@ impl E2eKey {
         Ok(Self(raw))
     }
 
+    #[allow(dead_code)]
     pub fn from_bytes(raw: [u8; 32]) -> Self {
         Self(raw)
     }
-
     /// Parse `k` from a URL fragment (base64url, no pad, 32 bytes).
     pub fn from_base64url(s: &str) -> anyhow::Result<Self> {
         let raw = decode_b64url(s)?;
@@ -162,9 +162,11 @@ impl E2e {
         Ok(pt)
     }
 
+    #[allow(dead_code)]
     pub fn tx_seq(&self) -> u64 {
         self.tx_seq
     }
+    #[allow(dead_code)]
     pub fn rx_next(&self) -> u64 {
         self.rx_next
     }

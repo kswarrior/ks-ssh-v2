@@ -39,12 +39,12 @@ function loadTerms(): TermSession[] {
   }
 }
 
-function loadActiveId(): string | null {
+function loadActiveId(fallback: string | null): string | null {
   try {
     const raw = localStorage.getItem(TERMS_ACTIVE_KEY)
-    return typeof raw === 'string' && raw ? raw : null
+    return typeof raw === 'string' && raw ? raw : fallback
   } catch {
-    return null
+    return fallback
   }
 }
 
@@ -488,7 +488,9 @@ export default function TerminalPage({
     }
     return stored
   })
-  const [activeId, setActiveId] = useState<string | null>(() => loadActiveId())
+  const [activeId, setActiveId] = useState<string | null>(() =>
+    loadActiveId(loadTerms().length > 0 ? (loadTerms()[0]?.id ?? null) : null),
+  )
   const [statuses, setStatuses] = useState<Record<string, TermStatus>>({})
   // Pending close confirmation — the kill only happens after Confirm.
   const [confirmId, setConfirmId] = useState<string | null>(null)
@@ -528,30 +530,13 @@ export default function TerminalPage({
   const requestClose = (id: string) => setConfirmId(id)
 
   const confirmClose = () => {
-    const t = sessions.find((s) => s.id === confirmId)
-    if (t) {
-      // Kill the backend shell now — otherwise it would linger detached
-      // until the reaper TTL even though the tab is gone.
-      if (t.sid) {
-        void fetch(`/v1/shell?id=${encodeURIComponent(t.sid)}`, {
-          method: 'DELETE',
-        }).catch(() => {})
-      }
-      closeTerminal(t.id)
-    }
+    if (confirmId) closeTerminal(confirmId)
     setConfirmId(null)
   }
 
   // Stable identity — child reports status without refiring every render.
   const handleStatus = useCallback((id: string, s: TermStatus) => {
     setStatuses((prev) => (prev[id] === s ? prev : { ...prev, [id]: s }))
-  }, [])
-
-  // Backend handed a tab its session id (or cleared it for a fresh shell).
-  const handleReady = useCallback((id: string, sid: string | null) => {
-    setSessions((prev) =>
-      prev.map((t) => (t.id === id && t.sid !== sid ? { ...t, sid } : t)),
-    )
   }, [])
 
   // First run: complete blank + centered button only.
@@ -606,8 +591,6 @@ export default function TerminalPage({
               key={t.id}
               role="tab"
               aria-selected={isActive}
-              aria-label={t.name}
-              title={t.name}
               tabIndex={0}
               className={`term-tab${isActive ? ' active' : ''}`}
               onClick={() => setActiveId(t.id)}
@@ -648,6 +631,7 @@ export default function TerminalPage({
                 <rect x="2" y="4" width="20" height="16" rx="2" />
                 <path d="m7 9 3 3-3 3M13 15h4" />
               </svg>
+              <span className="term-tab-name">{t.name}</span>
               <span
                 className={`term-tab-dot${st === 'online' ? ' on' : st === 'connecting' ? ' wait' : ''}`}
                 aria-hidden="true"
@@ -693,9 +677,7 @@ export default function TerminalPage({
             <ShellSession
               id={t.id}
               active={t.id === active.id}
-              sid={t.sid}
               onStatus={handleStatus}
-              onReady={handleReady}
             />
           </div>
         ))}
