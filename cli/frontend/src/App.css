@@ -2484,10 +2484,12 @@ a.file-link {
 .ports-page {
   max-width: none;
   flex: 1;
+  padding-top: 0;
+  gap: 8px;
 }
 
 .ports-head {
-  min-height: 44px;
+  min-height: 0;
 }
 
 .ports-actions {
