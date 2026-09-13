@@ -606,6 +606,8 @@ export default function TerminalPage({
               key={t.id}
               role="tab"
               aria-selected={isActive}
+              aria-label={t.name}
+              title={t.name}
               tabIndex={0}
               className={`term-tab${isActive ? ' active' : ''}`}
               onClick={() => setActiveId(t.id)}
@@ -646,7 +648,6 @@ export default function TerminalPage({
                 <rect x="2" y="4" width="20" height="16" rx="2" />
                 <path d="m7 9 3 3-3 3M13 15h4" />
               </svg>
-              <span className="term-tab-name">{t.name}</span>
               <span
                 className={`term-tab-dot${st === 'online' ? ' on' : st === 'connecting' ? ' wait' : ''}`}
                 aria-hidden="true"

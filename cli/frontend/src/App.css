@@ -1272,12 +1272,6 @@
   opacity: 0.85;
 }
 
-.term-tab-name {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .term-tab-close {
   border: none;
   background: transparent;
