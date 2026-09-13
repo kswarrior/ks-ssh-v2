@@ -1031,28 +1031,44 @@ export default function FilesPage() {
                       className="btn btn-sm"
                       href={downloadUrl(editing.path)}
                       download={editing.name}
+                      title={`Download ${editing.name}`}
                     >
-                      Get
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                        <path d="m7 10 5 5 5-5" />
+                        <path d="M12 15V3" />
+                      </svg>
+                      <span className="btn-label">Get</span>
                     </a>
                     <button
                       type="button"
                       className="btn btn-sm btn-primary"
                       disabled={!editorDirty || editorSaving}
                       onClick={() => void saveEditor()}
+                      title="Save file"
                     >
-                      {editorSaving ? 'Saving…' : 'Save'}
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                        <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" />
+                        <path d="M17 21v-8H7v8" />
+                        <path d="M7 3v5h8" />
+                      </svg>
+                      <span className="btn-label">{editorSaving ? 'Saving…' : 'Save'}</span>
                     </button>
                     <button
                       type="button"
                       className="btn btn-sm"
                       disabled={editorSaving}
                       onClick={() => closeEditor()}
+                      title="Close editor"
                     >
-                      {editorDirty
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                        <path d="M18 6 6 18M6 6l12 12" />
+                      </svg>
+                      <span className="btn-label">{editorDirty
                         ? confirmDiscard
                           ? 'Discard?'
                           : 'Close'
-                        : 'Close'}
+                        : 'Close'}</span>
                     </button>
                   </div>
                 </div>
@@ -1069,15 +1085,25 @@ export default function FilesPage() {
                     className="btn btn-sm btn-primary"
                     href={downloadUrl(editing.path)}
                     download={editing.name}
+                    title={`Download ${editing.name}`}
                   >
-                    Download
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                      <path d="m7 10 5 5 5-5" />
+                      <path d="M12 15V3" />
+                    </svg>
+                    <span className="btn-label">Download</span>
                   </a>
                   <button
                     type="button"
                     className="btn btn-sm"
                     onClick={() => closeEditor()}
+                    title="Close editor"
                   >
-                    Close
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <path d="M18 6 6 18M6 6l12 12" />
+                    </svg>
+                    <span className="btn-label">Close</span>
                   </button>
                 </div>
               </div>
@@ -1176,20 +1202,28 @@ export default function FilesPage() {
                 className="btn btn-sm"
                 disabled={createBusy}
                 onClick={() => setCreating(null)}
+                title="Cancel create"
               >
-                Cancel
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M18 6 6 18M6 6l12 12" />
+                </svg>
+                <span className="btn-label">Cancel</span>
               </button>
               <button
                 type="button"
                 className="btn btn-sm btn-primary"
                 disabled={!createNameValid || createBusy}
                 onClick={() => void submitCreate()}
+                title={creating === 'file' ? 'Create file' : 'Create folder'}
               >
-                {createBusy
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M12 5v14M5 12h14" />
+                </svg>
+                <span className="btn-label">{createBusy
                   ? 'Creating…'
                   : creating === 'file'
                     ? 'Create file'
-                    : 'Create folder'}
+                    : 'Create folder'}</span>
               </button>
             </div>
           </div>
@@ -1353,8 +1387,16 @@ export default function FilesPage() {
                 className="btn btn-sm"
                 disabled={uploadBusy}
                 onClick={() => setUploading(null)}
+                title={uploadDone.length > 0 ? 'Close upload dialog' : 'Cancel upload'}
               >
-                {uploadDone.length > 0 ? 'Done' : 'Cancel'}
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  {uploadDone.length > 0 ? (
+                    <path d="M20 6 9 17l-5-5" />
+                  ) : (
+                    <path d="M18 6 6 18M6 6l12 12" />
+                  )}
+                </svg>
+                <span className="btn-label">{uploadDone.length > 0 ? 'Done' : 'Cancel'}</span>
               </button>
               {uploading === 'local' ? (
                 <button
@@ -1362,10 +1404,16 @@ export default function FilesPage() {
                   className="btn btn-sm btn-primary"
                   disabled={uploadFiles.length === 0 || uploadBusy}
                   onClick={() => void submitLocalUpload()}
+                  title="Upload selected files"
                 >
-                  {uploadBusy
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                    <path d="m17 8-5-5-5 5" />
+                    <path d="M12 3v12" />
+                  </svg>
+                  <span className="btn-label">{uploadBusy
                     ? 'Uploading…'
-                    : `Upload ${uploadFiles.length > 0 ? `${uploadFiles.length} file${uploadFiles.length > 1 ? 's' : ''}` : ''}`}
+                    : `Upload ${uploadFiles.length > 0 ? `${uploadFiles.length} file${uploadFiles.length > 1 ? 's' : ''}` : ''}`}</span>
                 </button>
               ) : (
                 <button
@@ -1373,8 +1421,14 @@ export default function FilesPage() {
                   className="btn btn-sm btn-primary"
                   disabled={!uploadUrl.trim() || uploadBusy}
                   onClick={() => void submitUrlUpload()}
+                  title="Fetch file from URL"
                 >
-                  {uploadBusy ? 'Fetching…' : 'Fetch file'}
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                    <path d="m7 10 5 5 5-5" />
+                    <path d="M12 15V3" />
+                  </svg>
+                  <span className="btn-label">{uploadBusy ? 'Fetching…' : 'Fetch file'}</span>
                 </button>
               )}
             </div>
