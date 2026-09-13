@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
 
-type PageId = 'home' | 'ssh' | 'installation' | 'settings'
+type PageId = 'home' | 'ssh' | 'view' | 'installation' | 'settings'
 
 type NavItem = { id: PageId; label: string; hash: string }
 
 const NAV: NavItem[] = [
   { id: 'home', label: 'Home', hash: '#/' },
   { id: 'ssh', label: 'SSH', hash: '#/ssh' },
+  { id: 'view', label: 'View', hash: '#/view' },
   { id: 'installation', label: 'Installation', hash: '#/installation' },
   { id: 'settings', label: 'Settings', hash: '#/settings' },
 ]
@@ -56,8 +57,23 @@ function writeJSON(key: string, value: unknown) {
 /** Map a location hash to a page, or null when it is not a page route. */
 function hashToPage(hash: string): PageId | null {
   const clean = hash.replace(/^#\/?/, '')
+  // Support deep links like #/view/ABCDE -> view page.
+  if (clean === 'view' || clean.startsWith('view/')) return 'view'
   const found = NAV.find((p) => p.hash.replace(/^#\/?/, '') === clean)
   return found ? found.id : null
+}
+
+/** Extract a 5-char token from #/view/ABCDE or ?token=ABCDE. */
+function hashToViewToken(hash: string): string | null {
+  const m = hash.match(/^#\/view\/([A-Za-z0-9]{0,5})/)
+  if (m?.[1] && /^[A-Za-z0-9]{5}$/.test(m[1])) return m[1].toUpperCase()
+  try {
+    const q = new URLSearchParams(window.location.search).get('token')
+    if (q && /^[A-Za-z0-9]{5}$/.test(q)) return q.toUpperCase()
+  } catch {
+    // URL parsing unavailable — ignore.
+  }
+  return null
 }
 
 function useIsMobile(breakpoint = 768): boolean {
@@ -331,6 +347,7 @@ function ActiveSession({
   const [lines, setLines] = useState<string[]>([])
   const [draft, setDraft] = useState('')
   const [agentOnline, setAgentOnline] = useState(false)
+  const [hasUi, setHasUi] = useState(false)
   const wsRef = useRef<WebSocket | null>(null)
   const logRef = useRef<HTMLDivElement | null>(null)
 
@@ -356,15 +373,30 @@ function ActiveSession({
           agent?: boolean
           online?: boolean
           data?: unknown
+          hasUi?: boolean
+          size?: number
         }
         if (msg?.type === 'paired' || msg?.type === 'registered') {
           push(msg.agent ? 'paired — agent online' : 'paired — waiting for agent …')
           setAgentOnline(msg.agent === true)
+          if (msg.hasUi === true) {
+            setHasUi(true)
+            push(`agent UI ready (${msg.size ?? '?'} bytes) — open View for fullscreen`)
+          }
           return
         }
         if (msg?.type === 'agent') {
           push(msg.online ? 'agent online' : 'agent offline')
           setAgentOnline(msg.online === true)
+          return
+        }
+        if (msg?.type === 'ui-ready') {
+          setHasUi(true)
+          push(`agent UI ready (${msg.size ?? '?'} bytes) — open View for fullscreen`)
+          return
+        }
+        if (msg?.type === 'ui-pending') {
+          push('agent UI uploading …')
           return
         }
         if (msg?.type === 'pong') return
@@ -422,11 +454,40 @@ function ActiveSession({
         </h2>
         <div className="row-actions">
           <StatusTag online={agentOnline} />
+          {hasUi && (
+            <a className="btn btn-sm btn-primary" href={`#/view/${token}`}>
+              Fullscreen UI
+            </a>
+          )}
           <button type="button" className="btn btn-sm" onClick={onBack}>
             Back
           </button>
         </div>
       </div>
+      {hasUi && (
+        <div className="banner-ui" role="status">
+          <p>
+            Agent pushed its full UI ({' '}
+            <a href={`/v/${token}`} target="_blank" rel="noreferrer">
+              /v/{token}
+            </a>{' '}
+            ). Open it fullscreen:
+          </p>
+          <div className="row-actions">
+            <a className="btn btn-sm btn-primary" href={`#/view/${token}`}>
+              Open fullscreen
+            </a>
+            <a
+              className="btn btn-sm"
+              href={`/v/${token}`}
+              target="_blank"
+              rel="noreferrer"
+            >
+              Open raw /v/{token}
+            </a>
+          </div>
+        </div>
+      )}
       {!agentOnline && (
         <>
           <p>Waiting for the agent. On the machine, run:</p>
