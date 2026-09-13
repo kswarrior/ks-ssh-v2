@@ -503,7 +503,6 @@ function RelayCard() {
     ws.onclose = () => {
       if (wsRef.current !== ws) return
       wsRef.current = null
-      setAgentOnline(false)
       setStatus((s) => {
         if (s === 'connected') {
           setError('Relay closed by the agent.')

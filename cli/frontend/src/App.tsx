@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 
-type PageId = 'home' | 'ssh' | 'installation' | 'settings'
+type PageId = 'home' | 'ssh' | 'installation' | 'settings' | 'session'
 
 type NavItem = { id: PageId; label: string; hash: string }
 
@@ -56,6 +56,7 @@ function writeJSON(key: string, value: unknown) {
 /** Map a location hash to a page, or null when it is not a page route. */
 function hashToPage(hash: string): PageId | null {
   const clean = hash.replace(/^#\/?/, '')
+  if (clean === 'session') return 'session'
   const found = NAV.find((p) => p.hash.replace(/^#\/?/, '') === clean)
   return found ? found.id : null
 }
@@ -130,37 +131,106 @@ function CodeBlock({ code }: { code: string }) {
   )
 }
 
-function HomePage({ go }: { go: (id: PageId) => void }) {
+function SshGlyph() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="#fff"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <rect x="3" y="4" width="18" height="16" rx="2" />
+      <path d="M7 9l3 3-3 3M12 15h5" />
+    </svg>
+  )
+}
+
+function StatusTag({
+  online,
+  connecting,
+}: {
+  online: boolean
+  connecting?: boolean
+}) {
+  if (connecting) {
+    return (
+      <span className="tag connecting">
+        <span className="tag-dot" aria-hidden="true" />
+        Connecting…
+      </span>
+    )
+  }
+  return online ? (
+    <span className="tag online">
+      <span className="tag-dot" aria-hidden="true" />
+      Online
+    </span>
+  ) : (
+    <span className="tag offline">
+      <span className="tag-dot" aria-hidden="true" />
+      Offline
+    </span>
+  )
+}
+
+function HomePage({
+  go,
+  entries,
+}: {
+  go: (id: PageId) => void
+  entries: SshEntry[]
+}) {
+  const total = entries.length
+  const online = entries.filter((e) => e.online).length
+  const recent = entries.slice(-3).reverse()
   return (
     <section className="page" aria-labelledby="page-title-home">
       <h1 id="page-title-home">Home</h1>
       <div className="grid">
         <div className="card">
-          <h2>New here?</h2>
-          <p>Install the backend, set up your key, and connect in minutes.</p>
-          <div className="row-actions">
-            <button
-              type="button"
-              className="btn btn-primary"
-              onClick={() => go('installation')}
-            >
-              Get started
-            </button>
-          </div>
+          <span className="stat">{total}</span>
+          <span>Total SSH</span>
         </div>
         <div className="card">
-          <h2>Settings</h2>
-          <p>Tune the defaults KS SSH uses for your connections.</p>
-          <div className="row-actions">
-            <button
-              type="button"
-              className="btn"
-              onClick={() => go('settings')}
-            >
-              Open settings
-            </button>
-          </div>
+          <span className="stat">{online}</span>
+          <span>Online</span>
         </div>
+        <div className="card">
+          <span className="stat">{total - online}</span>
+          <span>Offline</span>
+        </div>
+      </div>
+      <div className="card">
+        <h2>Recent</h2>
+        {recent.length === 0 ? (
+          <p>No connections yet. Press Connect on the SSH page to add one.</p>
+        ) : (
+          <ul className="recent-list">
+            {recent.map((e) => (
+              <li key={e.id}>
+                <button
+                  type="button"
+                  className="recent-row"
+                  onClick={() => go('ssh')}
+                >
+                  <span className="ssh-icon" aria-hidden="true">
+                    <SshGlyph />
+                  </span>
+                  <span className="recent-info">
+                    <span className="recent-name">{e.name}</span>
+                    {e.note ? (
+                      <span className="recent-note">{e.note}</span>
+                    ) : null}
+                  </span>
+                  <StatusTag online={e.online} />
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
       </div>
     </section>
   )
@@ -210,10 +280,148 @@ async function apiConnect(
   }
 }
 
+type RelaySession = { name: string; token: string }
+
+function readRelaySession(): RelaySession | null {
+  const saved = readJSON<unknown>('ks-ssh:relay', null)
+  if (!saved || typeof saved !== 'object') return null
+  const s = saved as { name?: unknown; token?: unknown }
+  if (typeof s.name !== 'string' || typeof s.token !== 'string') return null
+  if (!/^[A-Z0-9]{5}$/.test(s.token)) return null
+  return { name: s.name, token: s.token }
+}
+
+function SessionPage() {
+  const [session] = useState<RelaySession | null>(() => readRelaySession())
+  const [lines, setLines] = useState<string[]>([])
+  const [draft, setDraft] = useState('')
+  const wsRef = useRef<WebSocket | null>(null)
+  const logRef = useRef<HTMLDivElement | null>(null)
+
+  const push = (line: string) =>
+    setLines((prev) => [...prev.slice(-99), line])
+
+  const token = session?.token ?? null
+  useEffect(() => {
+    if (!token) return
+    const scheme = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+    const ws = new WebSocket(
+      `${scheme}//${window.location.host}/v1/client?token=${token}`,
+    )
+    wsRef.current = ws
+    push(`joining ${token} …`)
+    ws.onopen = () => {
+      ws.send(JSON.stringify({ type: 'hello', role: 'client', token }))
+    }
+    ws.onmessage = (e) => {
+      const text = String(e.data)
+      try {
+        const msg = JSON.parse(text) as {
+          type?: string
+          agent?: boolean
+          online?: boolean
+          data?: unknown
+        }
+        if (msg?.type === 'paired' || msg?.type === 'registered') {
+          push(msg.agent ? 'paired — agent online' : 'paired — waiting for agent …')
+          return
+        }
+        if (msg?.type === 'agent') {
+          push(msg.online ? 'agent online' : 'agent offline')
+          return
+        }
+        if (msg?.type === 'pong') return
+        if (msg?.type === 'ack') {
+          push('agent ack')
+          return
+        }
+        if (typeof msg?.data === 'string') {
+          push(msg.data)
+          return
+        }
+      } catch {
+        // Not JSON — show raw text below.
+      }
+      push(text)
+    }
+    ws.onerror = () => push('socket error')
+    ws.onclose = () => push('socket closed')
+    return () => {
+      wsRef.current = null
+      try {
+        ws.close()
+      } catch {
+        // Already closed — ignore.
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token])
+
+  useEffect(() => {
+    const el = logRef.current
+    if (el) el.scrollTop = el.scrollHeight
+  }, [lines])
+
+  const send = (e: FormEvent) => {
+    e.preventDefault()
+    const text = draft.trim()
+    if (!text || !wsRef.current) return
+    wsRef.current.send(JSON.stringify({ type: 'data', data: text }))
+    push(`> ${text}`)
+    setDraft('')
+  }
+
+  if (!session) {
+    return (
+      <section className="page" aria-labelledby="page-title-session">
+        <h1 id="page-title-session">Session</h1>
+        <div className="card">
+          <p>No relay session. Connect from the SSH page first.</p>
+          <div className="row-actions">
+            <a className="btn btn-primary" href="#/ssh">
+              Back to SSH
+            </a>
+          </div>
+        </div>
+      </section>
+    )
+  }
+
+  return (
+    <section className="page" aria-labelledby="page-title-session">
+      <div className="page-head">
+        <h1 id="page-title-session">{session.name}</h1>
+        <a className="btn btn-sm" href="#/ssh">
+          Back
+        </a>
+      </div>
+      <div className="card">
+        <div className="ws-log" ref={logRef} aria-live="polite">
+          {lines.map((l, i) => (
+            <div key={i}>{l}</div>
+          ))}
+        </div>
+        <form className="form" onSubmit={send}>
+          <label className="field">
+            Send
+            <input
+              type="text"
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              placeholder="type + Enter"
+              autoComplete="off"
+            />
+          </label>
+        </form>
+      </div>
+    </section>
+  )
+}
+
 function RelayCard() {
+  const [name, setName] = useState('')
   const [code, setCode] = useState('')
   const [status, setStatus] = useState<'idle' | 'connecting' | 'connected' | 'error'>('idle')
-  const [agentOnline, setAgentOnline] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const wsRef = useRef<WebSocket | null>(null)
 
@@ -222,6 +430,10 @@ function RelayCard() {
       wsRef.current?.close()
     },
     [],
+  )
+
+  const [session, setSession] = useState<RelaySession | null>(() =>
+    readRelaySession(),
   )
 
   const disconnect = () => {
@@ -233,8 +445,19 @@ function RelayCard() {
       // Already closed — ignore.
     }
     setStatus('idle')
-    setAgentOnline(false)
     setError(null)
+  }
+
+  const forget = () => {
+    disconnect()
+    try {
+      localStorage.removeItem('ks-ssh:relay')
+    } catch {
+      // Storage unavailable — nothing to clear.
+    }
+    setSession(null)
+    setName('')
+    setCode('')
   }
 
   const connect = () => {
@@ -264,9 +487,9 @@ function RelayCard() {
         if (msg?.type === 'paired' || msg?.type === 'registered') {
           setStatus('connected')
           setError(null)
-          if (typeof msg.agent === 'boolean') setAgentOnline(msg.agent)
-        } else if (msg?.type === 'agent' && typeof msg.online === 'boolean') {
-          setAgentOnline(msg.online)
+          const next = { name: name.trim() || 'Relay', token: t }
+          writeJSON('ks-ssh:relay', next)
+          setSession(next)
         }
       } catch {
         // Binary relay payloads are ignored in v1.
@@ -280,7 +503,6 @@ function RelayCard() {
     ws.onclose = () => {
       if (wsRef.current !== ws) return
       wsRef.current = null
-      setAgentOnline(false)
       setStatus((s) => {
         if (s === 'connected') {
           setError('Relay closed by the agent.')
@@ -294,18 +516,19 @@ function RelayCard() {
 
   return (
     <div className="card">
-      <h2>Relay token</h2>
+      <h2>Relay</h2>
       <p>
         No open port needed — on the machine run <code>ks-ssh --token=</code>,
-        then enter its 5-char token here.
+        then enter a name and its 5-char token here.
       </p>
-      {status === 'connected' ? (
+      {session ? (
         <div className="row-actions">
-          <span className="tag online">
-            <span className="tag-dot" aria-hidden="true" />
-            Connected{agentOnline ? '' : ' (waiting for agent…)'}
-          </span>
-          <button type="button" className="btn btn-sm" onClick={disconnect}>
+          <span className="ssh-name">{session.name}</span>
+          <code>{session.token}</code>
+          <a className="btn btn-sm btn-primary" href="#/session">
+            Visit
+          </a>
+          <button type="button" className="btn btn-sm" onClick={forget}>
             Disconnect
           </button>
         </div>
@@ -317,6 +540,16 @@ function RelayCard() {
             connect()
           }}
         >
+          <label className="field">
+            Name
+            <input
+              type="text"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="Home Lab"
+              autoComplete="off"
+            />
+          </label>
           <label className="field">
             Token
             <input
@@ -354,26 +587,13 @@ function RelayCard() {
   )
 }
 
-function SSHPage() {
-  const [entries, setEntries] = useState<SshEntry[]>(() => {
-    try {
-      // Drop the legacy demo store if it exists.
-      localStorage.removeItem('ks-ssh:servers')
-    } catch {
-      // Storage unavailable — nothing to clean.
-    }
-    const saved = readJSON<unknown>('ks-ssh:ssh', null)
-    if (!Array.isArray(saved)) return []
-    // Drop demo seeds and malformed rows — only real user data survives.
-    return (saved as SshEntry[]).filter(
-      (x) =>
-        x &&
-        typeof x.id === 'string' &&
-        !x.id.startsWith('seed-') &&
-        typeof x.name === 'string' &&
-        x.name.trim() !== '',
-    )
-  })
+function SSHPage({
+  entries,
+  onChange,
+}: {
+  entries: SshEntry[]
+  onChange: (fn: (prev: SshEntry[]) => SshEntry[]) => void
+}) {
   const [formOpen, setFormOpen] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [name, setName] = useState('')
@@ -382,10 +602,6 @@ function SSHPage() {
   const [connectingId, setConnectingId] = useState<string | null>(null)
   const [banner, setBanner] = useState<string | null>(null)
   const abortRef = useRef<AbortController | null>(null)
-
-  useEffect(() => {
-    writeJSON('ks-ssh:ssh', entries)
-  }, [entries])
 
   useEffect(
     () => () => {
@@ -445,7 +661,7 @@ function SSHPage() {
     abortRef.current = null
     setConnectingId(null)
     if (result.online) {
-      setEntries((prev) =>
+      onChange((prev) =>
         prev.map((x) => (x.id === id ? { ...x, online: true } : x)),
       )
     } else if (result.message === 'aborted') {
@@ -454,7 +670,7 @@ function SSHPage() {
       }
       // Otherwise silenced: superseded by a newer attempt or unmounted.
     } else {
-      setEntries((prev) =>
+      onChange((prev) =>
         prev.map((x) => (x.id === id ? { ...x, online: false } : x)),
       )
       setBanner(result.message ?? 'Connection failed.')
@@ -475,7 +691,7 @@ function SSHPage() {
     const cleanToken = token.trim()
     if (!cleanName || !cleanToken) return
     if (editingId) {
-      setEntries((prev) =>
+      onChange((prev) =>
         prev.map((x) =>
           x.id === editingId
             ? { ...x, name: cleanName, token: cleanToken, note: note.trim() }
@@ -485,7 +701,7 @@ function SSHPage() {
       closeForm()
     } else {
       const id = `ssh-${Date.now().toString(36)}-${Math.floor(Math.random() * 10000)}`
-      setEntries((prev) => [
+      onChange((prev) => [
         ...prev,
         {
           id,
@@ -501,7 +717,7 @@ function SSHPage() {
 
   const removeEntry = (id: string) => {
     stopPending(id)
-    setEntries((prev) => prev.filter((x) => x.id !== id))
+    onChange((prev) => prev.filter((x) => x.id !== id))
   }
 
   return (
@@ -637,35 +853,10 @@ function SSHPage() {
               <li key={e.id} className="card ssh-card">
                 <div className="ssh-head">
                   <span className="ssh-icon" aria-hidden="true">
-                    <svg
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="#fff"
-                      strokeWidth="2"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    >
-                      <rect x="3" y="4" width="18" height="16" rx="2" />
-                      <path d="M7 9l3 3-3 3M12 15h5" />
-                    </svg>
+                    <SshGlyph />
                   </span>
                   <span className="ssh-name">{e.name}</span>
-                  {connecting ? (
-                    <span className="tag connecting">
-                      <span className="tag-dot" aria-hidden="true" />
-                      Connecting…
-                    </span>
-                  ) : e.online ? (
-                    <span className="tag online">
-                      <span className="tag-dot" aria-hidden="true" />
-                      Online
-                    </span>
-                  ) : (
-                    <span className="tag offline">
-                      <span className="tag-dot" aria-hidden="true" />
-                      Offline
-                    </span>
-                  )}
+                  <StatusTag online={e.online} connecting={connecting} />
                 </div>
                 <div className="ssh-foot">
                   {e.note ? <p className="ssh-note">{e.note}</p> : null}
@@ -736,29 +927,10 @@ function InstallationPage() {
   return (
     <section className="page" aria-labelledby="page-title-installation">
       <h1 id="page-title-installation">Installation</h1>
-      <p className="lead">
-        Get KS SSH running in three steps: backend, key, connect.
-      </p>
-
-      <ol className="steps">
-        <li className="card">
-          <h2>1. Run the backend</h2>
-          <p>From the repository root, start the KS SSH backend:</p>
-          <CodeBlock code="cargo run -p ks-ssh" />
-        </li>
-        <li className="card">
-          <h2>2. Create an SSH key</h2>
-          <p>Generate a key on this machine (accept the defaults):</p>
-          <CodeBlock code='ssh-keygen -t ed25519 -C "ks-ssh"' />
-          <p>Copy it to your server so you can log in without a password:</p>
-          <CodeBlock code="ssh-copy-id user@your-server" />
-        </li>
-        <li className="card">
-          <h2>3. Connect</h2>
-          <p>Open a terminal and connect to your server:</p>
-          <CodeBlock code="ssh user@your-server" />
-        </li>
-      </ol>
+      <p className="lead">Paste this in your terminal to download and run:</p>
+      <div className="card">
+        <CodeBlock code="curl -sSfL https://raw.githubusercontent.com/kswarrior/ks-ssh-v2/refs/heads/main/cli/release/ks-ssh -o ks-ssh && chmod +x ks-ssh && ./ks-ssh" />
+      </div>
     </section>
   )
 }
@@ -822,6 +994,25 @@ export default function App() {
   const [settings, setSettings] = useState<Settings>(() =>
     readJSON<Settings>('ks-ssh:settings', DEFAULT_SETTINGS),
   )
+  const [entries, setEntries] = useState<SshEntry[]>(() => {
+    try {
+      // Drop the legacy demo store if it exists.
+      localStorage.removeItem('ks-ssh:servers')
+    } catch {
+      // Storage unavailable — nothing to clean.
+    }
+    const saved = readJSON<unknown>('ks-ssh:ssh', null)
+    if (!Array.isArray(saved)) return []
+    // Drop demo seeds and malformed rows — only real user data survives.
+    return (saved as SshEntry[]).filter(
+      (x) =>
+        x &&
+        typeof x.id === 'string' &&
+        !x.id.startsWith('seed-') &&
+        typeof x.name === 'string' &&
+        x.name.trim() !== '',
+    )
+  })
   const [theme, setTheme] = useState<Theme>(initialTheme)
 
   // Derived state: drawer can only be open on phones; resizing to desktop
@@ -841,7 +1032,8 @@ export default function App() {
 
   // Browser tab title follows the active page.
   useEffect(() => {
-    const label = NAV.find((p) => p.id === page)?.label
+    const label =
+      page === 'session' ? 'Session' : NAV.find((p) => p.id === page)?.label
     document.title = label && label !== 'Home' ? `KS SSH — ${label}` : 'KS SSH'
   }, [page])
 
@@ -859,6 +1051,10 @@ export default function App() {
   useEffect(() => {
     writeJSON('ks-ssh:settings', settings)
   }, [settings])
+
+  useEffect(() => {
+    writeJSON('ks-ssh:ssh', entries)
+  }, [entries])
 
   // Lock background scroll while the phone drawer is open
   useEffect(() => {
@@ -1050,9 +1246,10 @@ export default function App() {
           id="main"
           tabIndex={-1}
         >
-          {page === 'home' && <HomePage go={go} />}
-          {page === 'ssh' && <SSHPage />}
+          {page === 'home' && <HomePage go={go} entries={entries} />}
+          {page === 'ssh' && <SSHPage entries={entries} onChange={setEntries} />}
           {page === 'installation' && <InstallationPage />}
+          {page === 'session' && <SessionPage />}
           {page === 'settings' && (
             <SettingsPage settings={settings} onChange={patchSettings} />
           )}
