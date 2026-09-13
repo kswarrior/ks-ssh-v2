@@ -210,6 +210,150 @@ async function apiConnect(
   }
 }
 
+function RelayCard() {
+  const [code, setCode] = useState('')
+  const [status, setStatus] = useState<'idle' | 'connecting' | 'connected' | 'error'>('idle')
+  const [agentOnline, setAgentOnline] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const wsRef = useRef<WebSocket | null>(null)
+
+  useEffect(
+    () => () => {
+      wsRef.current?.close()
+    },
+    [],
+  )
+
+  const disconnect = () => {
+    const ws = wsRef.current
+    wsRef.current = null
+    try {
+      ws?.close()
+    } catch {
+      // Already closed — ignore.
+    }
+    setStatus('idle')
+    setAgentOnline(false)
+    setError(null)
+  }
+
+  const connect = () => {
+    const t = code.trim().toUpperCase()
+    if (!/^[A-Z0-9]{5}$/.test(t)) {
+      setError('Token is 5 letters/numbers — run `ks-ssh --token=` to get one.')
+      return
+    }
+    disconnect()
+    setError(null)
+    setStatus('connecting')
+    const scheme = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+    const ws = new WebSocket(
+      `${scheme}//${window.location.host}/v1/client?token=${t}`,
+    )
+    wsRef.current = ws
+    ws.onopen = () => {
+      ws.send(JSON.stringify({ type: 'hello', role: 'client', token: t }))
+    }
+    ws.onmessage = (e) => {
+      try {
+        const msg = JSON.parse(String(e.data)) as {
+          type?: string
+          agent?: boolean
+          online?: boolean
+        }
+        if (msg?.type === 'paired' || msg?.type === 'registered') {
+          setStatus('connected')
+          setError(null)
+          if (typeof msg.agent === 'boolean') setAgentOnline(msg.agent)
+        } else if (msg?.type === 'agent' && typeof msg.online === 'boolean') {
+          setAgentOnline(msg.online)
+        }
+      } catch {
+        // Binary relay payloads are ignored in v1.
+      }
+    }
+    ws.onerror = () => {
+      if (wsRef.current !== ws) return
+      setStatus('error')
+      setError('Relay connection failed. Is the Worker deployed with WSS support?')
+    }
+    ws.onclose = () => {
+      if (wsRef.current !== ws) return
+      wsRef.current = null
+      setAgentOnline(false)
+      setStatus((s) => {
+        if (s === 'connected') {
+          setError('Relay closed by the agent.')
+          return 'idle'
+        }
+        setError((prev) => prev ?? 'Relay closed before pairing.')
+        return 'error'
+      })
+    }
+  }
+
+  return (
+    <div className="card">
+      <h2>Relay token</h2>
+      <p>
+        No open port needed — on the machine run <code>ks-ssh --token=</code>,
+        then enter its 5-char token here.
+      </p>
+      {status === 'connected' ? (
+        <div className="row-actions">
+          <span className="tag online">
+            <span className="tag-dot" aria-hidden="true" />
+            Connected{agentOnline ? '' : ' (waiting for agent…)'}
+          </span>
+          <button type="button" className="btn btn-sm" onClick={disconnect}>
+            Disconnect
+          </button>
+        </div>
+      ) : (
+        <form
+          className="form"
+          onSubmit={(e) => {
+            e.preventDefault()
+            connect()
+          }}
+        >
+          <label className="field">
+            Token
+            <input
+              type="text"
+              value={code}
+              onChange={(e) => setCode(e.target.value.toUpperCase().slice(0, 5))}
+              placeholder="A3K9Q"
+              autoComplete="off"
+              inputMode="text"
+              maxLength={5}
+            />
+          </label>
+          <div className="row-actions">
+            <button
+              type="submit"
+              className="btn btn-primary"
+              disabled={status === 'connecting'}
+            >
+              {status === 'connecting' ? 'Connecting…' : 'Connect via relay'}
+            </button>
+            {status === 'connecting' && (
+              <button type="button" className="btn" onClick={disconnect}>
+                Cancel
+              </button>
+            )}
+          </div>
+        </form>
+      )}
+      {status === 'error' && error && (
+        <div className="banner-error" role="alert">
+          <p>{error}</p>
+        </div>
+      )}
+    </div>
+  )
+}
+
 function SSHPage() {
   const [entries, setEntries] = useState<SshEntry[]>(() => {
     try {
@@ -408,10 +552,11 @@ function SSHPage() {
         </div>
       )}
 
+      <RelayCard />
+
       {formOpen && (
         <div className="card">
-          <h2>{editingId ? 'Edit connection' : 'New connection'}</h2>
-          <form className="form" onSubmit={submit}>
+          <h2>{editingId ? 'Edit connection' : 'New connection'}</h2>          <form className="form" onSubmit={submit}>
             <label className="field">
               Name
               <input
