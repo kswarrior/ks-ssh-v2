@@ -76,6 +76,16 @@ export default function FilesPage() {
   const [createBusy, setCreateBusy] = useState(false)
   const [createError, setCreateError] = useState<string | null>(null)
   const createInputRef = useRef<HTMLInputElement | null>(null)
+  // Upload dialog state.
+  const [uploading, setUploading] = useState<null | 'local' | 'url'>(null)
+  const [uploadFiles, setUploadFiles] = useState<File[]>([])
+  const [uploadUrl, setUploadUrl] = useState('')
+  const [uploadName, setUploadName] = useState('')
+  const [uploadBusy, setUploadBusy] = useState(false)
+  const [uploadError, setUploadError] = useState<string | null>(null)
+  const [uploadDone, setUploadDone] = useState<string[]>([])
+  const [uploadProgress, setUploadProgress] = useState('')
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
 
   const load = useCallback(async (path?: string) => {
     setLoading(true)
@@ -159,6 +169,16 @@ export default function FilesPage() {
       document.removeEventListener('keydown', onKey)
     }
   }, [creating, createBusy])
+
+  // Escape closes the upload dialog (when idle).
+  useEffect(() => {
+    if (!uploading) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && !uploadBusy) setUploading(null)
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [uploading, uploadBusy])
 
   const visible = (data?.entries ?? []).filter(
     (e) => showHidden || !e.name.startsWith('.'),
@@ -307,6 +327,86 @@ export default function FilesPage() {
     setCreating('file')
   }
 
+  const openUpload = () => {
+    setUploadFiles([])
+    setUploadUrl('')
+    setUploadName('')
+    setUploadError(null)
+    setUploadDone([])
+    setUploadProgress('')
+    setUploading('local')
+  }
+
+  const submitLocalUpload = async () => {
+    if (!data || uploadFiles.length === 0) return
+    setUploadBusy(true)
+    setUploadError(null)
+    setUploadDone([])
+    const done: string[] = []
+    const failed: string[] = []
+    for (const f of uploadFiles) {
+      setUploadProgress(`Uploading ${f.name} (${done.length + 1}/${uploadFiles.length})…`)
+      try {
+        const res = await fetch(
+          `/api/files/upload?dir=${encodeURIComponent(data.path)}&name=${encodeURIComponent(f.name)}`,
+          { method: 'POST', body: f },
+        )
+        if (!res.ok) {
+          const text = await res.text().catch(() => '')
+          throw new Error(text || `upload failed (${res.status})`)
+        }
+        done.push(f.name)
+      } catch (err) {
+        failed.push(`${f.name}: ${err instanceof Error ? err.message : 'failed'}`)
+      }
+    }
+    setUploadDone(done)
+    setUploadProgress('')
+    setUploadBusy(false)
+    await load(data.path)
+    if (failed.length > 0) {
+      setUploadError(failed.join('\n'))
+    } else {
+      setUploadFiles([])
+      if (fileInputRef.current) fileInputRef.current.value = ''
+    }
+  }
+
+  const submitUrlUpload = async () => {
+    const url = uploadUrl.trim()
+    if (!data || !url) return
+    setUploadBusy(true)
+    setUploadError(null)
+    setUploadDone([])
+    setUploadProgress(`Fetching…`)
+    try {
+      const res = await fetch('/api/files/upload-url', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          dir: data.path,
+          url,
+          name: uploadName.trim() || undefined,
+        }),
+      })
+      if (!res.ok) {
+        const text = await res.text().catch(() => '')
+        throw new Error(text || `fetch failed (${res.status})`)
+      }
+      const json = (await res.json()) as { path?: string }
+      const saved = json.path?.split('/').pop() ?? url
+      setUploadDone([saved])
+      setUploadUrl('')
+      setUploadName('')
+      await load(data.path)
+    } catch (err) {
+      setUploadError(err instanceof Error ? err.message : 'Fetch failed.')
+    } finally {
+      setUploadBusy(false)
+      setUploadProgress('')
+    }
+  }
+
   const createNameValid = (() => {
     const n = createName.trim()
     if (!n || n === '.' || n === '..') return false
@@ -383,6 +483,15 @@ export default function FilesPage() {
             title="Create a file or folder here"
           >
             Create
+          </button>
+          <button
+            type="button"
+            className="btn btn-sm"
+            onClick={openUpload}
+            disabled={loading || busy || !!error || !data}
+            title="Upload files or fetch a URL here"
+          >
+            Upload
           </button>
           <button
             type="button"

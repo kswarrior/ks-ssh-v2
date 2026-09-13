@@ -800,6 +800,44 @@ mod tests {
     }
 
     #[test]
+    fn upload_url_validation() {
+        assert!(valid_upload_url("https://example.com/file.zip"));
+        assert!(valid_upload_url("http://example.com/a/b?q=1"));
+        assert!(!valid_upload_url("file:///etc/passwd"));
+        assert!(!valid_upload_url("ftp://example.com/x"));
+        assert!(!valid_upload_url("https://no dot"));
+        assert!(!valid_upload_url("javascript:alert(1)"));
+        assert_eq!(filename_from_url("https://example.com/a/my%20file.zip?v=2"), "my file.zip");
+        assert_eq!(filename_from_url("https://example.com/"), "download");
+    }
+
+    #[tokio::test]
+    async fn upload_roundtrip_inside_home() {
+        use axum::body::Bytes;
+        let home = home_dir();
+        let dir = home.join(format!(".ks-ssh-test-upload-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("test dir");
+        let q = UploadQuery {
+            dir: dir.to_string_lossy().to_string(),
+            name: "up.txt".to_string(),
+        };
+        let res = api_upload_file(Query(q), Bytes::from("hello upload")).await;
+        // 200 OK — easiest assertion without draining the body type.
+        let res = res.into_response();
+        assert_eq!(res.status(), StatusCode::OK);
+        assert_eq!(std::fs::read(dir.join("up.txt")).expect("written"), b"hello upload");
+        // Duplicate name is refused.
+        let q2 = UploadQuery {
+            dir: dir.to_string_lossy().to_string(),
+            name: "up.txt".to_string(),
+        };
+        let res2 = api_upload_file(Query(q2), Bytes::from("again")).await.into_response();
+        assert_eq!(res2.status(), StatusCode::CONFLICT);
+        std::fs::remove_dir_all(&dir).expect("cleanup");
+    }
+
+    #[test]
     fn mkdir_roundtrip_inside_home() {
         let home = home_dir();
         let dir = home.join(format!(".ks-ssh-test-mkdir-{}", std::process::id()));
