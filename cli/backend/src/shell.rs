@@ -48,11 +48,13 @@ fn spawn_shell(
     // for most shells — fall back to plain spawn when it fails.
     cmd.args(["-i"]);
     cmd.env("TERM", "xterm-256color");
+    cmd.env("COLORTERM", "truecolor");
     cmd.env("KS_SSH", "1");
-    if let Ok(home) = std::env::var("HOME") {
-        if !home.trim().is_empty() {
-            cmd.cwd(home);
-        }
+    if let Ok(home) = std::env::var("HOME")
+        && !home.trim().is_empty()
+        && std::path::Path::new(&home).is_dir()
+    {
+        cmd.cwd(home);
     }
 
     let child = match pair.slave.spawn_command(cmd) {
@@ -65,6 +67,53 @@ fn spawn_shell(
         }
     };
     Ok((pair.master, child))
+}
+
+/// Decode PTY bytes to text, holding an incomplete UTF-8 tail in `carry`
+/// for the next read. Invalid sequences become U+FFFD; only a truncated
+/// sequence at the very end is deferred.
+fn decode_with_carry(data: &mut Vec<u8>, carry: &mut Vec<u8>) -> String {
+    let mut out = String::with_capacity(data.len());
+    let mut start = 0;
+    loop {
+        match std::str::from_utf8(&data[start..]) {
+            Ok(s) => {
+                out.push_str(s);
+                carry.clear();
+                break;
+            }
+            Err(e) => {
+                let valid_up_to = e.valid_up_to();
+                if valid_up_to > 0 {
+                    // Valid prefix before the problem — emit it.
+                    // SAFETY: valid_up_to is a valid UTF-8 boundary by contract.
+                    let s = unsafe {
+                        std::str::from_utf8_unchecked(&data[start..start + valid_up_to])
+                    };
+                    out.push_str(s);
+                    start += valid_up_to;
+                    continue;
+                }
+                match e.error_len() {
+                    Some(len) => {
+                        // Genuinely invalid bytes — replace, skip, continue.
+                        out.push('\u{FFFD}');
+                        start += len;
+                        if start >= data.len() {
+                            carry.clear();
+                            break;
+                        }
+                    }
+                    None => {
+                        // Truncated multi-byte rune at the end — defer.
+                        *carry = data[start..].to_vec();
+                        break;
+                    }
+                }
+            }
+        }
+    }
+    out
 }
 
 async fn handle_socket(socket: WebSocket) {
@@ -83,9 +132,11 @@ async fn handle_socket(socket: WebSocket) {
     // closed must never leave an orphaned bash behind.
     let child = std::sync::Arc::new(std::sync::Mutex::new(Some(child)));
 
-    // PTY reader runs on a blocking thread, pushes bytes through a
+    // PTY reader runs on a blocking thread, pushes decoded text through a
     // bounded channel. `blocking_send` applies backpressure into the PTY
     // so `cat` on a huge file slows the reader instead of OOMing us.
+    // Decoding happens here with a carry-over tail so a multi-byte UTF-8
+    // rune split across two 8KB reads is never replaced with U+FFFD.
     let mut reader = match master.try_clone_reader() {
         Ok(r) => r,
         Err(e) => {
@@ -95,23 +146,33 @@ async fn handle_socket(socket: WebSocket) {
             return;
         }
     };
-    let (out_tx, mut out_rx) = tokio::sync::mpsc::channel::<Vec<u8>>(64);
+    let (out_tx, mut out_rx) = tokio::sync::mpsc::channel::<String>(64);
     std::thread::spawn(move || {
         let mut buf = [0u8; 8192];
+        let mut carry: Vec<u8> = Vec::new();
         loop {
             match reader.read(&mut buf) {
                 Ok(0) => break,
                 Ok(n) => {
-                    if out_tx.blocking_send(buf[..n].to_vec()).is_err() {
+                    let mut data = std::mem::take(&mut carry);
+                    data.extend_from_slice(&buf[..n]);
+                    let text = decode_with_carry(&mut data, &mut carry);
+                    if !text.is_empty() && out_tx.blocking_send(text).is_err() {
                         break;
                     }
                 }
                 Err(_) => break,
             }
         }
+        // Flush any leftover tail as lossy (shell is gone; don't lose bytes).
+        if !carry.is_empty() {
+            let tail = String::from_utf8_lossy(&carry).into_owned();
+            let _ = out_tx.blocking_send(tail);
+        }
     });
 
-    // PTY writer lives behind a mutex so the WS loop can write from async.
+    // PTY writer lives on its own blocking thread so big pastes never
+    // stall the tokio executor. The WS loop just queues bytes.
     let writer = match master.take_writer() {
         Ok(w) => w,
         Err(e) => {
@@ -121,8 +182,16 @@ async fn handle_socket(socket: WebSocket) {
             return;
         }
     };
-    let writer = std::sync::Arc::new(tokio::sync::Mutex::new(writer));
-    let writer_clone = writer.clone();
+    let (in_tx, in_rx) = tokio::sync::mpsc::channel::<Vec<u8>>(128);
+    std::thread::spawn(move || {
+        let mut w = writer;
+        let mut rx = in_rx;
+        use std::io::Write as _;
+        while let Some(data) = rx.blocking_recv() {
+            let _ = w.write_all(&data);
+            let _ = w.flush();
+        }
+    });
 
     // Watch child exit (polled — lets the session end kill the shell
     // through the same handle instead of leaking it).
