@@ -32,6 +32,17 @@ pub struct RenameBody {
     pub to: String,
 }
 
+#[derive(Deserialize)]
+pub struct SaveBody {
+    pub path: String,
+    pub content: String,
+}
+
+/// Max bytes returned by the content endpoint (editor is for small text files).
+pub const READ_MAX_BYTES: u64 = 1024 * 1024;
+/// Max bytes accepted by the save endpoint.
+pub const SAVE_MAX_BYTES: usize = 5 * 1024 * 1024;
+
 #[derive(Serialize)]
 pub struct FileEntry {
     pub name: String,
@@ -320,6 +331,113 @@ pub async fn api_rename_file(Json(b): Json<RenameBody>) -> Response {
         Err(e) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             format!("cannot rename {}: {e}", from.display()),
+        )
+            .into_response(),
+    }
+}
+/// GET /api/files/content?path=<file> — read a text file inside HOME for the editor.
+/// Returns JSON { path, name, size, modified, kind, content? } where kind is
+/// "text" (content included), "binary" (use download), or "too-large".
+pub async fn api_read_content(Query(q): Query<DownloadQuery>) -> Response {
+    let (_, target) = match resolve_inside_home(Some(&q.path)) {
+        Ok(v) => v,
+        Err((code, msg)) => return (code, msg).into_response(),
+    };
+    let Ok(meta) = std::fs::metadata(&target) else {
+        return (
+            StatusCode::NOT_FOUND,
+            format!("not found: {}", target.display()),
+        )
+            .into_response();
+    };
+    if !meta.is_file() {
+        return (
+            StatusCode::BAD_REQUEST,
+            "only files can be opened".to_string(),
+        )
+            .into_response();
+    }
+    let modified = meta
+        .modified()
+        .ok()
+        .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+        .map(|d| d.as_secs() as i64);
+    let base = serde_json::json!({
+        "path": target.to_string_lossy(),
+        "name": target.file_name().map(|n| n.to_string_lossy()),
+        "size": meta.len(),
+        "modified": modified,
+    });
+    if meta.len() > READ_MAX_BYTES {
+        let mut v = base;
+        v["kind"] = serde_json::Value::String("too-large".to_string());
+        return (StatusCode::OK, Json(v)).into_response();
+    }
+    let Ok(bytes) = std::fs::read(&target) else {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "cannot read file".to_string(),
+        )
+            .into_response();
+    };
+    // NUL byte in the first chunk, or invalid UTF-8 → binary.
+    let sniff_len = bytes.len().min(8192);
+    if bytes[..sniff_len].contains(&0) || std::str::from_utf8(&bytes).is_err() {
+        let mut v = base;
+        v["kind"] = serde_json::Value::String("binary".to_string());
+        return (StatusCode::OK, Json(v)).into_response();
+    }
+    // Safe: just validated as UTF-8.
+    let text = String::from_utf8(bytes).unwrap_or_default();
+    let mut v = base;
+    v["kind"] = serde_json::Value::String("text".to_string());
+    v["content"] = serde_json::Value::String(text);
+    (StatusCode::OK, Json(v)).into_response()
+}
+
+/// PUT /api/files/content {"path","content"} — save a text file inside HOME.
+pub async fn api_save_content(Json(b): Json<SaveBody>) -> Response {
+    let (_, target) = match resolve_inside_home(Some(&b.path)) {
+        Ok(v) => v,
+        Err((code, msg)) => return (code, msg).into_response(),
+    };
+    if b.content.len() > SAVE_MAX_BYTES {
+        return (
+            StatusCode::PAYLOAD_TOO_LARGE,
+            format!("content too large (max {} MB)", SAVE_MAX_BYTES / 1024 / 1024),
+        )
+            .into_response();
+    }
+    if let Ok(meta) = std::fs::symlink_metadata(&target) {
+        if meta.is_dir() && !meta.is_symlink() {
+            return (
+                StatusCode::BAD_REQUEST,
+                "cannot overwrite a folder".to_string(),
+            )
+                .into_response();
+        }
+    }
+    let Some(parent) = target.parent() else {
+        return (StatusCode::BAD_REQUEST, "bad path".to_string()).into_response();
+    };
+    if !parent.is_dir() {
+        return (
+            StatusCode::BAD_REQUEST,
+            format!("folder missing: {}", parent.display()),
+        )
+            .into_response();
+    }
+    match std::fs::write(&target, b.content.as_bytes()) {
+        Ok(()) => (
+            StatusCode::OK,
+            Json(
+                serde_json::json!({ "ok": true, "path": target.to_string_lossy(), "size": b.content.len() }),
+            ),
+        )
+            .into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("cannot save {}: {e}", target.display()),
         )
             .into_response(),
     }

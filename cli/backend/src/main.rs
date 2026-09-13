@@ -7,7 +7,7 @@ use axum::{
     Router,
     http::{StatusCode, header},
     response::{IntoResponse, Response},
-    routing::{get, post},
+    routing::{get, post, put},
 };
 use clap::Parser;
 use ui::Ui;
