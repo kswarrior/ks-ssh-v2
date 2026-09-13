@@ -1,11 +1,12 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type FormEvent } from 'react'
 
-type PageId = 'home' | 'installation' | 'settings'
+type PageId = 'home' | 'ssh' | 'installation' | 'settings'
 
 type NavItem = { id: PageId; label: string; hash: string }
 
 const NAV: NavItem[] = [
   { id: 'home', label: 'Home', hash: '#/' },
+  { id: 'ssh', label: 'SSH', hash: '#/ssh' },
   { id: 'installation', label: 'Installation', hash: '#/installation' },
   { id: 'settings', label: 'Settings', hash: '#/settings' },
 ]
@@ -133,9 +134,6 @@ function HomePage({ go }: { go: (id: PageId) => void }) {
   return (
     <section className="page" aria-labelledby="page-title-home">
       <h1 id="page-title-home">Home</h1>
-      <p className="lead">
-        Welcome to KS SSH — your companion for fast, secure shell access.
-      </p>
       <div className="grid">
         <div className="card">
           <h2>New here?</h2>
@@ -164,6 +162,325 @@ function HomePage({ go }: { go: (id: PageId) => void }) {
           </div>
         </div>
       </div>
+    </section>
+  )
+}
+
+type SshEntry = {
+  id: string
+  name: string
+  token: string
+  note: string
+  online: boolean
+}
+
+const SEED_SSH: SshEntry[] = [
+  {
+    id: 'seed-ssh-lab',
+    name: 'Home Lab',
+    token: '',
+    note: 'Local dev machine over Tailscale',
+    online: true,
+  },
+  {
+    id: 'seed-ssh-vps',
+    name: 'VPS EU',
+    token: '',
+    note: 'Production box in Frankfurt',
+    online: false,
+  },
+]
+
+function SSHPage() {
+  const [entries, setEntries] = useState<SshEntry[]>(() => {
+    const saved = readJSON<unknown>('ks-ssh:ssh', null)
+    return Array.isArray(saved) ? (saved as SshEntry[]) : SEED_SSH
+  })
+  const [formOpen, setFormOpen] = useState(false)
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [name, setName] = useState('')
+  const [token, setToken] = useState('')
+  const [note, setNote] = useState('')
+  const [connectingId, setConnectingId] = useState<string | null>(null)
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  useEffect(() => {
+    writeJSON('ks-ssh:ssh', entries)
+  }, [entries])
+
+  useEffect(
+    () => () => {
+      if (timer.current) clearTimeout(timer.current)
+    },
+    [],
+  )
+
+  const resetForm = () => {
+    setEditingId(null)
+    setName('')
+    setToken('')
+    setNote('')
+  }
+
+  const openNew = () => {
+    resetForm()
+    setFormOpen(true)
+  }
+
+  const openEdit = (e: SshEntry) => {
+    setEditingId(e.id)
+    setName(e.name)
+    setToken(e.token)
+    setNote(e.note)
+    setFormOpen(true)
+  }
+
+  const closeForm = () => {
+    setFormOpen(false)
+    resetForm()
+  }
+
+  const markOnline = (id: string) => {
+    if (timer.current) clearTimeout(timer.current)
+    setConnectingId(id)
+    timer.current = setTimeout(() => {
+      setEntries((prev) =>
+        prev.map((x) => (x.id === id ? { ...x, online: true } : x)),
+      )
+      setConnectingId(null)
+    }, 900)
+  }
+
+  const submit = (e: FormEvent) => {
+    e.preventDefault()
+    const cleanName = name.trim()
+    const cleanToken = token.trim()
+    if (!cleanName || !cleanToken) return
+    if (editingId) {
+      setEntries((prev) =>
+        prev.map((x) =>
+          x.id === editingId
+            ? { ...x, name: cleanName, token: cleanToken, note: note.trim() }
+            : x,
+        ),
+      )
+      closeForm()
+    } else {
+      const id = `ssh-${Date.now().toString(36)}-${Math.floor(Math.random() * 10000)}`
+      setEntries((prev) => [
+        ...prev,
+        {
+          id,
+          name: cleanName,
+          token: cleanToken,
+          note: note.trim(),
+          online: false,
+        },
+      ])
+      closeForm()
+      markOnline(id)
+    }
+  }
+
+  const removeEntry = (id: string) => {
+    if (id === connectingId) {
+      if (timer.current) clearTimeout(timer.current)
+      setConnectingId(null)
+    }
+    setEntries((prev) => prev.filter((x) => x.id !== id))
+  }
+
+  const disconnect = (id: string) => {
+    if (id === connectingId) {
+      if (timer.current) clearTimeout(timer.current)
+      setConnectingId(null)
+    }
+    setEntries((prev) =>
+      prev.map((x) => (x.id === id ? { ...x, online: false } : x)),
+    )
+  }
+
+  return (
+    <section className="page" aria-labelledby="page-title-ssh">
+      <div className="page-head">
+        <h1 id="page-title-ssh">SSH</h1>
+        <button
+          type="button"
+          className="btn btn-primary ssh-connect-btn"
+          onClick={openNew}
+        >
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+          >
+            <path d="M12 5v14M5 12h14" />
+          </svg>
+          <span className="btn-label">Connect</span>
+        </button>
+      </div>
+
+      {formOpen && (
+        <div className="card">
+          <h2>{editingId ? 'Edit connection' : 'New connection'}</h2>
+          <form className="form" onSubmit={submit}>
+            <label className="field">
+              Name
+              <input
+                type="text"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="Home Lab"
+                autoComplete="off"
+                required
+                autoFocus
+              />
+            </label>
+            <label className="field">
+              Token
+              <input
+                type="password"
+                value={token}
+                onChange={(e) => setToken(e.target.value)}
+                placeholder="••••••••"
+                autoComplete="off"
+                required
+              />
+            </label>
+            <label className="field ssh-note-field">
+              Note
+              <input
+                type="text"
+                value={note}
+                onChange={(e) => setNote(e.target.value)}
+                placeholder="What is this machine for? (optional)"
+                autoComplete="off"
+              />
+            </label>
+            <div className="row-actions">
+              <button type="button" className="btn" onClick={closeForm}>
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2.2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden="true"
+                >
+                  <path d="M18 6L6 18M6 6l12 12" />
+                </svg>
+                Cancel
+              </button>
+              <button type="submit" className="btn btn-primary">
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2.2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden="true"
+                >
+                  <path d="M20 6L9 17l-5-5" />
+                </svg>
+                {editingId ? 'Save' : 'Connect'}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {entries.length === 0 && !formOpen ? (
+        <div className="card">
+          <h2>No connections yet</h2>
+          <p>Press Connect to add your first one.</p>
+        </div>
+      ) : (
+        <ul className="ssh-list">
+          {entries.map((e) => {
+            const connecting = e.id === connectingId
+            return (
+              <li key={e.id} className="card ssh-card">
+                <span className="ssh-icon" aria-hidden="true">
+                  <svg
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="#fff"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <rect x="3" y="4" width="18" height="16" rx="2" />
+                    <path d="M7 9l3 3-3 3M12 15h5" />
+                  </svg>
+                </span>
+                <div className="ssh-main">
+                  <div className="ssh-top">
+                    <span className="ssh-name">{e.name}</span>
+                    {connecting ? (
+                      <span className="tag connecting">
+                        <span className="tag-dot" aria-hidden="true" />
+                        Connecting…
+                      </span>
+                    ) : e.online ? (
+                      <span className="tag online">
+                        <span className="tag-dot" aria-hidden="true" />
+                        Online
+                      </span>
+                    ) : (
+                      <span className="tag offline">
+                        <span className="tag-dot" aria-hidden="true" />
+                        Offline
+                      </span>
+                    )}
+                  </div>
+                  {e.note ? <p className="ssh-note">{e.note}</p> : null}
+                  <div className="row-actions">
+                    {e.online ? (
+                      <button
+                        type="button"
+                        className="btn btn-sm"
+                        onClick={() => disconnect(e.id)}
+                      >
+                        Disconnect
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        className="btn btn-sm btn-primary"
+                        disabled={connecting}
+                        onClick={() => markOnline(e.id)}
+                      >
+                        {connecting ? 'Connecting…' : 'Connect'}
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      className="btn btn-sm"
+                      onClick={() => openEdit(e)}
+                    >
+                      Edit
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-sm btn-danger"
+                      onClick={() => removeEntry(e.id)}
+                      aria-label={`Delete ${e.name}`}
+                    >
+                      Delete
+                    </button>
+                  </div>
+                </div>
+              </li>
+            )
+          })}
+        </ul>
+      )}
     </section>
   )
 }
@@ -487,6 +804,7 @@ export default function App() {
           tabIndex={-1}
         >
           {page === 'home' && <HomePage go={go} />}
+          {page === 'ssh' && <SSHPage />}
           {page === 'installation' && <InstallationPage />}
           {page === 'settings' && (
             <SettingsPage settings={settings} onChange={patchSettings} />
