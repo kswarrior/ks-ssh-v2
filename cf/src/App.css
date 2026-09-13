@@ -1,4 +1,4 @@
-/* ================= Neumorphic app shell ================= */
+/* ================= Glass app shell ================= */
 
 .app-shell {
   flex: 1;
@@ -7,7 +7,7 @@
   min-height: 100svh;
   min-width: 0;
   text-align: left;
-  background: var(--bg);
+  background: transparent;
 }
 
 /* Skip link: hidden until keyboard focus */
@@ -30,7 +30,7 @@
   top: 8px;
 }
 
-/* ---------- Header: soft bar floating over the page ---------- */
+/* ---------- Header: translucent blurred bar ---------- */
 
 .app-header {
   position: sticky;
@@ -42,8 +42,10 @@
   gap: 12px;
   padding: 8px max(16px, env(safe-area-inset-right)) 8px max(16px, env(safe-area-inset-left));
   padding-top: calc(8px + env(safe-area-inset-top));
-  background: var(--bg);
-  box-shadow: 0 10px 22px -14px var(--neu-dark);
+  background: var(--chrome-bg);
+  -webkit-backdrop-filter: blur(20px) saturate(150%);
+  backdrop-filter: blur(20px) saturate(150%);
+  border-bottom: 1px solid var(--glass-border);
   min-width: 0;
 }
 
@@ -58,17 +60,20 @@
   font-size: 18px;
   font-weight: 800;
   color: #fff;
-  background: linear-gradient(145deg, var(--accent-hi), var(--accent-lo));
+  background: linear-gradient(135deg, var(--accent-hi), var(--accent-lo) 60%, var(--accent-glow) 140%);
+  border: 1px solid rgba(255, 255, 255, 0.25);
   box-shadow:
-    3px 3px 8px var(--accent-shadow),
-    -2px -2px 6px var(--neu-light);
+    0 6px 18px -4px var(--accent-shadow),
+    0 0 16px -2px var(--accent-shadow),
+    inset 0 1px 0 rgba(255, 255, 255, 0.35);
 }
 
 .brand {
   font-weight: 700;
-  letter-spacing: 0.4px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
   color: var(--text-h);
-  font-size: 18px;
+  font-size: 16px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -85,14 +90,14 @@
   height: 12px;
   flex-shrink: 0;
   border-radius: 50%;
-  background: #22c55e;
+  background: var(--success);
+  border: 1px solid rgba(255, 255, 255, 0.35);
   box-shadow:
-    0 0 0 3px var(--bg),
-    2px 2px 6px var(--neu-dark),
-    0 0 12px rgba(34, 197, 94, 0.7);
+    0 0 12px rgba(52, 211, 153, 0.8),
+    0 0 4px rgba(52, 211, 153, 0.9);
 }
 
-/* Round neumorphic icon button (theme toggle) */
+/* Round glass icon button (theme toggle) */
 .icon-btn {
   width: 42px;
   height: 42px;
@@ -101,24 +106,25 @@
   align-items: center;
   justify-content: center;
   padding: 0;
-  border: none;
+  border: 1px solid var(--glass-border);
   border-radius: 50%;
-  background: var(--bg);
+  background: var(--card-bg);
+  -webkit-backdrop-filter: blur(16px) saturate(150%);
+  backdrop-filter: blur(16px) saturate(150%);
   color: var(--text-h);
-  box-shadow: var(--neu-sm);
+  box-shadow: var(--glow-line), var(--shadow-md);
   cursor: pointer;
-  transition: box-shadow 0.18s ease, transform 0.18s ease;
+  transition: box-shadow 0.18s ease, transform 0.18s ease, background 0.18s ease;
   -webkit-tap-highlight-color: transparent;
 }
 
 .icon-btn:hover {
-  box-shadow: var(--neu-md);
+  background: var(--hover-bg);
   transform: translateY(-1px);
 }
 
 .icon-btn:active {
-  box-shadow: var(--neu-inset-sm);
-  transform: translateY(0);
+  transform: translateY(0) scale(0.96);
 }
 
 .icon-btn svg {
@@ -126,7 +132,7 @@
   height: 20px;
 }
 
-/* Hamburger: soft raised tile, phone only */
+/* Hamburger: glass tile, phone only */
 .hamburger {
   display: none;
   flex-direction: column;
@@ -137,18 +143,20 @@
   height: 42px;
   flex-shrink: 0;
   padding: 11px;
-  background: var(--bg);
-  border: none;
+  background: var(--card-bg);
+  -webkit-backdrop-filter: blur(16px) saturate(150%);
+  backdrop-filter: blur(16px) saturate(150%);
+  border: 1px solid var(--glass-border);
   border-radius: 12px;
-  box-shadow: var(--neu-sm);
+  box-shadow: var(--glow-line), var(--shadow-md);
   cursor: pointer;
   color: inherit;
-  transition: box-shadow 0.18s ease;
+  transition: background 0.18s ease;
   -webkit-tap-highlight-color: transparent;
 }
 
 .hamburger:active {
-  box-shadow: var(--neu-inset-sm);
+  background: var(--hover-bg);
 }
 
 .hamburger span {
@@ -170,7 +178,7 @@
   transform: translateY(-7px) rotate(-45deg);
 }
 
-/* ---------- Body + floating sidebar ---------- */
+/* ---------- Body + floating glass sidebar ---------- */
 
 .app-body {
   flex: 1;
@@ -195,8 +203,11 @@
   margin: 16px 0 16px 16px;
   border-radius: 22px;
   padding: 14px 12px calc(14px + env(safe-area-inset-bottom, 0px));
-  background: var(--bg);
-  box-shadow: var(--neu-md);
+  background: var(--panel-bg);
+  -webkit-backdrop-filter: blur(22px) saturate(150%);
+  backdrop-filter: blur(22px) saturate(150%);
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--glow-line), var(--shadow-lg);
 }
 
 .sidebar nav {
@@ -213,8 +224,9 @@
   line-height: 1.4;
   padding: 12px 14px;
   border-radius: 14px;
+  border: 1px solid transparent;
   overflow-wrap: anywhere;
-  transition: box-shadow 0.18s ease, color 0.18s ease, background 0.18s ease;
+  transition: box-shadow 0.18s ease, color 0.18s ease, background 0.18s ease, border-color 0.18s ease;
 }
 
 .sidebar a:hover {
@@ -223,10 +235,13 @@
 }
 
 .sidebar a.active {
-  background: var(--bg);
-  box-shadow: var(--neu-inset-sm);
+  background: var(--accent-soft);
+  border-color: rgba(139, 124, 255, 0.35);
   color: var(--accent-strong);
   font-weight: 700;
+  box-shadow:
+    0 6px 18px -8px var(--accent-shadow),
+    inset 0 1px 0 rgba(255, 255, 255, 0.1);
 }
 
 .overlay {
@@ -257,7 +272,7 @@
   }
 }
 
-/* Phone: sidebar becomes a soft floating drawer */
+/* Phone: sidebar becomes a floating glass drawer */
 @media (max-width: 768px) {
   .hamburger {
     display: flex;
@@ -279,7 +294,6 @@
     transform: translateX(-105%);
     visibility: hidden;
     transition: transform 0.25s ease, visibility 0.25s ease;
-    box-shadow: var(--neu-lg);
     padding-bottom: calc(16px + env(safe-area-inset-bottom));
   }
 
@@ -296,7 +310,9 @@
     bottom: 0;
     left: 0;
     z-index: 10;
-    background: rgba(30, 34, 48, 0.35);
+    background: rgba(3, 6, 14, 0.5);
+    -webkit-backdrop-filter: blur(4px);
+    backdrop-filter: blur(4px);
   }
 }
 
@@ -307,12 +323,15 @@
   .skip-link,
   .btn,
   .icon-btn,
-  .sidebar a {
+  .sidebar a,
+  .server-row,
+  .badge.connecting {
     transition: none;
+    animation: none;
   }
 }
 
-/* ================= Neumorphic pages & components ================= */
+/* ================= Glass pages & components ================= */
 
 .page {
   display: flex;
@@ -337,13 +356,15 @@
   gap: 16px;
 }
 
-/* Raised soft card */
+/* Elegant frosted card */
 .card {
-  border: none;
+  border: 1px solid var(--glass-border);
   border-radius: 20px;
   padding: 20px;
-  background: var(--bg);
-  box-shadow: var(--neu-md);
+  background: var(--card-bg);
+  -webkit-backdrop-filter: blur(20px) saturate(150%);
+  backdrop-filter: blur(20px) saturate(150%);
+  box-shadow: var(--glow-line), var(--shadow-lg);
   display: flex;
   flex-direction: column;
   gap: 10px;
@@ -361,6 +382,11 @@
 .stat {
   font-size: 30px;
   font-weight: 750;
+  letter-spacing: -0.02em;
+  background: linear-gradient(120deg, var(--text-h), var(--accent-strong));
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
   color: var(--text-h);
   line-height: 1.2;
 }
@@ -373,7 +399,7 @@
   padding-top: 10px;
 }
 
-/* Raised soft button; press it and it dents in */
+/* Glass button; primary glows with an accent gradient */
 .btn {
   font: inherit;
   font-size: 14px;
@@ -385,43 +411,43 @@
   padding: 11px 18px;
   min-height: 44px;
   border-radius: 14px;
-  border: none;
-  background: var(--bg);
+  border: 1px solid var(--glass-border);
+  background: var(--card-bg);
+  -webkit-backdrop-filter: blur(16px) saturate(150%);
+  backdrop-filter: blur(16px) saturate(150%);
   color: var(--text-h);
-  box-shadow: var(--neu-sm);
+  box-shadow: var(--glow-line), var(--shadow-md);
   cursor: pointer;
-  transition: box-shadow 0.18s ease, transform 0.18s ease, opacity 0.18s ease;
+  transition: box-shadow 0.18s ease, transform 0.18s ease, background 0.18s ease;
 }
 
 .btn:hover {
-  box-shadow: var(--neu-md);
+  background: var(--hover-bg);
   transform: translateY(-1px);
+  box-shadow: var(--glow-line), var(--shadow-lg);
 }
 
 .btn:active {
-  box-shadow: var(--neu-inset-sm);
-  transform: translateY(0);
+  transform: translateY(0) scale(0.98);
 }
 
 .btn-primary {
-  background: linear-gradient(145deg, var(--accent-hi), var(--accent-lo));
+  background: linear-gradient(135deg, var(--accent-hi), var(--accent-lo) 65%);
+  border-color: rgba(255, 255, 255, 0.22);
   color: #fff;
+  text-shadow: 0 1px 8px rgba(0, 0, 0, 0.25);
   box-shadow:
-    5px 5px 14px var(--accent-shadow),
-    -4px -4px 10px var(--neu-light);
+    0 10px 28px -8px var(--accent-shadow),
+    0 0 20px -6px var(--accent-shadow),
+    inset 0 1px 0 rgba(255, 255, 255, 0.3);
 }
 
 .btn-primary:hover {
-  opacity: 0.94;
+  background: linear-gradient(135deg, var(--accent-hi), var(--accent-lo) 65%);
   box-shadow:
-    6px 6px 18px var(--accent-shadow),
-    -4px -4px 10px var(--neu-light);
-}
-
-.btn-primary:active {
-  box-shadow:
-    inset 4px 4px 9px rgba(0, 0, 0, 0.3),
-    inset -3px -3px 7px rgba(255, 255, 255, 0.25);
+    0 14px 34px -8px var(--accent-shadow),
+    0 0 28px -4px var(--accent-shadow),
+    inset 0 1px 0 rgba(255, 255, 255, 0.3);
 }
 
 .btn-danger {
@@ -430,7 +456,6 @@
 
 .btn-danger:hover {
   background: var(--danger-soft);
-  box-shadow: var(--neu-md);
 }
 
 .btn-sm {
@@ -462,16 +487,23 @@
   align-items: center;
   gap: 12px;
   flex-wrap: wrap;
-  border: none;
+  border: 1px solid var(--glass-border);
   border-radius: 18px;
   padding: 14px 16px;
-  background: var(--bg);
-  box-shadow: var(--neu-sm);
-  transition: box-shadow 0.18s ease;
+  background: var(--card-bg);
+  -webkit-backdrop-filter: blur(20px) saturate(150%);
+  backdrop-filter: blur(20px) saturate(150%);
+  box-shadow: var(--glow-line), var(--shadow-md);
+  transition: box-shadow 0.18s ease, transform 0.18s ease, border-color 0.18s ease;
 }
 
 .server-row:hover {
-  box-shadow: var(--neu-md);
+  transform: translateY(-1px);
+  border-color: rgba(139, 124, 255, 0.35);
+  box-shadow:
+    var(--glow-line),
+    var(--shadow-lg),
+    0 0 24px -10px var(--accent-shadow);
 }
 
 .server-row .row-actions {
@@ -506,26 +538,39 @@
   line-height: 1.4;
   padding: 5px 12px;
   border-radius: 999px;
-  border: none;
-  background: var(--bg);
-  box-shadow: var(--neu-inset-sm);
+  border: 1px solid var(--glass-border);
+  background: var(--field-bg);
   color: var(--text);
   white-space: nowrap;
 }
 
 .badge.connected {
-  background: linear-gradient(145deg, #34c77b, #1da35c);
-  color: #fff;
+  background: linear-gradient(135deg, #34d399, #10b981);
+  border-color: rgba(255, 255, 255, 0.25);
+  color: #04120c;
   box-shadow:
-    3px 3px 8px rgba(29, 163, 92, 0.45),
-    -3px -3px 8px var(--neu-light);
+    0 6px 16px -6px rgba(52, 211, 153, 0.7),
+    0 0 14px -2px rgba(52, 211, 153, 0.6);
 }
 
 .badge.connecting {
   color: var(--accent-strong);
+  border-color: rgba(139, 124, 255, 0.4);
+  background: var(--accent-soft);
+  animation: pulse-soft 1.6s ease-in-out infinite;
 }
 
-/* ---------- Forms: concave (pressed-in) fields ---------- */
+@keyframes pulse-soft {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.55;
+  }
+}
+
+/* ---------- Forms: deep glass fields ---------- */
 
 .form {
   display: grid;
@@ -555,17 +600,27 @@
   min-height: 48px;
   padding: 12px 16px;
   border-radius: 14px;
-  border: none;
-  background: var(--bg);
+  border: 1px solid var(--glass-border);
+  background: var(--field-bg);
   color: var(--text-h);
-  box-shadow: var(--neu-inset-sm);
-  transition: box-shadow 0.18s ease;
+  box-shadow: inset 0 2px 10px rgba(0, 0, 0, 0.18);
+  transition: border-color 0.18s ease, box-shadow 0.18s ease;
 }
 
 .field input[type='text']::placeholder,
 .field input[type='number']::placeholder {
   color: var(--text);
-  opacity: 0.8;
+  opacity: 0.75;
+}
+
+.field input[type='text']:focus,
+.field input[type='number']:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow:
+    inset 0 2px 10px rgba(0, 0, 0, 0.18),
+    0 0 0 3px var(--accent-soft),
+    0 0 18px -4px var(--accent-shadow);
 }
 
 .field.checkbox-row {
@@ -582,12 +637,12 @@
   margin: 0;
   flex-shrink: 0;
   border-radius: 9px;
-  background: var(--bg);
-  box-shadow: var(--neu-inset-sm);
+  border: 1px solid var(--glass-border);
+  background: var(--field-bg);
   cursor: pointer;
   display: inline-grid;
   place-content: center;
-  transition: box-shadow 0.18s ease;
+  transition: border-color 0.18s ease, box-shadow 0.18s ease;
 }
 
 .field input[type='checkbox']::before {
@@ -597,8 +652,12 @@
   border-radius: 5px;
   transform: scale(0);
   transition: transform 0.15s ease;
-  background: linear-gradient(145deg, var(--accent-hi), var(--accent-lo));
-  box-shadow: 1px 1px 4px var(--accent-shadow);
+  background: linear-gradient(135deg, var(--accent-hi), var(--accent-lo));
+  box-shadow: 0 2px 8px var(--accent-shadow);
+}
+
+.field input[type='checkbox']:checked {
+  border-color: var(--accent);
 }
 
 .field input[type='checkbox']:checked::before {
@@ -620,12 +679,17 @@
   display: flex;
   gap: 10px;
   align-items: flex-start;
-  border: none;
-  background: var(--bg);
-  box-shadow: var(--neu-inset);
+  border: 1px solid var(--glass-border);
+  background: rgba(0, 0, 0, 0.32);
   border-radius: 14px;
   padding: 12px 12px 12px 16px;
   min-width: 0;
+  box-shadow: inset 0 2px 12px rgba(0, 0, 0, 0.3);
+}
+
+:root[data-theme='light'] .codeblock {
+  background: rgba(15, 31, 61, 0.06);
+  box-shadow: inset 0 2px 10px rgba(15, 31, 61, 0.1);
 }
 
 .codeblock pre {
@@ -638,6 +702,7 @@
 
 .codeblock code {
   background: transparent;
+  border: none;
   box-shadow: none;
   padding: 0;
   display: block;
