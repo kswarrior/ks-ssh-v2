@@ -1,4 +1,13 @@
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
+import {
+  E2E_ALG,
+  E2eSession,
+  extractKeyFromText,
+  isEncEnvelope,
+  parseFragmentKey,
+  type E2eStatus,
+  type EncEnvelope,
+} from './e2e'
 
 type PageId = 'home' | 'ssh' | 'view' | 'installation' | 'settings'
 
@@ -65,6 +74,8 @@ function hashToPage(hash: string): PageId | null {
 
 /** Extract a 5-char token from #/view/ABCDE or ?token=ABCDE. */
 function hashToViewToken(hash: string): string | null {
+  // Supports `#/view/ABCDE` and `#/view/ABCDE#k=...` (fragment key ignored here;
+  // use parseFragmentKey() for `k` — never query/fetch).
   const m = hash.match(/^#\/view\/([A-Za-z0-9]{0,5})/)
   if (m?.[1] && /^[A-Za-z0-9]{5}$/.test(m[1])) return m[1].toUpperCase()
   try {
