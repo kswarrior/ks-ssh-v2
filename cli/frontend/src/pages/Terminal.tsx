@@ -11,9 +11,42 @@ export type SshEntry = {
   online: boolean
 }
 
-type TermSession = { id: string; name: string }
+type TermSession = { id: string; name: string; sid: string | null }
 
 type TermStatus = 'connecting' | 'online' | 'offline'
+
+const TERMS_KEY = 'ks-ssh:terms'
+const TERMS_ACTIVE_KEY = 'ks-ssh:terms:active'
+
+/** Tabs persisted across refresh so their shells can be reattached. */
+function loadTerms(): TermSession[] {
+  try {
+    const raw = localStorage.getItem(TERMS_KEY)
+    if (!raw) return []
+    const parsed: unknown = JSON.parse(raw)
+    if (!Array.isArray(parsed)) return []
+    return (parsed as Partial<TermSession>[])
+      .filter(
+        (t) =>
+          t &&
+          typeof t.id === 'string' &&
+          typeof t.name === 'string' &&
+          (t.sid === null || typeof t.sid === 'string'),
+      )
+      .map((t) => ({ id: t.id as string, name: t.name as string, sid: (t.sid as string | null) ?? null }))
+  } catch {
+    return []
+  }
+}
+
+function loadActiveId(fallback: string | null): string | null {
+  try {
+    const raw = localStorage.getItem(TERMS_ACTIVE_KEY)
+    return typeof raw === 'string' && raw ? raw : fallback
+  } catch {
+    return fallback
+  }
+}
 
 /** Copy text to the clipboard with a legacy fallback. */
 function copyText(text: string): void {
@@ -63,7 +96,7 @@ function ShellSession({
   /** Backend session id to reattach to (null = ask the backend for one). */
   sid: string | null
   onStatus: (id: string, s: TermStatus) => void
-  onReady: (id: string, sid: string) => void
+  onReady: (id: string, sid: string | null) => void
 }) {
   const [status, setStatus] = useState<TermStatus>('offline')
   // "↓ latest" pill when the user scrolled up to read older output.
@@ -246,6 +279,20 @@ function ShellSession({
     ws.onmessage = (e) => {
       const d: unknown = e.data
       if (typeof d === 'string') {
+        // Session handshake — a fresh tab learns its backend id here and
+        // persists it so a refresh reattaches to the same shell.
+        try {
+          const msg = JSON.parse(d) as { type?: string; id?: string }
+          if (msg?.type === 'ready' && typeof msg.id === 'string' && msg.id) {
+            if (!sidRef.current) {
+              sidRef.current = msg.id
+              onReady(id, msg.id)
+            }
+            return
+          }
+        } catch {
+          // Not JSON — PTY text or the exit sentinel below.
+        }
         // Exact sentinel only: shell output such as
         // `echo '{"type":"exit"}'` keeps the socket open, so it must NOT
         // flip the tab offline — only the backend close does that.
@@ -272,12 +319,16 @@ function ShellSession({
       term.write('\r\nsocket error\r\n')
       setStatus('offline')
     }
-    ws.onclose = () => {
+    ws.onclose = (e) => {
       if (wsRef.current !== ws) return
       wsRef.current = null
       // Always go offline — a failed connect must not stick on amber.
       setStatus('offline')
-      if (!gotExitRef.current) {
+      if (e.code === 4000) {
+        // Same session attached elsewhere (another page/tab) — say so
+        // instead of a generic "disconnected".
+        term.write('\r\nattached elsewhere — Reconnect here to take over\r\n')
+      } else if (!gotExitRef.current) {
         const hint =
           window.location.pathname.startsWith('/v/') ||
           window.location.hash.includes('/view/')
@@ -331,6 +382,12 @@ function ShellSession({
       // Ignore — a fresh socket is created below regardless.
     }
     wsRef.current = null
+    // A dead shell can't be reattached to — drop the id so the backend
+    // spawns a fresh session (and reports the new id via `ready`).
+    if (gotExitRef.current) {
+      sidRef.current = null
+      onReady(id, null)
+    }
     gotExitRef.current = false
     sizeRef.current = null
     setStuck(true)
