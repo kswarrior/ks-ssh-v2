@@ -178,7 +178,7 @@ export default function PortsPage() {
         </div>
       </div>
 
-      <div className="card ports-card">
+      <div className="files-body">
         <p className="files-sub" aria-live="polite">
           {loading && !data
             ? 'Scanning host ports…'
@@ -224,7 +224,7 @@ export default function PortsPage() {
             <span className="sr-only" role="status">Scanning host ports…</span>
           </ul>
         ) : visible.length === 0 ? (
-          <div className="card">
+          <div className="ports-empty">
             <h2>No open ports found</h2>
             <p>
               {query || filter !== 'all'

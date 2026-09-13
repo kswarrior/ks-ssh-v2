@@ -2155,8 +2155,20 @@ a.file-link {
   flex-shrink: 0;
 }
 
-.ports-card {
-  gap: 12px;
+.ports-empty {
+  padding: 4px 2px;
+}
+
+.ports-empty h2 {
+  font-size: 15px;
+  color: var(--text-h);
+  margin: 0 0 6px;
+}
+
+.ports-empty p {
+  font-size: 13px;
+  color: var(--text);
+  margin: 0;
 }
 
 /* Cards reuse the Files page .file-grid / .file-card look;
