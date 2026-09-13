@@ -528,7 +528,17 @@ export default function TerminalPage({
   const requestClose = (id: string) => setConfirmId(id)
 
   const confirmClose = () => {
-    if (confirmId) closeTerminal(confirmId)
+    const t = sessions.find((s) => s.id === confirmId)
+    if (t) {
+      // Kill the backend shell now — otherwise it would linger detached
+      // until the reaper TTL even though the tab is gone.
+      if (t.sid) {
+        void fetch(`/v1/shell?id=${encodeURIComponent(t.sid)}`, {
+          method: 'DELETE',
+        }).catch(() => {})
+      }
+      closeTerminal(t.id)
+    }
     setConfirmId(null)
   }
 

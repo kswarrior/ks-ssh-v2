@@ -85,7 +85,7 @@ async fn serve(host: String, port: u16) {
             "/api/files/content",
             get(files::api_read_content).put(files::api_save_content),
         )
-        .route("/v1/shell", get(shell::ws_handler))
+        .route("/v1/shell", get(shell::ws_handler).delete(shell::api_kill_session))
         .fallback(serve_ui);
 
     let addr = format!("{host}:{port}");
