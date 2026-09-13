@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 
-type PageId = 'home' | 'ssh' | 'installation' | 'settings'
+type PageId = 'home' | 'ssh' | 'installation' | 'settings' | 'session'
 
 type NavItem = { id: PageId; label: string; hash: string }
 
@@ -56,6 +56,7 @@ function writeJSON(key: string, value: unknown) {
 /** Map a location hash to a page, or null when it is not a page route. */
 function hashToPage(hash: string): PageId | null {
   const clean = hash.replace(/^#\/?/, '')
+  if (clean === 'session') return 'session'
   const found = NAV.find((p) => p.hash.replace(/^#\/?/, '') === clean)
   return found ? found.id : null
 }
@@ -279,7 +280,146 @@ async function apiConnect(
   }
 }
 
+type RelaySession = { name: string; token: string }
+
+function readRelaySession(): RelaySession | null {
+  const saved = readJSON<unknown>('ks-ssh:relay', null)
+  if (!saved || typeof saved !== 'object') return null
+  const s = saved as { name?: unknown; token?: unknown }
+  if (typeof s.name !== 'string' || typeof s.token !== 'string') return null
+  if (!/^[A-Z0-9]{5}$/.test(s.token)) return null
+  return { name: s.name, token: s.token }
+}
+
+function SessionPage() {
+  const [session] = useState<RelaySession | null>(() => readRelaySession())
+  const [lines, setLines] = useState<string[]>([])
+  const [draft, setDraft] = useState('')
+  const wsRef = useRef<WebSocket | null>(null)
+  const logRef = useRef<HTMLDivElement | null>(null)
+
+  const push = (line: string) =>
+    setLines((prev) => [...prev.slice(-99), line])
+
+  const token = session?.token ?? null
+  useEffect(() => {
+    if (!token) return
+    const scheme = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+    const ws = new WebSocket(
+      `${scheme}//${window.location.host}/v1/client?token=${token}`,
+    )
+    wsRef.current = ws
+    push(`joining ${token} …`)
+    ws.onopen = () => {
+      ws.send(JSON.stringify({ type: 'hello', role: 'client', token }))
+    }
+    ws.onmessage = (e) => {
+      const text = String(e.data)
+      try {
+        const msg = JSON.parse(text) as {
+          type?: string
+          agent?: boolean
+          online?: boolean
+          data?: unknown
+        }
+        if (msg?.type === 'paired' || msg?.type === 'registered') {
+          push(msg.agent ? 'paired — agent online' : 'paired — waiting for agent …')
+          return
+        }
+        if (msg?.type === 'agent') {
+          push(msg.online ? 'agent online' : 'agent offline')
+          return
+        }
+        if (msg?.type === 'pong') return
+        if (msg?.type === 'ack') {
+          push('agent ack')
+          return
+        }
+        if (typeof msg?.data === 'string') {
+          push(msg.data)
+          return
+        }
+      } catch {
+        // Not JSON — show raw text below.
+      }
+      push(text)
+    }
+    ws.onerror = () => push('socket error')
+    ws.onclose = () => push('socket closed')
+    return () => {
+      wsRef.current = null
+      try {
+        ws.close()
+      } catch {
+        // Already closed — ignore.
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token])
+
+  useEffect(() => {
+    const el = logRef.current
+    if (el) el.scrollTop = el.scrollHeight
+  }, [lines])
+
+  const send = (e: FormEvent) => {
+    e.preventDefault()
+    const text = draft.trim()
+    if (!text || !wsRef.current) return
+    wsRef.current.send(JSON.stringify({ type: 'data', data: text }))
+    push(`> ${text}`)
+    setDraft('')
+  }
+
+  if (!session) {
+    return (
+      <section className="page" aria-labelledby="page-title-session">
+        <h1 id="page-title-session">Session</h1>
+        <div className="card">
+          <p>No relay session. Connect from the SSH page first.</p>
+          <div className="row-actions">
+            <a className="btn btn-primary" href="#/ssh">
+              Back to SSH
+            </a>
+          </div>
+        </div>
+      </section>
+    )
+  }
+
+  return (
+    <section className="page" aria-labelledby="page-title-session">
+      <div className="page-head">
+        <h1 id="page-title-session">{session.name}</h1>
+        <a className="btn btn-sm" href="#/ssh">
+          Back
+        </a>
+      </div>
+      <div className="card">
+        <div className="ws-log" ref={logRef} aria-live="polite">
+          {lines.map((l, i) => (
+            <div key={i}>{l}</div>
+          ))}
+        </div>
+        <form className="form" onSubmit={send}>
+          <label className="field">
+            Send
+            <input
+              type="text"
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              placeholder="type + Enter"
+              autoComplete="off"
+            />
+          </label>
+        </form>
+      </div>
+    </section>
+  )
+}
+
 function RelayCard() {
+  const [name, setName] = useState('')
   const [code, setCode] = useState('')
   const [status, setStatus] = useState<'idle' | 'connecting' | 'connected' | 'error'>('idle')
   const [agentOnline, setAgentOnline] = useState(false)
@@ -293,6 +433,10 @@ function RelayCard() {
     [],
   )
 
+  const [session, setSession] = useState<RelaySession | null>(() =>
+    readRelaySession(),
+  )
+
   const disconnect = () => {
     const ws = wsRef.current
     wsRef.current = null
@@ -304,6 +448,18 @@ function RelayCard() {
     setStatus('idle')
     setAgentOnline(false)
     setError(null)
+  }
+
+  const forget = () => {
+    disconnect()
+    try {
+      localStorage.removeItem('ks-ssh:relay')
+    } catch {
+      // Storage unavailable — nothing to clear.
+    }
+    setSession(null)
+    setName('')
+    setCode('')
   }
 
   const connect = () => {
@@ -334,6 +490,9 @@ function RelayCard() {
           setStatus('connected')
           setError(null)
           if (typeof msg.agent === 'boolean') setAgentOnline(msg.agent)
+          const next = { name: name.trim() || 'Relay', token: t }
+          writeJSON('ks-ssh:relay', next)
+          setSession(next)
         } else if (msg?.type === 'agent' && typeof msg.online === 'boolean') {
           setAgentOnline(msg.online)
         }
@@ -363,18 +522,19 @@ function RelayCard() {
 
   return (
     <div className="card">
-      <h2>Relay token</h2>
+      <h2>Relay</h2>
       <p>
         No open port needed — on the machine run <code>ks-ssh --token=</code>,
-        then enter its 5-char token here.
+        then enter a name and its 5-char token here.
       </p>
-      {status === 'connected' ? (
+      {session ? (
         <div className="row-actions">
-          <span className="tag online">
-            <span className="tag-dot" aria-hidden="true" />
-            Connected{agentOnline ? '' : ' (waiting for agent…)'}
-          </span>
-          <button type="button" className="btn btn-sm" onClick={disconnect}>
+          <span className="ssh-name">{session.name}</span>
+          <code>{session.token}</code>
+          <a className="btn btn-sm btn-primary" href="#/session">
+            Visit
+          </a>
+          <button type="button" className="btn btn-sm" onClick={forget}>
             Disconnect
           </button>
         </div>
@@ -386,6 +546,16 @@ function RelayCard() {
             connect()
           }}
         >
+          <label className="field">
+            Name
+            <input
+              type="text"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="Home Lab"
+              autoComplete="off"
+            />
+          </label>
           <label className="field">
             Token
             <input
@@ -868,7 +1038,8 @@ export default function App() {
 
   // Browser tab title follows the active page.
   useEffect(() => {
-    const label = NAV.find((p) => p.id === page)?.label
+    const label =
+      page === 'session' ? 'Session' : NAV.find((p) => p.id === page)?.label
     document.title = label && label !== 'Home' ? `KS SSH — ${label}` : 'KS SSH'
   }, [page])
 
@@ -1084,6 +1255,7 @@ export default function App() {
           {page === 'home' && <HomePage go={go} entries={entries} />}
           {page === 'ssh' && <SSHPage entries={entries} onChange={setEntries} />}
           {page === 'installation' && <InstallationPage />}
+          {page === 'session' && <SessionPage />}
           {page === 'settings' && (
             <SettingsPage settings={settings} onChange={patchSettings} />
           )}
