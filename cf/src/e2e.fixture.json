@@ -1,0 +1,15 @@
+{
+  "envelope": {
+    "ct": "a2XGzNkSK2_xPULPNdQcR8aq0aRkDcZyAUbLUP51uDkwWZcjKLdEVF_RKQ_rFo5Hy1g",
+    "nonce": "AAECAwQFBgcICQoL",
+    "seq": 7,
+    "type": "enc",
+    "v": 1
+  },
+  "k": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+  "nonce": "AAECAwQFBgcICQoL",
+  "plaintext": "{\"type\":\"data\",\"data\":\"hello e2e\"}",
+  "seq": 7,
+  "token": "ABCDE",
+  "_note": "Rust-generated (aes-gcm + HKDF-SHA256 salt=32 zeros info=ks-ssh-e2e-v1 AAD=token). TS must decrypt ct->plaintext with k/token."
+}
