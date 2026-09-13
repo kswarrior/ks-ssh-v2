@@ -3,7 +3,8 @@
 .app-shell {
   flex: 1;
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
+  align-items: stretch;
   min-height: 100svh;
   min-width: 0;
   text-align: left;
@@ -178,36 +179,47 @@
   transform: translateY(-7px) rotate(-45deg);
 }
 
-/* ---------- Body + floating glass sidebar ---------- */
+/* ---------- Body + normal full-height sidebar ---------- */
 
-.app-body {
+.app-main {
   flex: 1;
-  display: flex;
-  align-items: stretch;
-  min-height: 0;
   min-width: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 100svh;
 }
 
 .sidebar {
-  width: 250px;
+  width: 260px;
   flex-shrink: 0;
-  align-self: flex-start;
+  height: 100svh;
   position: sticky;
-  top: calc(64px + 16px + env(safe-area-inset-top, 0px));
-  max-height: calc(
-    100svh - 64px - 32px - env(safe-area-inset-top, 0px) -
-      env(safe-area-inset-bottom, 0px)
-  );
+  top: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
   overflow-y: auto;
   overscroll-behavior: contain;
-  margin: 16px 0 16px 16px;
-  border-radius: 8px;
-  padding: 14px 12px calc(14px + env(safe-area-inset-bottom, 0px));
+  margin: 0;
+  border-radius: 0;
+  padding:
+    calc(18px + env(safe-area-inset-top, 0px))
+    14px
+    calc(16px + env(safe-area-inset-bottom, 0px))
+    max(14px, env(safe-area-inset-left));
   background: var(--panel-bg);
   -webkit-backdrop-filter: blur(22px) saturate(150%);
   backdrop-filter: blur(22px) saturate(150%);
-  border: 1px solid var(--glass-border);
-  box-shadow: var(--glow-line), var(--shadow-lg);
+  border-right: 1px solid var(--glass-border);
+}
+
+.sidebar-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 2px 8px 16px;
+  margin-bottom: 8px;
+  border-bottom: 1px solid var(--glass-border);
 }
 
 .sidebar nav {
@@ -265,10 +277,10 @@
   max-width: 70ch;
 }
 
-/* Narrow desktop / small laptop: slimmer floating panel */
+/* Narrow desktop / small laptop: slimmer bar */
 @media (max-width: 1024px) {
   .sidebar {
-    width: 216px;
+    width: 220px;
   }
 }
 
@@ -283,9 +295,11 @@
     top: 0;
     bottom: 0;
     left: 0;
+    height: auto;
+    max-height: none;
     margin: 0;
     width: min(280px, 86vw);
-    max-height: none;
+    border-right: 1px solid var(--glass-border);
     border-radius: 0 8px 8px 0;
     z-index: 40;
     overflow-y: auto;
@@ -294,6 +308,7 @@
     transform: translateX(-105%);
     visibility: hidden;
     transition: transform 0.25s ease, visibility 0.25s ease;
+    box-shadow: var(--shadow-lg);
     padding-top: calc(20px + env(safe-area-inset-top, 0px));
     padding-bottom: calc(16px + env(safe-area-inset-bottom));
   }
