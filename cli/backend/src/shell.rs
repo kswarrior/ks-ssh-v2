@@ -1,27 +1,103 @@
 //! Local shell over WebSocket — sshx.io style, no token.
 //!
-//! `GET /v1/shell` upgrades to WebSocket. Each connection spawns its own
-//! login shell (`$SHELL`, else `bash`, else `sh`) inside a real PTY so
-//! prompts, colors, `clear`, `vim`, etc. behave like a real terminal.
+//! `GET /v1/shell?id=<session>` upgrades to WebSocket. Sessions outlive
+//! the socket: closing the page (or refreshing) detaches, and reconnecting
+//! with the same id reattaches to the still-running shell, replaying the
+//! scrollback ring first. Detached sessions are reaped after a TTL.
 //!
 //! Protocol:
 //! * client -> server: raw keystrokes (`onData` from xterm.js). Only the
 //!   exact JSON `{"type":"resize","cols":N,"rows":N}` is control traffic —
 //!   everything else (even typed JSON) goes to the shell as input.
-//! * server -> client: raw PTY bytes (Binary frames) for xterm.js, plus
-//!   the exact Text `{"type":"exit"}` once when the shell exits
-//!   (followed by a Close frame).
+//! * server -> client: `{"type":"ready","id":...}` (Text) first, then raw
+//!   PTY bytes (Binary frames) for xterm.js, plus the exact Text
+//!   `{"type":"exit"}` once when the shell exits (followed by Close).
+//!   A superseded socket gets Close code 4000 ("attached elsewhere").
 
 use axum::{
-    extract::ws::{Message, WebSocket, WebSocketUpgrade},
+    extract::{
+        Query,
+        ws::{CloseFrame, Message, WebSocket, WebSocketUpgrade},
+    },
     response::IntoResponse,
 };
 use futures_util::{SinkExt, StreamExt};
 use portable_pty::{CommandBuilder, NativePtySystem, PtySize, PtySystem};
-use std::io::Read;
+use serde::Deserialize;
+use std::{
+    collections::{HashMap, VecDeque},
+    io::Read,
+    sync::{
+        Arc, LazyLock, Mutex as StdMutex,
+        atomic::{AtomicBool, AtomicU64, Ordering},
+    },
+    time::{Duration, Instant},
+};
 
-pub async fn ws_handler(ws: WebSocketUpgrade) -> impl IntoResponse {
-    ws.on_upgrade(handle_socket)
+/// PTY output kept per session for reattach replay.
+const RING_CAP: usize = 256 * 1024;
+/// Detached sessions are reaped after this long without a socket.
+const SESSION_TTL: Duration = Duration::from_secs(30 * 60);
+/// Upper bound on sessions; oldest detached are evicted past it.
+const MAX_SESSIONS: usize = 64;
+/// Close code telling a socket it lost a takeover fight.
+const CLOSE_SUPERSEDED: u16 = 4000;
+
+#[derive(Deserialize)]
+struct ShellQuery {
+    id: Option<String>,
+}
+
+fn valid_session_id(t: &str) -> bool {
+    !t.is_empty()
+        && t.len() <= 64
+        && t.bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+}
+
+fn new_session_id() -> String {
+    // 128-bit random hex — unguessable, so another local user can't
+    // attach to someone else's shell by guessing ids.
+    (0..16)
+        .map(|_| format!("{:02x}", fastrand::u8(..)))
+        .collect()
+}
+
+/// Keep the last RING_CAP bytes of PTY output for reattach replay.
+fn push_ring(ring: &mut VecDeque<u8>, bytes: &[u8]) {
+    ring.extend(bytes.iter());
+    let overflow = ring.len().saturating_sub(RING_CAP);
+    if overflow > 0 {
+        ring.drain(..overflow);
+    }
+}
+
+enum Out {
+    Data(Vec<u8>),
+    Eof,
+    Takeover,
+}
+
+struct Session {
+    id: String,
+    master: StdMutex<Box<dyn portable_pty::MasterPty + Send>>,
+    child: StdMutex<Option<Box<dyn portable_pty::Child + Send + Sync>>>,
+    /// Input path to the PTY writer thread (lives as long as the session).
+    writer_tx: tokio::sync::mpsc::Sender<Vec<u8>>,
+    /// Current subscriber (None while detached).
+    sub: StdMutex<Option<tokio::sync::mpsc::Sender<Out>>>,
+    ring: StdMutex<VecDeque<u8>>,
+    dead: AtomicBool,
+    /// Bumped on every attach; lets stale sockets notice a takeover.
+    gen: AtomicU64,
+    last_active: StdMutex<Instant>,
+}
+
+static SESSIONS: LazyLock<tokio::sync::Mutex<HashMap<String, Arc<Session>>>> =
+    LazyLock::new(|| tokio::sync::Mutex::new(HashMap::new()));
+
+pub async fn ws_handler(ws: WebSocketUpgrade, Query(q): Query<ShellQuery>) -> impl IntoResponse {
+    ws.on_upgrade(move |socket| handle_socket(socket, q.id))
 }
 
 fn spawn_shell(
