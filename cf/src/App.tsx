@@ -231,34 +231,6 @@ function HomePage({
           </ul>
         )}
       </div>
-      <div className="grid">
-        <div className="card">
-          <h2>New here?</h2>
-          <p>Install the backend, set up your key, and connect in minutes.</p>
-          <div className="row-actions">
-            <button
-              type="button"
-              className="btn btn-primary"
-              onClick={() => go('installation')}
-            >
-              Get started
-            </button>
-          </div>
-        </div>
-        <div className="card">
-          <h2>Settings</h2>
-          <p>Tune the defaults KS SSH uses for your connections.</p>
-          <div className="row-actions">
-            <button
-              type="button"
-              className="btn"
-              onClick={() => go('settings')}
-            >
-              Open settings
-            </button>
-          </div>
-        </div>
-      </div>
     </section>
   )
 }
