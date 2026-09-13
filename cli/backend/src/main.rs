@@ -1,4 +1,5 @@
 mod files;
+mod ports;
 mod relay;
 mod shell;
 mod ui;
@@ -74,6 +75,7 @@ async fn serve(host: String, port: u16) {
         .route("/api/files/rename", post(files::api_rename_file))
         .route("/api/files/mkdir", post(files::api_mkdir))
         .route("/api/files/download", get(files::api_download_file))
+        .route("/api/ports", get(ports::api_list_ports))
         .route(
             "/api/files/content",
             get(files::api_read_content).put(files::api_save_content),

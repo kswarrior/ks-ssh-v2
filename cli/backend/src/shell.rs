@@ -150,10 +150,22 @@ async fn handle_socket(socket: WebSocket) {
         loop {
             tokio::select! {
                 chunk = out_rx.recv() => {
-                    let Some(bytes) = chunk else { break };
-                    let text = String::from_utf8_lossy(&bytes).into_owned();
-                    if ws_tx.send(Message::Text(text.into())).await.is_err() {
-                        break;
+                    match chunk {
+                        Some(bytes) => {
+                            let text = String::from_utf8_lossy(&bytes).into_owned();
+                            if ws_tx.send(Message::Text(text.into())).await.is_err() {
+                                break;
+                            }
+                        }
+                        // Reader hit EOF — the shell is gone. Tell the UI
+                        // (the exit watcher is only a backup: EOF usually
+                        // wins the race against its 200ms poll).
+                        None => {
+                            let _ = ws_tx
+                                .send(Message::Text(r#"{"type":"exit"}"#.to_string().into()))
+                                .await;
+                            break;
+                        }
                     }
                 }
                 _ = &mut exit_rx => {
