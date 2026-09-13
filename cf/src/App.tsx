@@ -422,7 +422,6 @@ function RelayCard() {
   const [name, setName] = useState('')
   const [code, setCode] = useState('')
   const [status, setStatus] = useState<'idle' | 'connecting' | 'connected' | 'error'>('idle')
-  const [agentOnline, setAgentOnline] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const wsRef = useRef<WebSocket | null>(null)
 
@@ -446,7 +445,6 @@ function RelayCard() {
       // Already closed — ignore.
     }
     setStatus('idle')
-    setAgentOnline(false)
     setError(null)
   }
 
@@ -489,12 +487,9 @@ function RelayCard() {
         if (msg?.type === 'paired' || msg?.type === 'registered') {
           setStatus('connected')
           setError(null)
-          if (typeof msg.agent === 'boolean') setAgentOnline(msg.agent)
           const next = { name: name.trim() || 'Relay', token: t }
           writeJSON('ks-ssh:relay', next)
           setSession(next)
-        } else if (msg?.type === 'agent' && typeof msg.online === 'boolean') {
-          setAgentOnline(msg.online)
         }
       } catch {
         // Binary relay payloads are ignored in v1.

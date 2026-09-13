@@ -1009,3 +1009,23 @@
     flex: 1 1 auto;
   }
 }
+
+.ws-log {
+  font-family: var(--mono);
+  font-size: 14px;
+  line-height: 1.5;
+  background: var(--field-bg);
+  border: 1px solid var(--glass-border);
+  border-radius: 8px;
+  padding: 12px;
+  margin-bottom: 16px;
+  min-height: 200px;
+  max-height: 50svh;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.ws-log > div + div {
+  margin-top: 4px;
+}
