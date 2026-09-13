@@ -414,6 +414,8 @@ export default function TerminalPage({
   const [sessions, setSessions] = useState<TermSession[]>([])
   const [activeId, setActiveId] = useState<string | null>(null)
   const [statuses, setStatuses] = useState<Record<string, TermStatus>>({})
+  // Pending close confirmation — the kill only happens after Confirm.
+  const [confirmId, setConfirmId] = useState<string | null>(null)
 
   const addTerminal = () => {
     const t = nextTerm()
@@ -428,11 +430,19 @@ export default function TerminalPage({
     if (activeId === id) {
       setActiveId(next.length > 0 ? next[next.length - 1].id : null)
     }
+    if (confirmId === id) setConfirmId(null)
     setStatuses((prev) => {
       const next = { ...prev }
       delete next[id]
       return next
     })
+  }
+
+  const requestClose = (id: string) => setConfirmId(id)
+
+  const confirmClose = () => {
+    if (confirmId) closeTerminal(confirmId)
+    setConfirmId(null)
   }
 
   // Stable identity — child reports status without refiring every render.
@@ -474,6 +484,9 @@ export default function TerminalPage({
   }
 
   const active = sessions.find((t) => t.id === activeId) ?? sessions[0]
+  const confirmTerm = confirmId
+    ? sessions.find((t) => t.id === confirmId) ?? null
+    : null
 
   return (
     <section className="page term-page" aria-labelledby="page-title-terminal">
@@ -512,15 +525,28 @@ export default function TerminalPage({
                   if (last) setActiveId(last.id)
                 } else if (e.key === 'Delete') {
                   e.preventDefault()
-                  closeTerminal(t.id)
+                  requestClose(t.id)
                 }
               }}
             >
+              <svg
+                className="term-tab-icon"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <rect x="2" y="4" width="20" height="16" rx="2" />
+                <path d="m7 9 3 3-3 3M13 15h4" />
+              </svg>
+              <span className="term-tab-name">{t.name}</span>
               <span
                 className={`term-tab-dot${st === 'online' ? ' on' : st === 'connecting' ? ' wait' : ''}`}
                 aria-hidden="true"
               />
-              <span className="term-tab-name">{t.name}</span>
               <button
                 type="button"
                 className="term-tab-close"
@@ -528,10 +554,20 @@ export default function TerminalPage({
                 title={`Close ${t.name}`}
                 onClick={(e) => {
                   e.stopPropagation()
-                  closeTerminal(t.id)
+                  requestClose(t.id)
                 }}
               >
-                ×
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2.4"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden="true"
+                >
+                  <path d="M18 6 6 18M6 6l12 12" />
+                </svg>
               </button>
             </div>
           )
@@ -557,6 +593,56 @@ export default function TerminalPage({
           </div>
         ))}
       </div>
+      {confirmTerm && (
+        <div
+          className="term-confirm-overlay"
+          onClick={() => setConfirmId(null)}
+          onKeyDown={(e) => {
+            if (e.key === 'Escape') setConfirmId(null)
+          }}
+        >
+          <div
+            className="term-confirm"
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="term-confirm-title"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <svg
+              className="term-confirm-icon"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <rect x="2" y="4" width="20" height="16" rx="2" />
+              <path d="m7 9 3 3-3 3M13 15h4" />
+            </svg>
+            <h2 id="term-confirm-title">Close {confirmTerm.name}?</h2>
+            <p>The shell session will be killed.</p>
+            <div className="term-confirm-actions">
+              <button
+                type="button"
+                className="btn btn-sm"
+                onClick={() => setConfirmId(null)}
+                autoFocus
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn btn-sm btn-danger"
+                onClick={confirmClose}
+              >
+                Close terminal
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </section>
   )
 }
