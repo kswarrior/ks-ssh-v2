@@ -63,6 +63,9 @@ function copyText(text: string): void {
   fallback()
 }
 
+// Retained for upcoming terminal copy button — keeps noUnusedLocals happy.
+void copyText
+
 function ShellSession({
   id,
   onStatus,
