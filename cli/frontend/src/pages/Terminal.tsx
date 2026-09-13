@@ -133,14 +133,33 @@ function ShellSession({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  // Auto-scroll only while pinned to the bottom — never yank a user
+  // who scrolled up to read older output.
   useEffect(() => {
     const el = bodyRef.current
-    if (el) el.scrollTop = el.scrollHeight
+    if (el && stickRef.current) el.scrollTop = el.scrollHeight
   }, [output])
 
   useEffect(() => {
-    onStatus?.(status)
-  }, [status, onStatus])
+    onStatus(id, status)
+  }, [id, status, onStatus])
+
+  const onScroll = () => {
+    const el = bodyRef.current
+    if (!el) return
+    const nearBottom =
+      el.scrollHeight - el.scrollTop - el.clientHeight < 48
+    stickRef.current = nearBottom
+    setStuck(nearBottom)
+  }
+
+  const jumpToBottom = () => {
+    stickRef.current = true
+    setStuck(true)
+    const el = bodyRef.current
+    if (el) el.scrollTop = el.scrollHeight
+    focusKeys()
+  }
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter') {
@@ -168,6 +187,9 @@ function ShellSession({
       e.preventDefault()
       send('\x1b[D')
     } else if (e.ctrlKey && (e.key === 'c' || e.key === 'C')) {
+      // Let the browser copy when terminal text is selected.
+      const sel = window.getSelection()
+      if (sel && !sel.isCollapsed && sel.toString() !== '') return
       e.preventDefault()
       send('\x03')
     } else if (e.ctrlKey && (e.key === 'd' || e.key === 'D')) {
@@ -184,11 +206,28 @@ function ShellSession({
 
   return (
     <div className="term-window" onClick={focusKeys}>
-      <div className="term-body" ref={bodyRef} aria-live="polite">
+      <div
+        className="term-body"
+        ref={bodyRef}
+        aria-live="polite"
+        onScroll={onScroll}
+      >
         <pre className="term-output">{output}</pre>
         <span className="term-cursor" aria-hidden="true">
           █
         </span>
+        {!stuck && (
+          <button
+            type="button"
+            className="term-jump"
+            onClick={(e) => {
+              e.stopPropagation()
+              jumpToBottom()
+            }}
+          >
+            ↓ latest
+          </button>
+        )}
         <input
           ref={keyRef}
           className="term-keycapture"
@@ -240,13 +279,11 @@ export default function TerminalPage({
   }
 
   const closeTerminal = (id: string) => {
-    setSessions((prev) => {
-      const next = prev.filter((t) => t.id !== id)
-      if (activeId === id) {
-        setActiveId(next.length > 0 ? next[next.length - 1].id : null)
-      }
-      return next
-    })
+    const next = sessions.filter((t) => t.id !== id)
+    setSessions(next)
+    if (activeId === id) {
+      setActiveId(next.length > 0 ? next[next.length - 1].id : null)
+    }
     setStatuses((prev) => {
       const next = { ...prev }
       delete next[id]
@@ -254,9 +291,10 @@ export default function TerminalPage({
     })
   }
 
-  const handleStatus = (id: string) => (s: TermStatus) => {
+  // Stable identity — child reports status without refiring every render.
+  const handleStatus = useCallback((id: string, s: TermStatus) => {
     setStatuses((prev) => (prev[id] === s ? prev : { ...prev, [id]: s }))
-  }
+  }, [])
 
   // First run: complete blank + centered button only.
   if (sessions.length === 0) {
@@ -299,7 +337,7 @@ export default function TerminalPage({
         Terminal
       </h1>
       <div className="term-bar" role="tablist" aria-label="Terminals">
-        {sessions.map((t) => {
+        {sessions.map((t, i) => {
           const isActive = t.id === active.id
           const st = statuses[t.id] ?? 'connecting'
           return (
@@ -314,6 +352,12 @@ export default function TerminalPage({
                 if (e.key === 'Enter' || e.key === ' ') {
                   e.preventDefault()
                   setActiveId(t.id)
+                } else if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
+                  e.preventDefault()
+                  const dir = e.key === 'ArrowRight' ? 1 : -1
+                  const next =
+                    sessions[(i + dir + sessions.length) % sessions.length]
+                  if (next) setActiveId(next.id)
                 }
               }}
             >
@@ -350,7 +394,7 @@ export default function TerminalPage({
       <div className="term-opened">
         {sessions.map((t) => (
           <div key={t.id} hidden={t.id !== active.id}>
-            <ShellSession name={t.name} onStatus={handleStatus(t.id)} />
+            <ShellSession id={t.id} onStatus={handleStatus} />
           </div>
         ))}
       </div>
