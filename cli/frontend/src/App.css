@@ -1452,6 +1452,71 @@
   padding: 10px 12px;
 }
 
+/* Clickable breadcrumb path: ~/docs/project — each parent navigates. */
+.files-crumbs ol {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 2px 0;
+  min-width: 0;
+}
+
+.files-crumbs li {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.crumb-link,
+.crumb-current {
+  font: inherit;
+  font-size: 13px;
+  max-width: 32ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.crumb-link {
+  background: none;
+  border: none;
+  padding: 2px 4px;
+  margin: -2px 0;
+  border-radius: 6px;
+  color: var(--accent-strong);
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: none;
+}
+
+.crumb-link:hover:not(:disabled) {
+  text-decoration: underline;
+  background: var(--accent-soft);
+}
+
+.crumb-link:disabled {
+  opacity: 0.55;
+  cursor: wait;
+}
+
+.crumb-current {
+  padding: 2px 4px;
+  color: var(--text-h);
+  font-weight: 700;
+}
+
+.crumb-sep {
+  color: var(--text);
+  opacity: 0.6;
+  padding: 0 2px;
+  user-select: none;
+}
+
 .files-toggle {
   display: inline-flex;
   align-items: center;

@@ -37,6 +37,25 @@ function downloadUrl(path: string): string {
   return `/api/files/download?path=${encodeURIComponent(path)}`
 }
 
+type Crumb = { name: string; path: string }
+
+function buildCrumbs(home: string, path: string): Crumb[] {
+  const norm = (s: string) => s.replace(/\\/g, '/').replace(/\/+$/, '') || '/'
+  const h = norm(home)
+  const p = norm(path)
+  const root: Crumb = { name: '~', path: home }
+  if (p === h) return [root]
+  if (!p.startsWith(h + '/')) return [{ name: path, path }]
+  const rel = p.slice(h.length + 1).split('/').filter(Boolean)
+  const crumbs: Crumb[] = [root]
+  rel.forEach((seg, i) => {
+    // Rebuild with the original home prefix so `load()` gets a valid abs path.
+    const abs = `${h}/${rel.slice(0, i + 1).join('/')}`
+    crumbs.push({ name: seg, path: i === rel.length - 1 ? path : abs })
+  })
+  return crumbs
+}
+
 type ContentKind = 'text' | 'binary' | 'too-large'
 
 type ContentResponse = {
@@ -525,9 +544,45 @@ export default function FilesPage() {
 
       <div className="files-body">
         <div className="files-pathrow">
-          <code className="files-path" title={data?.path ?? 'HOME of host'}>
-            {data?.path ?? '~'}
-          </code>
+          <nav
+            className="files-path files-crumbs"
+            aria-label="Current folder"
+            title={data?.path ?? 'HOME of host'}
+          >
+            {!data ? (
+              <span className="crumb-current">~</span>
+            ) : (
+              <ol>
+                {buildCrumbs(data.home, data.path).map((c, i, arr) => {
+                  const isLast = i === arr.length - 1
+                  return (
+                    <li key={`${c.path}-${i}`}>
+                      {isLast ? (
+                        <span className="crumb-current" aria-current="page" title={c.path}>
+                          {c.name}
+                        </span>
+                      ) : (
+                        <button
+                          type="button"
+                          className="crumb-link"
+                          title={`Open ${c.path}`}
+                          disabled={loading || busy}
+                          onClick={() => void load(c.path)}
+                        >
+                          {c.name}
+                        </button>
+                      )}
+                      {!isLast && (
+                        <span className="crumb-sep" aria-hidden="true">
+                          /
+                        </span>
+                      )}
+                    </li>
+                  )
+                })}
+              </ol>
+            )}
+          </nav>
           <label className="files-toggle">
             <input
               type="checkbox"
