@@ -1989,5 +1989,3 @@ export default function FilesPage() {
   )
 }
 
-// TEMP-TEST-EXPORT
-export { highlightCode, detectLang, fileCat, paint }
