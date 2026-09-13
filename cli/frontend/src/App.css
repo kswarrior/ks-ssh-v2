@@ -2094,45 +2094,13 @@ a.file-link {
   gap: 12px;
 }
 
-.ports-table-wrap {
-  overflow-x: auto;
-  margin: 4px -4px -4px;
-  padding: 4px;
-}
+/* Cards reuse the Files page .file-grid / .file-card look;
+   only port-specific bits live here. */
 
-.ports-table {
-  width: 100%;
-  min-width: 620px;
-  border-collapse: separate;
-  border-spacing: 0;
-  font-size: 14px;
-}
-
-.ports-table thead th {
-  text-align: left;
-  font-size: 12px;
+.file-card .file-name .ports-port {
+  font-family: var(--mono);
   font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--text);
-  padding: 10px 12px;
-  border-bottom: 1px solid var(--glass-border);
-  white-space: nowrap;
-}
-
-.ports-table tbody td {
-  padding: 10px 12px;
-  border-bottom: 1px solid var(--glass-border);
-  vertical-align: middle;
-  color: var(--text-h);
-}
-
-.ports-table tbody tr:last-child td {
-  border-bottom: none;
-}
-
-.ports-table tbody tr:hover {
-  background: var(--hover-bg);
+  font-size: 15px;
 }
 
 .ports-port {
@@ -2153,6 +2121,7 @@ a.file-link {
   color: var(--accent-strong);
   border: 1px solid rgba(139, 124, 255, 0.35);
   white-space: nowrap;
+  vertical-align: middle;
 }
 
 .ports-pill {
@@ -2179,31 +2148,9 @@ a.file-link {
   border-color: rgba(52, 211, 153, 0.35);
 }
 
-.ports-addr {
-  font-size: 13px;
-  max-width: 260px;
-}
-
-.ports-proc {
-  min-width: 120px;
-}
-
-.ports-proc-name {
-  font-weight: 600;
-  overflow-wrap: anywhere;
-}
-
-.ports-pid {
-  display: inline-block;
-  margin-left: 8px;
-  font-family: var(--mono);
-  font-size: 12px;
-  color: var(--text);
-  white-space: nowrap;
-}
-
-.ports-unknown {
-  color: var(--text);
+.ports-top-pill {
+  margin-left: auto;
+  flex-shrink: 0;
 }
 
 /* ---------- Ports loading skeleton ---------- */
@@ -2223,25 +2170,31 @@ a.file-link {
   vertical-align: middle;
 }
 
-.skeleton-port {
-  width: 64px;
+.skeleton-icon {
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+  border-radius: 8px;
 }
 
-.skeleton-pill {
-  width: 58px;
-  height: 22px;
+.skeleton-title {
+  width: 55%;
+  flex: 1 1 auto;
 }
 
-.skeleton-addr {
-  width: min(160px, 100%);
+.skeleton-meta {
+  width: 90%;
 }
 
-.skeleton-proc {
-  width: min(120px, 100%);
-}
-
-.ports-skeleton-row td {
+.file-card.ports-skeleton {
   pointer-events: none;
+  cursor: default;
+}
+
+.file-card.ports-skeleton:hover {
+  transform: none;
+  border-color: var(--glass-border);
+  box-shadow: var(--glow-line), var(--shadow-md);
 }
 
 @keyframes skeleton-shimmer {

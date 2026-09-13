@@ -208,11 +208,10 @@ export default function PortsPage() {
           <ul
             className="file-grid"
             aria-label="Scanning host ports"
-            role="status"
             aria-busy="true"
           >
             {Array.from({ length: 8 }, (_, i) => (
-              <li key={i} className="file-card" aria-hidden="true">
+              <li key={i} className="file-card ports-skeleton" aria-hidden="true">
                 <div className="file-card-top">
                   <span className="skeleton skeleton-icon" />
                   <span className="skeleton skeleton-title" />
@@ -222,7 +221,7 @@ export default function PortsPage() {
                 </div>
               </li>
             ))}
-            <span className="sr-only">Scanning host ports…</span>
+            <span className="sr-only" role="status">Scanning host ports…</span>
           </ul>
         ) : visible.length === 0 ? (
           <div className="card">
@@ -234,68 +233,53 @@ export default function PortsPage() {
             </p>
           </div>
         ) : (
-          <div className="ports-table-wrap">
-            <table className="ports-table">
-              <thead>
-                <tr>
-                  <th scope="col">Port</th>
-                  <th scope="col">Proto</th>
-                  <th scope="col">Listen address</th>
-                  <th scope="col">State</th>
-                  <th scope="col">Process</th>
-                </tr>
-              </thead>
-              <tbody>
-                {visible.map((p, i) => {
-                  const svc = serviceName(p.port)
-                  return (
-                    <tr key={`${p.proto}-${p.addr}-${p.port}-${i}`}>
-                      <td>
-                        <span className="ports-port">{p.port}</span>
-                        {svc && (
-                          <span className="ports-svc" title="Well-known service">
-                            {svc}
-                          </span>
-                        )}
-                      </td>
-                      <td>
-                        <span
-                          className="ports-pill"
-                          data-proto={isTcp(p.proto) ? 'tcp' : 'udp'}
-                        >
-                          {p.proto}
+          <ul className="file-grid" aria-label={`Open ports on ${data?.hostname ?? 'host'}`}>
+            {visible.map((p, i) => {
+              const svc = serviceName(p.port)
+              const tcp = isTcp(p.proto)
+              const proc = p.process
+                ? ` · ${p.process}${p.pid != null ? ` (pid ${p.pid})` : ''}`
+                : ''
+              return (
+                <li
+                  key={`${p.proto}-${p.addr}-${p.port}-${i}`}
+                  className="file-card"
+                  title={`Port ${p.port} (${p.proto}) on ${p.addr}${p.process ? ` — ${p.process}` : ''}`}
+                >
+                  <div className="file-card-top">
+                    <span
+                      className="file-icon"
+                      aria-hidden="true"
+                      data-kind={tcp ? 'dir' : 'file'}
+                    >
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M9 2v6M15 2v6M7 8h10v4a5 5 0 0 1-10 0z" />
+                        <path d="M12 17v5" />
+                      </svg>
+                    </span>
+                    <span className="file-name">
+                      <span className="ports-port">{p.port}</span>
+                      {svc && (
+                        <span className="ports-svc" title="Well-known service">
+                          {svc}
                         </span>
-                      </td>
-                      <td>
-                        <code className="ports-addr" title={`${p.addr}:${p.port}`}>
-                          {p.addr}
-                        </code>
-                      </td>
-                      <td>
-                        <span className="tag online">{p.state}</span>
-                      </td>
-                      <td className="ports-proc">
-                        {p.process ? (
-                          <>
-                            <span className="ports-proc-name">{p.process}</span>
-                            {p.pid != null && (
-                              <span className="ports-pid" title="Process ID">
-                                pid {p.pid}
-                              </span>
-                            )}
-                          </>
-                        ) : (
-                          <span className="ports-unknown" title="Needs root to see all processes">
-                            —
-                          </span>
-                        )}
-                      </td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
-          </div>
+                      )}
+                    </span>
+                    <span
+                      className="ports-pill ports-top-pill"
+                      data-proto={tcp ? 'tcp' : 'udp'}
+                    >
+                      {p.proto}
+                    </span>
+                  </div>
+                  <div className="file-meta">
+                    {p.addr}:{p.port} · {p.state}
+                    {proc}
+                  </div>
+                </li>
+              )
+            })}
+          </ul>
         )}
       </div>
     </section>
