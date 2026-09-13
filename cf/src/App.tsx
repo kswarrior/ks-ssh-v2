@@ -968,6 +968,393 @@ function SSHPage({
   )
 }
 
+function ViewPage() {
+  const [token, setToken] = useState(() => hashToViewToken(window.location.hash) ?? '')
+  const [activeToken, setActiveToken] = useState<string | null>(() =>
+    hashToViewToken(window.location.hash),
+  )
+  const [meta, setMeta] = useState<{ hasUi: boolean; size: number } | null>(null)
+  const [checking, setChecking] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [srcDoc, setSrcDoc] = useState<string | null>(null)
+  const [cacheBust, setCacheBust] = useState(0)
+  const wrapRef = useRef<HTMLDivElement | null>(null)
+  const frameRef = useRef<HTMLIFrameElement | null>(null)
+
+  // Deep link support: #/view/ABCDE loads that token.
+  useEffect(() => {
+    const onHash = () => {
+      const t = hashToViewToken(window.location.hash)
+      if (t) {
+        setToken(t)
+        setActiveToken(t)
+      }
+    }
+    window.addEventListener('hashchange', onHash)
+    return () => window.removeEventListener('hashchange', onHash)
+  }, [])
+
+  // Check /api/ui/<token>/meta, then prefer raw /v/<token> iframe.
+  // Fall back to WSS ui-request -> srcdoc when HTTP has no UI yet.
+  useEffect(() => {
+    if (!activeToken) return
+    let cancelled = false
+    const ctrl = new AbortController()
+    setChecking(true)
+    setError(null)
+    setMeta(null)
+    setSrcDoc(null)
+    const load = async () => {
+      try {
+        const res = await fetch(`/api/ui/${activeToken}/meta`, {
+          signal: ctrl.signal,
+        })
+        const data = (await res.json().catch(() => null)) as {
+          ok?: boolean
+          hasUi?: boolean
+          size?: number
+        } | null
+        if (cancelled) return
+        if (res.ok && data?.hasUi) {
+          setMeta({ hasUi: true, size: Number(data.size) || 0 })
+          setChecking(false)
+          return
+        }
+        // HTTP has nothing yet — try live WSS (agent may be mid-upload).
+        await loadViaWss(activeToken, ctrl.signal, cancelled, {
+          setMeta,
+          setSrcDoc,
+          setError,
+          setChecking,
+        })
+      } catch (e) {
+        if (cancelled || ctrl.signal.aborted) return
+        setError(e instanceof Error ? e.message : 'check failed')
+        setChecking(false)
+      }
+    }
+    void load()
+    return () => {
+      cancelled = true
+      ctrl.abort()
+    }
+  }, [activeToken, cacheBust])
+
+  // Live reload: when the agent re-pushes, the room broadcasts ui-ready.
+  useEffect(() => {
+    if (!activeToken || srcDoc !== null) return
+    const scheme = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+    let ws: WebSocket | null = null
+    try {
+      ws = new WebSocket(
+        `${scheme}//${window.location.host}/v1/client?token=${activeToken}`,
+      )
+    } catch {
+      return
+    }
+    ws.onopen = () => {
+      try {
+        ws?.send(JSON.stringify({ type: 'hello', role: 'client' }))
+      } catch {
+        // Ignore — reload happens on next check.
+      }
+    }
+    ws.onmessage = (e) => {
+      try {
+        const msg = JSON.parse(String(e.data)) as { type?: string }
+        if (msg?.type === 'ui-ready') {
+          setCacheBust((n) => n + 1)
+        }
+      } catch {
+        // Non-JSON relay traffic — ignore here.
+      }
+    }
+    return () => {
+      try {
+        ws?.close()
+      } catch {
+        // Already closed — ignore.
+      }
+    }
+  }, [activeToken, srcDoc])
+
+  const submit = (e: FormEvent) => {
+    e.preventDefault()
+    const t = token.trim().toUpperCase()
+    if (!/^[A-Z0-9]{5}$/.test(t)) {
+      setError('Token is 5 letters/numbers.')
+      return
+    }
+    window.location.hash = `#/view/${t}`
+    setActiveToken(t)
+  }
+
+  const openFullscreen = async () => {
+    try {
+      const el = wrapRef.current
+      if (el?.requestFullscreen) {
+        await el.requestFullscreen()
+      } else {
+        // Fallback: raw /v/ page in a new tab is already fullscreen-capable.
+        window.open(`/v/${activeToken}`, '_blank', 'noopener')
+      }
+    } catch {
+      setError('Fullscreen blocked — use "Open raw" in a new tab instead.')
+    }
+  }
+
+  const frameSrc =
+    activeToken && meta?.hasUi && srcDoc === null
+      ? `/v/${activeToken}${cacheBust ? `?t=${cacheBust}` : ''}`
+      : undefined
+
+  return (
+    <section className="page page-view" aria-labelledby="page-title-view">
+      <div className="page-head">
+        <h1 id="page-title-view">View</h1>
+        {activeToken && (meta?.hasUi || srcDoc) && (
+          <div className="row-actions">
+            <button type="button" className="btn btn-sm btn-primary" onClick={openFullscreen}>
+              Fullscreen
+            </button>
+            <a
+              className="btn btn-sm"
+              href={`/v/${activeToken}`}
+              target="_blank"
+              rel="noreferrer"
+            >
+              Open raw
+            </a>
+          </div>
+        )}
+      </div>
+      <p className="lead">
+        Open the full UI pushed by your CLI over WSS — no port forwarding.
+        Run <code>ks-ssh --no-serve --token=ABCDE</code>, then enter the token.
+      </p>
+      <div className="card">
+        <form className="form" onSubmit={submit}>
+          <label className="field">
+            Token
+            <input
+              type="text"
+              value={token}
+              onChange={(e) => setToken(e.target.value.toUpperCase().slice(0, 5))}
+              placeholder="A3K9Q"
+              autoComplete="off"
+              inputMode="text"
+              maxLength={5}
+              required
+            />
+          </label>
+          <div className="row-actions">
+            <button type="submit" className="btn btn-primary">
+              Load UI
+            </button>
+            {activeToken && (
+              <button
+                type="button"
+                className="btn"
+                onClick={() => setCacheBust((n) => n + 1)}
+              >
+                Reload
+              </button>
+            )}
+          </div>
+        </form>
+        {checking && <p aria-live="polite">Checking for agent UI …</p>}
+        {error && (
+          <div className="banner-error" role="alert">
+            <p>{error}</p>
+          </div>
+        )}
+        {activeToken && !checking && !meta?.hasUi && !srcDoc && !error && (
+          <p>
+            Waiting for the agent UI for <code>{activeToken}</code>. On the
+            machine, run: <code>ks-ssh --no-serve --token={activeToken}</code>
+          </p>
+        )}
+      </div>
+
+      {activeToken && (meta?.hasUi || srcDoc) && (
+        <div className="view-wrap" ref={wrapRef}>
+          <div className="view-bar">
+            <code>/v/{activeToken}</code>
+            {meta && <span>{Math.round(meta.size / 1024)} KB</span>}
+            <span className="header-spacer" />
+            <button type="button" className="btn btn-sm btn-primary" onClick={openFullscreen}>
+              Fullscreen
+            </button>
+          </div>
+          {srcDoc !== null ? (
+            <iframe
+              ref={frameRef}
+              title={`Agent UI ${activeToken}`}
+              className="view-frame"
+              srcDoc={srcDoc}
+              allow="fullscreen"
+              allowFullScreen
+              sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
+            />
+          ) : (
+            <iframe
+              ref={frameRef}
+              title={`Agent UI ${activeToken}`}
+              className="view-frame"
+              src={frameSrc}
+              allow="fullscreen"
+              allowFullScreen
+            />
+          )}
+        </div>
+      )}
+    </section>
+  )
+}
+
+async function loadViaWss(
+  token: string,
+  signal: AbortSignal,
+  cancelled: boolean,
+  hooks: {
+    setMeta: (m: { hasUi: boolean; size: number } | null) => void
+    setSrcDoc: (s: string | null) => void
+    setError: (s: string | null) => void
+    setChecking: (b: boolean) => void
+  },
+): Promise<void> {
+  return new Promise((resolve) => {
+    if (signal.aborted || cancelled) {
+      resolve()
+      return
+    }
+    const scheme = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+    let ws: WebSocket
+    try {
+      ws = new WebSocket(`${scheme}//${window.location.host}/v1/client?token=${token}`)
+    } catch {
+      hooks.setError(`No UI for ${token} yet — is the CLI running with --token=${token}?`)
+      hooks.setChecking(false)
+      resolve()
+      return
+    }
+    let chunks: (string | null)[] | null = null
+    const timeout = setTimeout(() => {
+      try {
+        ws.close()
+      } catch {
+        // Already closed — ignore.
+      }
+      if (!cancelled && !signal.aborted) {
+        hooks.setError(
+          `No UI for ${token} yet. Run: ks-ssh --no-serve --token=${token}`,
+        )
+        hooks.setChecking(false)
+      }
+      resolve()
+    }, 10000)
+    const done = (ok: boolean) => {
+      clearTimeout(timeout)
+      try {
+        ws.close()
+      } catch {
+        // Already closed — ignore.
+      }
+      resolve()
+      void ok
+    }
+    signal.addEventListener('abort', () => {
+      clearTimeout(timeout)
+      try {
+        ws.close()
+      } catch {
+        // Already closed — ignore.
+      }
+      resolve()
+    })
+    ws.onopen = () => {
+      ws.send(JSON.stringify({ type: 'hello', role: 'client', token }))
+      ws.send(JSON.stringify({ type: 'ui-request' }))
+    }
+    ws.onmessage = (e) => {
+      try {
+        const msg = JSON.parse(String(e.data)) as {
+          type?: string
+          encoding?: string
+          size?: number
+          chunks?: number
+          i?: number
+          data?: string
+        }
+        if (msg?.type === 'ui-begin') {
+          const n = Number(msg.chunks) || 0
+          if (n > 0 && n <= 256) chunks = new Array(n).fill(null)
+          return
+        }
+        if (msg?.type === 'ui-chunk' && chunks) {
+          const i = Number(msg.i)
+          if (Number.isInteger(i) && i >= 0 && i < chunks.length && typeof msg.data === 'string') {
+            chunks[i] = msg.data
+          }
+          return
+        }
+        if (msg?.type === 'ui-end' && chunks) {
+          if (chunks.some((c) => c === null)) return
+          try {
+            const html = decodeUiChunks(chunks as string[])
+            if (cancelled || signal.aborted) {
+              done(false)
+              return
+            }
+            hooks.setSrcDoc(html)
+            hooks.setMeta({ hasUi: true, size: html.length })
+            hooks.setChecking(false)
+          } catch {
+            hooks.setError('UI decode failed — try Reload.')
+            hooks.setChecking(false)
+          }
+          done(true)
+          return
+        }
+        if (msg?.type === 'ui-missing' || msg?.type === 'ui-error') {
+          if (!cancelled && !signal.aborted) {
+            hooks.setError(`No UI for ${token} yet. Run: ks-ssh --no-serve --token=${token}`)
+            hooks.setChecking(false)
+          }
+          done(false)
+        }
+      } catch {
+        // Opaque relay traffic — ignore.
+      }
+    }
+    ws.onerror = () => {
+      if (!cancelled && !signal.aborted && chunks === null) {
+        hooks.setError(`No UI for ${token} yet. Run: ks-ssh --no-serve --token=${token}`)
+        hooks.setChecking(false)
+      }
+      done(false)
+    }
+  })
+}
+
+function decodeUiChunks(chunks: string[]): string {
+  let total = 0
+  const parts: Uint8Array[] = chunks.map((b64) => {
+    const bin = atob(b64)
+    const arr = new Uint8Array(bin.length)
+    for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i)
+    total += arr.length
+    return arr
+  })
+  const all = new Uint8Array(total)
+  let off = 0
+  for (const p of parts) {
+    all.set(p, off)
+    off += p.length
+  }
+  return new TextDecoder().decode(all)
+}
+
 function InstallationPage() {
   return (
     <section className="page" aria-labelledby="page-title-installation">
@@ -1337,6 +1724,7 @@ export default function App() {
         >
           {page === 'home' && <HomePage />}
           {page === 'ssh' && <SSHPage entries={entries} onChange={setEntries} />}
+          {page === 'view' && <ViewPage />}
           {page === 'installation' && <InstallationPage />}
           {page === 'settings' && (
             <SettingsPage settings={settings} onChange={patchSettings} />
