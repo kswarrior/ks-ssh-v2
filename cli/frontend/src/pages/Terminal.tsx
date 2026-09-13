@@ -48,13 +48,17 @@ function emulateEdits(s: string): string {
 
 /** Apply a PTY output chunk to the visible buffer. Handles clear-screen. */
 function applyChunk(prev: string, chunk: string): string {
-  if (
-    chunk.includes('\x1b[2J') ||
-    chunk.includes('\x1b[3J') ||
-    chunk.includes('\x1bc') ||
-    chunk.includes('\x1b[H\x1b[2J')
-  ) {
-    return emulateEdits(stripAnsi(chunk)).slice(-20000)
+  const clearSeqs = ['\x1b[2J', '\x1b[3J', '\x1bc', '\x1b[H\x1b[2J']
+  let lastClear = -1
+  for (const seq of clearSeqs) {
+    const idx = chunk.lastIndexOf(seq)
+    if (idx > lastClear) lastClear = idx
+  }
+  if (lastClear >= 0) {
+    // Discard everything before (and including) the last clear sequence —
+    // `clear` must wipe, not append.
+    const after = chunk.slice(lastClear)
+    return emulateEdits(stripAnsi(after)).slice(-20000)
   }
   const out = prev + emulateEdits(stripAnsi(chunk))
   if (out.length > 20000) return out.slice(-20000)
@@ -141,7 +145,6 @@ function ShellSession({
   // Chunk batching: coalesce bursty PTY output into one setState.
   const outBufRef = useRef('')
   const outTimerRef = useRef<number | undefined>(undefined)
-  const outFlushRef = useRef<(() => void) | null>(null)
   // Whether the view is pinned to the bottom.
   const stickRef = useRef(true)
   // True once the backend announced exit (JSON + close); distinguishes a
@@ -179,8 +182,11 @@ function ShellSession({
     // space). Fall back to the window when the box is not laid out yet.
     const w = el?.clientWidth ?? window.innerWidth
     const h = el?.clientHeight ?? window.innerHeight
-    const cols = Math.max(20, Math.min(500, Math.floor(w / 8.4)))
-    const rows = Math.max(5, Math.min(300, Math.floor(h / 18)))
+    // 14px mono ≈ 8.4px wide, 21.7px tall (14 * 1.55 line-height).
+    // Subtract body padding so the shell does not think it is taller
+    // than the visible box (hidden bottom lines otherwise).
+    const cols = Math.max(20, Math.min(500, Math.floor((w - 28) / 8.4)))
+    const rows = Math.max(5, Math.min(300, Math.floor((h - 28) / 21.7)))
     try {
       ws.send(JSON.stringify({ type: 'resize', cols, rows }))
     } catch {
@@ -208,7 +214,6 @@ function ShellSession({
       outBufRef.current = ''
       if (chunk) setOutput((prev) => applyChunk(prev, chunk))
     }
-    outFlushRef.current = flushOut
     const queueChunk = (text: string) => {
       if (!text) return
       outBufRef.current += text
@@ -636,7 +641,7 @@ export default function TerminalPage({
                   e.preventDefault()
                   const last = sessions[sessions.length - 1]
                   if (last) setActiveId(last.id)
-                } else if (e.key === 'Delete' || e.key === 'Backspace') {
+                } else if (e.key === 'Delete') {
                   e.preventDefault()
                   closeTerminal(t.id)
                 }
