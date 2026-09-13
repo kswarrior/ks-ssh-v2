@@ -1,3 +1,4 @@
+mod e2e;
 mod files;
 mod host;
 mod ports;
@@ -37,6 +38,13 @@ struct Cli {
     /// Skip pushing the frontend UI bundle over WSS (relay only).
     #[arg(long)]
     no_ui: bool,
+    /// Disable end-to-end encryption (legacy plaintext relay, relay-visible).
+    #[arg(long)]
+    no_e2e: bool,
+    /// E2E secret (base64url 32 bytes, from a printed share link `#k=...`).
+    /// Omit to auto-generate a fresh `k` per run.
+    #[arg(long)]
+    e2e_key: Option<String>,
 }
 
 async fn api_hello() -> &'static str {
@@ -118,9 +126,39 @@ async fn main() {
         std::process::exit(2);
     }
 
+    // E2E key handling: `--token=` auto-generates `k` unless `--e2e-key=`
+    // is given; `--no-e2e` forces legacy plaintext (escape hatch).
+    if cli.no_e2e && cli.e2e_key.is_some() {
+        eprintln!("--no-e2e conflicts with --e2e-key");
+        std::process::exit(2);
+    }
+    let e2e_key: Option<e2e::E2eKey> = if cli.no_e2e {
+        None
+    } else if let Some(ref s) = cli.e2e_key {
+        match e2e::E2eKey::from_base64url(s.trim()) {
+            Ok(k) => Some(k),
+            Err(e) => {
+                eprintln!("bad --e2e-key: {e:#}");
+                std::process::exit(2);
+            }
+        }
+    } else if token.is_some() {
+        match e2e::E2eKey::generate() {
+            Ok(k) => Some(k),
+            Err(e) => {
+                eprintln!("rng failed: {e:#}");
+                std::process::exit(2);
+            }
+        }
+    } else {
+        None
+    };
+
     match (cli.no_serve, token) {
         // Pure agent: no open port, only outbound WSS.
-        (true, Some(t)) => relay::run_agent(&relay_ws_base(&cli.relay), &t, !cli.no_ui).await,
+        (true, Some(t)) => {
+            relay::run_agent(&relay_ws_base(&cli.relay), &t, !cli.no_ui, e2e_key).await
+        }
         (true, None) => {
             eprintln!("--no-serve needs --token (try --token= for a random one)");
             std::process::exit(2);
@@ -129,7 +167,7 @@ async fn main() {
         (false, Some(t)) => {
             let ws_base = relay_ws_base(&cli.relay);
             let push_ui = !cli.no_ui;
-            tokio::spawn(async move { relay::run_agent(&ws_base, &t, push_ui).await });
+            tokio::spawn(async move { relay::run_agent(&ws_base, &t, push_ui, e2e_key).await });
             serve(cli.host, cli.port).await;
         }
         // Local UI only (previous behaviour).
