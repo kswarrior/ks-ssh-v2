@@ -120,7 +120,7 @@ async fn serve(host: String, port: u16, auth: Option<Arc<AuthState>>) {
         )
         .route("/api/auth/users", get(auth::api_list_users).post(auth::api_create_user))
         .route(
-            "/api/auth/users/:username",
+            "/api/auth/users/{username}",
             axum::routing::put(auth::api_update_user).delete(auth::api_delete_user),
         )
         .route("/v1/shell", get(shell::ws_handler))

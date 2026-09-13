@@ -3198,3 +3198,70 @@ a.file-link {
 .login-submit {
   width: 100%;
 }
+
+/* ---------- Users management (Settings → Users) ---------- */
+
+.tag-main {
+  color: var(--accent-strong);
+  background: var(--accent-soft);
+  border-color: rgba(139, 124, 255, 0.4);
+}
+
+.users-created {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--text);
+}
+
+.dialog-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgba(0, 0, 0, 0.55);
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+}
+
+.dialog {
+  width: min(440px, 100%);
+  max-height: calc(100svh - 32px);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 22px 20px 20px;
+  border: 1px solid var(--glass-border);
+  border-radius: 8px;
+  background: var(--panel-bg);
+  -webkit-backdrop-filter: blur(24px) saturate(150%);
+  backdrop-filter: blur(24px) saturate(150%);
+  box-shadow: var(--shadow-lg);
+}
+
+.dialog h2 {
+  margin: 0;
+  font-size: 17px;
+}
+
+.dialog .lead {
+  font-size: 14px;
+}
+
+.dialog-form {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: 1fr;
+}
+
+.dialog-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.dialog-actions .btn {
+  flex: 1 1 auto;
+}
