@@ -998,6 +998,7 @@ export default function App() {
     )
   })
   const [theme, setTheme] = useState<Theme>(initialTheme)
+  const [backendOk, setBackendOk] = useState<boolean | null>(null)
 
   // Derived state: drawer can only be open on phones; resizing to desktop
   // auto-closes it without a setState-in-effect cascade.
@@ -1019,6 +1020,32 @@ export default function App() {
     const label = NAV.find((p) => p.id === page)?.label
     document.title = label && label !== 'Home' ? `KS SSH — ${label}` : 'KS SSH'
   }, [page])
+
+  // Live backend status for the sidebar panel.
+  useEffect(() => {
+    let cancelled = false
+    const ctrl = new AbortController()
+    const timeout = setTimeout(() => ctrl.abort(), 5000)
+    const check = async () => {
+      try {
+        const res = await fetch('/api/health', { signal: ctrl.signal })
+        const data = (await res.json().catch(() => null)) as {
+          ok?: boolean
+        } | null
+        if (!cancelled) setBackendOk(res.ok && data?.ok === true)
+      } catch {
+        if (!cancelled) setBackendOk(false)
+      } finally {
+        clearTimeout(timeout)
+      }
+    }
+    void check()
+    return () => {
+      cancelled = true
+      clearTimeout(timeout)
+      ctrl.abort()
+    }
+  }, [])
 
   // Apply + persist the neumorphic light/dark theme.
   useEffect(() => {
