@@ -330,6 +330,7 @@ function ActiveSession({
 }) {
   const [lines, setLines] = useState<string[]>([])
   const [draft, setDraft] = useState('')
+  const [agentOnline, setAgentOnline] = useState(false)
   const wsRef = useRef<WebSocket | null>(null)
   const logRef = useRef<HTMLDivElement | null>(null)
 
@@ -358,10 +359,12 @@ function ActiveSession({
         }
         if (msg?.type === 'paired' || msg?.type === 'registered') {
           push(msg.agent ? 'paired — agent online' : 'paired — waiting for agent …')
+          setAgentOnline(msg.agent === true)
           return
         }
         if (msg?.type === 'agent') {
           push(msg.online ? 'agent online' : 'agent offline')
+          setAgentOnline(msg.online === true)
           return
         }
         if (msg?.type === 'pong') return
@@ -378,8 +381,14 @@ function ActiveSession({
       }
       push(text)
     }
-    ws.onerror = () => push('socket error')
-    ws.onclose = () => push('socket closed')
+    ws.onerror = () => {
+      push('socket error')
+      setAgentOnline(false)
+    }
+    ws.onclose = () => {
+      push('socket closed')
+      setAgentOnline(false)
+    }
     return () => {
       wsRef.current = null
       try {
@@ -411,10 +420,19 @@ function ActiveSession({
         <h2>
           {entry.name} <code>{token}</code>
         </h2>
-        <button type="button" className="btn btn-sm" onClick={onBack}>
-          Back
-        </button>
+        <div className="row-actions">
+          <StatusTag online={agentOnline} />
+          <button type="button" className="btn btn-sm" onClick={onBack}>
+            Back
+          </button>
+        </div>
       </div>
+      {!agentOnline && (
+        <>
+          <p>Waiting for the agent. On the machine, run:</p>
+          <CodeBlock code={`ks-ssh --no-serve --token=${token}`} />
+        </>
+      )}
       <div className="ws-log" ref={logRef} aria-live="polite">
         {lines.map((l, i) => (
           <div key={i}>{l}</div>

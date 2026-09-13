@@ -1125,8 +1125,8 @@
   border-radius: 8px;
   padding: 12px;
   margin-bottom: 16px;
-  min-height: 200px;
-  max-height: 50svh;
+  min-height: 40svh;
+  max-height: 62svh;
   overflow-y: auto;
   white-space: pre-wrap;
   word-break: break-word;
