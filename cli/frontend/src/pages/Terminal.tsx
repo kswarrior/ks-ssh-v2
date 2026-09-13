@@ -54,11 +54,16 @@ const EXIT_SENTINEL = '{"type":"exit"}'
 function ShellSession({
   id,
   active,
+  sid,
   onStatus,
+  onReady,
 }: {
   id: string
   active: boolean
+  /** Backend session id to reattach to (null = ask the backend for one). */
+  sid: string | null
   onStatus: (id: string, s: TermStatus) => void
+  onReady: (id: string, sid: string) => void
 }) {
   const [status, setStatus] = useState<TermStatus>('offline')
   // "↓ latest" pill when the user scrolled up to read older output.
@@ -78,6 +83,9 @@ function ShellSession({
   // True once the backend announced exit (JSON + close); distinguishes a
   // real exit from shell output that merely looks like the sentinel.
   const gotExitRef = useRef(false)
+  // Backend session id for this tab — survives refresh via localStorage
+  // (parent prop on mount) and reconnects reattach to the same shell.
+  const sidRef = useRef<string | null>(sid)
 
   const focusKeys = () => {
     setTimeout(() => termRef.current?.focus(), 30)
@@ -214,7 +222,10 @@ function ShellSession({
     gotExitRef.current = false
     sizeRef.current = null
     const scheme = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    const ws = new WebSocket(`${scheme}//${window.location.host}/v1/shell`)
+    const url = sidRef.current
+      ? `${scheme}//${window.location.host}/v1/shell?id=${encodeURIComponent(sidRef.current)}`
+      : `${scheme}//${window.location.host}/v1/shell`
+    const ws = new WebSocket(url)
     wsRef.current = ws
     try {
       ws.binaryType = 'arraybuffer'
