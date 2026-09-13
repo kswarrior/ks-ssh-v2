@@ -1315,29 +1315,42 @@
   color: var(--text);
 }
 
-.file-list {
+.file-grid {
   list-style: none;
   margin: 4px 0 0;
   padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 12px;
+}
+
+.file-card {
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: 8px;
-}
-
-.file-row {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 10px 12px;
+  padding: 14px;
   border: 1px solid var(--glass-border);
   border-radius: 8px;
   background: var(--field-bg);
   min-width: 0;
+  box-shadow: var(--glow-line), var(--shadow-md);
+  transition: border-color 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease;
 }
 
-.file-row:hover {
-  background: var(--hover-bg);
+.file-card:hover {
   border-color: rgba(139, 124, 255, 0.35);
+  box-shadow:
+    var(--glow-line),
+    var(--shadow-lg),
+    0 0 24px -10px var(--accent-shadow);
+}
+
+.file-card-top {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
 }
 
 .file-icon {
@@ -1403,6 +1416,141 @@ a.file-link {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  padding-left: 46px;
+}
+
+.file-rename-form {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.file-rename-input {
+  font: inherit;
+  font-size: 14px;
+  width: 100%;
+  min-height: 36px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--accent);
+  background: var(--field-bg);
+  color: var(--text-h);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.file-rename-input:focus {
+  outline: none;
+}
+
+/* ---------- Card ⋮ menu ---------- */
+
+.file-menu-wrap {
+  position: relative;
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
+.file-dots {
+  width: 32px;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+
+.file-dots:hover,
+.file-dots[aria-expanded='true'] {
+  background: var(--hover-bg);
+  border-color: var(--glass-border);
+  color: var(--text-h);
+}
+
+.file-dots svg {
+  width: 18px;
+  height: 18px;
+  display: block;
+}
+
+.file-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 20;
+  min-width: 150px;
+  display: flex;
+  flex-direction: column;
+  padding: 6px;
+  border: 1px solid var(--glass-border);
+  border-radius: 8px;
+  background: var(--panel-bg);
+  -webkit-backdrop-filter: blur(20px) saturate(150%);
+  backdrop-filter: blur(20px) saturate(150%);
+  box-shadow: var(--shadow-lg);
+}
+
+.file-menu-item {
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-height: 38px;
+  padding: 8px 12px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-h);
+  text-decoration: none;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.file-menu-item:hover {
+  background: var(--hover-bg);
+}
+
+.file-menu-item.danger {
+  color: var(--danger);
+}
+
+.file-menu-item.danger:hover {
+  background: var(--danger-soft);
+}
+
+/* ---------- Inline rename / delete confirm ---------- */
+
+.file-inline-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.file-inline-actions .btn {
+  flex: 1 1 auto;
+}
+
+.file-confirm {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--glass-border);
+}
+
+.file-confirm p {
+  font-size: 13px;
+  color: var(--text-h);
+  overflow-wrap: anywhere;
+}
+
+.file-confirm strong {
+  overflow-wrap: anywhere;
 }
 
 @media (max-width: 560px) {
@@ -1414,7 +1562,7 @@ a.file-link {
     flex: 1 1 auto;
   }
 
-  .file-row .btn {
-    padding: 8px 10px;
+  .file-grid {
+    grid-template-columns: minmax(0, 1fr);
   }
 }
