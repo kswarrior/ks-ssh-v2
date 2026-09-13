@@ -205,46 +205,25 @@ export default function PortsPage() {
             </div>
           </div>
         ) : loading && !data ? (
-          <div
-            className="ports-table-wrap"
+          <ul
+            className="file-grid"
+            aria-label="Scanning host ports"
             role="status"
             aria-busy="true"
-            aria-label="Scanning host ports…"
           >
-            <table className="ports-table" aria-hidden="true">
-              <thead>
-                <tr>
-                  <th scope="col">Port</th>
-                  <th scope="col">Proto</th>
-                  <th scope="col">Listen address</th>
-                  <th scope="col">State</th>
-                  <th scope="col">Process</th>
-                </tr>
-              </thead>
-              <tbody>
-                {Array.from({ length: 8 }, (_, i) => (
-                  <tr key={i} className="ports-skeleton-row">
-                    <td>
-                      <span className="skeleton skeleton-port" />
-                    </td>
-                    <td>
-                      <span className="skeleton skeleton-pill" />
-                    </td>
-                    <td>
-                      <span className="skeleton skeleton-addr" />
-                    </td>
-                    <td>
-                      <span className="skeleton skeleton-pill" />
-                    </td>
-                    <td>
-                      <span className="skeleton skeleton-proc" />
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            {Array.from({ length: 8 }, (_, i) => (
+              <li key={i} className="file-card" aria-hidden="true">
+                <div className="file-card-top">
+                  <span className="skeleton skeleton-icon" />
+                  <span className="skeleton skeleton-title" />
+                </div>
+                <div className="file-meta">
+                  <span className="skeleton skeleton-meta" />
+                </div>
+              </li>
+            ))}
             <span className="sr-only">Scanning host ports…</span>
-          </div>
+          </ul>
         ) : visible.length === 0 ? (
           <div className="card">
             <h2>No open ports found</h2>
