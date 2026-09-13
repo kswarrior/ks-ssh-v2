@@ -18,7 +18,6 @@ function useIsMobile(breakpoint = 768): boolean {
   useEffect(() => {
     const mq = window.matchMedia(`(max-width: ${breakpoint}px)`)
     const onChange = (e: MediaQueryListEvent) => setIsMobile(e.matches)
-    setIsMobile(mq.matches)
     mq.addEventListener('change', onChange)
     return () => mq.removeEventListener('change', onChange)
   }, [breakpoint])
@@ -33,24 +32,23 @@ export default function App() {
   const btnRef = useRef<HTMLButtonElement>(null)
   const asideRef = useRef<HTMLElement>(null)
 
-  // Close drawer when switching to desktop so stale `open` never leaks styles
-  useEffect(() => {
-    if (!isMobile) setOpen(false)
-  }, [isMobile])
+  // Derived state: drawer can only be open on phones; resizing to desktop
+  // auto-closes it without a setState-in-effect cascade.
+  const drawerOpen = isMobile && open
 
   // Lock background scroll while the phone drawer is open
   useEffect(() => {
-    if (!isMobile || !open) return
+    if (!drawerOpen) return
     const prev = document.body.style.overflow
     document.body.style.overflow = 'hidden'
     return () => {
       document.body.style.overflow = prev
     }
-  }, [isMobile, open])
+  }, [drawerOpen])
 
   // Escape closes + returns focus to the hamburger
   useEffect(() => {
-    if (!open) return
+    if (!drawerOpen) return
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         setOpen(false)
@@ -59,18 +57,18 @@ export default function App() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [open ])
+  }, [drawerOpen])
 
   // Keep hidden drawer out of keyboard / screen-reader flow on phones.
   // (toggleAttribute avoids React `inert` typing gaps across versions.)
   useEffect(() => {
     const el = asideRef.current
     if (!el) return
-    const hidden = isMobile && !open
+    const hidden = isMobile && !drawerOpen
     el.toggleAttribute('inert', hidden)
-  }, [isMobile, open])
+  }, [isMobile, drawerOpen])
 
-  const drawerHidden = isMobile && !open
+  const drawerHidden = isMobile && !drawerOpen
 
   return (
     <div className="app-shell">
@@ -82,9 +80,9 @@ export default function App() {
         <button
           ref={btnRef}
           type="button"
-          className={`hamburger${open ? ' is-open' : ''}`}
-          aria-label={open ? 'Close menu' : 'Open menu'}
-          aria-expanded={open}
+          className={`hamburger${drawerOpen ? ' is-open' : ''}`}
+          aria-label={drawerOpen ? 'Close menu' : 'Open menu'}
+          aria-expanded={drawerOpen}
           aria-controls="app-sidebar"
           onClick={() => setOpen((v) => !v)}
         >
@@ -104,7 +102,7 @@ export default function App() {
 
       <div className="app-body">
         <div
-          className={`overlay${open && isMobile ? ' show' : ''}`}
+          className={`overlay${drawerOpen ? ' show' : ''}`}
           onClick={() => setOpen(false)}
           aria-hidden="true"
         />
@@ -112,7 +110,7 @@ export default function App() {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           ref={asideRef as any}
           id="app-sidebar"
-          className={`sidebar${open ? ' open' : ''}`}
+          className={`sidebar${drawerOpen ? ' open' : ''}`}
           aria-hidden={drawerHidden ? true : undefined}
           aria-label="Primary"
         >
