@@ -1111,15 +1111,20 @@
 .page.term-page {
   max-width: none;
   flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
   padding: 0;
   gap: 0;
 }
 
-/* Terminal tab: full-bleed, no outer gaps left/right. */
+/* Terminal tab: full-bleed, flush to end of screen (no outer gaps). */
 .content-term {
-  padding-left: 0;
-  padding-right: 0;
-  padding-top: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
 }
 
 /* Terminal bar: [terminal 1][terminal 2][+] */
@@ -1198,20 +1203,35 @@
 
 .term-opened {
   flex: 1;
+  display: flex;
+  flex-direction: column;
   min-width: 0;
+  min-height: 0;
+}
+
+.term-opened > div {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.term-opened > div[hidden] {
+  display: none;
 }
 
 .term-window {
+  flex: 1;
   display: flex;
   flex-direction: column;
-  min-height: 70svh;
+  min-height: 0;
   border-radius: 0;
   border-left: none;
   border-right: none;
+  border-bottom: none;
   overflow: hidden;
   background: #000;
   border-top: 1px solid var(--glass-border);
-  border-bottom: 1px solid var(--glass-border);
   box-shadow: var(--shadow-lg);
 }
 
@@ -1298,10 +1318,11 @@
 .term-body {
   position: relative;
   flex: 1;
-  min-height: 60svh;
-  max-height: 70svh;
+  min-height: 0;
+  max-height: none;
   overflow-y: auto;
   padding: 14px;
+  padding-bottom: calc(14px + env(safe-area-inset-bottom));
   background: #000;
   color: #e6edf3;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
@@ -1476,6 +1497,11 @@
   align-items: center;
   gap: 10px;
   min-width: 0;
+  cursor: pointer;
+}
+
+.file-card-top .file-name {
+  cursor: pointer;
 }
 
 .file-icon {

@@ -37,6 +37,17 @@ function downloadUrl(path: string): string {
   return `/api/files/download?path=${encodeURIComponent(path)}`
 }
 
+type ContentKind = 'text' | 'binary' | 'too-large'
+
+type ContentResponse = {
+  path: string
+  name: string
+  size: number
+  modified: number | null
+  kind: ContentKind
+  content?: string
+}
+
 export default function FilesPage() {
   const [data, setData] = useState<ListResponse | null>(null)
   const [loading, setLoading] = useState(true)
@@ -49,6 +60,16 @@ export default function FilesPage() {
   const [busy, setBusy] = useState(false)
   const [actionError, setActionError] = useState<string | null>(null)
   const renameInputRef = useRef<HTMLInputElement | null>(null)
+  // Editor state.
+  const [editing, setEditing] = useState<FileEntry | null>(null)
+  const [editorKind, setEditorKind] = useState<ContentKind | null>(null)
+  const [editorText, setEditorText] = useState('')
+  const [editorSaved, setEditorSaved] = useState('')
+  const [editorLoading, setEditorLoading] = useState(false)
+  const [editorError, setEditorError] = useState<string | null>(null)
+  const [editorSaving, setEditorSaving] = useState(false)
+  const [confirmDiscard, setConfirmDiscard] = useState(false)
+  const editorDirty = editorText !== editorSaved
 
   const load = useCallback(async (path?: string) => {
     setLoading(true)
@@ -108,6 +129,16 @@ export default function FilesPage() {
       return () => clearTimeout(t)
     }
   }, [renaming])
+
+  // Escape closes the editor (twice when there are unsaved changes).
+  useEffect(() => {
+    if (!editing) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') closeEditor()
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  })
 
   const visible = (data?.entries ?? []).filter(
     (e) => showHidden || !e.name.startsWith('.'),
@@ -171,6 +202,82 @@ export default function FilesPage() {
       setActionError(err instanceof Error ? err.message : 'Delete failed.')
     } finally {
       setBusy(false)
+    }
+  }
+
+  // Click a card: folders open, files open in the editor.
+  const openEntry = (e: FileEntry) => {
+    if (renaming === e.path || confirmDelete === e.path) return
+    if (e.is_dir) {
+      void load(e.path)
+    } else {
+      void openEditor(e)
+    }
+  }
+
+  const openEditor = async (e: FileEntry) => {
+    setEditing(e)
+    setEditorKind(null)
+    setEditorText('')
+    setEditorSaved('')
+    setEditorError(null)
+    setConfirmDiscard(false)
+    setEditorLoading(true)
+    try {
+      const res = await fetch(
+        `/api/files/content?path=${encodeURIComponent(e.path)}`,
+      )
+      if (!res.ok) {
+        const text = await res.text().catch(() => '')
+        throw new Error(text || `cannot open file (${res.status})`)
+      }
+      const json = (await res.json()) as ContentResponse
+      setEditorKind(json.kind)
+      if (json.kind === 'text') {
+        setEditorText(json.content ?? '')
+        setEditorSaved(json.content ?? '')
+      }
+    } catch (err) {
+      setEditorError(err instanceof Error ? err.message : 'Cannot open file.')
+    } finally {
+      setEditorLoading(false)
+    }
+  }
+
+  const closeEditor = () => {
+    if (editorDirty && !confirmDiscard) {
+      setConfirmDiscard(true)
+      return
+    }
+    setEditing(null)
+    setEditorKind(null)
+    setEditorText('')
+    setEditorSaved('')
+    setEditorError(null)
+    setConfirmDiscard(false)
+  }
+
+  const saveEditor = async () => {
+    if (!editing || !editorDirty) return
+    setEditorSaving(true)
+    setEditorError(null)
+    try {
+      const res = await fetch('/api/files/content', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: editing.path, content: editorText }),
+      })
+      if (!res.ok) {
+        const text = await res.text().catch(() => '')
+        throw new Error(text || `save failed (${res.status})`)
+      }
+      setEditorSaved(editorText)
+      setConfirmDiscard(false)
+      await load(data?.path)
+    } catch (err) {
+      setEditorError(err instanceof Error ? err.message : 'Save failed.')
+    } finally {
+      setEditorSaving(false)
     }
   }
 
@@ -267,7 +374,11 @@ export default function FilesPage() {
               const isConfirm = confirmDelete === e.path
               return (
                 <li key={e.path} className="file-card">
-                  <div className="file-card-top">
+                  <div
+                    className={`file-card-top${e.is_dir ? ' is-dir' : ''}`}
+                    onClick={() => openEntry(e)}
+                    title={e.is_dir ? `Open ${e.path}` : `Edit ${e.path}`}
+                  >
                     <span
                       className="file-icon"
                       aria-hidden="true"
@@ -308,19 +419,26 @@ export default function FilesPage() {
                       <button
                         type="button"
                         className="file-name file-link"
-                        onClick={() => void load(e.path)}
+                        onClick={(ev) => {
+                          ev.stopPropagation()
+                          void load(e.path)
+                        }}
                         title={`Open ${e.path}`}
                       >
                         {e.name}
                       </button>
                     ) : (
-                      <a
+                      <button
+                        type="button"
                         className="file-name file-link"
-                        href={downloadUrl(e.path)}
-                        title={`Download ${e.path}`}
+                        onClick={(ev) => {
+                          ev.stopPropagation()
+                          void openEditor(e)
+                        }}
+                        title={`Edit ${e.path}`}
                       >
                         {e.name}
-                      </a>
+                      </button>
                     )}
                     <div
                       className="file-menu-wrap"
@@ -357,14 +475,27 @@ export default function FilesPage() {
                               Open
                             </button>
                           ) : (
-                            <a
-                              role="menuitem"
-                              className="file-menu-item"
-                              href={downloadUrl(e.path)}
-                              download={e.name}
-                            >
-                              Download
-                            </a>
+                            <>
+                              <button
+                                type="button"
+                                role="menuitem"
+                                className="file-menu-item"
+                                onClick={() => {
+                                  setMenuOpen(null)
+                                  void openEditor(e)
+                                }}
+                              >
+                                Open in editor
+                              </button>
+                              <a
+                                role="menuitem"
+                                className="file-menu-item"
+                                href={downloadUrl(e.path)}
+                                download={e.name}
+                              >
+                                Download
+                              </a>
+                            </>
                           )}
                           <button
                             type="button"
@@ -452,6 +583,149 @@ export default function FilesPage() {
           </ul>
         )}
       </div>
+
+      {editing && (
+        <div
+          className="editor-overlay"
+          role="dialog"
+          aria-modal="true"
+          aria-label={`Edit ${editing.name}`}
+          onClick={() => closeEditor()}
+        >
+          <div
+            className="editor-window"
+            onClick={(ev) => ev.stopPropagation()}
+          >
+            <div className="editor-head">
+              <div className="editor-title">
+                <strong>{editing.name}</strong>
+                <code title={editing.path}>{editing.path}</code>
+              </div>
+              {editorDirty && (
+                <span className="dirty-dot" title="Unsaved changes">
+                  ●
+                </span>
+              )}
+              <button
+                type="button"
+                className="icon-btn editor-close"
+                aria-label="Close editor"
+                title="Close editor"
+                onClick={() => closeEditor()}
+              >
+                ×
+              </button>
+            </div>
+
+            {editorLoading ? (
+              <p aria-busy="true">Loading…</p>
+            ) : editorError ? (
+              <div className="banner-error" role="alert">
+                <p>{editorError}</p>
+                <div className="row-actions">
+                  <button
+                    type="button"
+                    className="btn btn-sm btn-primary"
+                    onClick={() => void openEditor(editing)}
+                  >
+                    Retry
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-sm"
+                    onClick={() => closeEditor()}
+                  >
+                    Close
+                  </button>
+                </div>
+              </div>
+            ) : editorKind === 'text' ? (
+              <>
+                <textarea
+                  className="editor-area"
+                  value={editorText}
+                  onChange={(ev) => {
+                    setEditorText(ev.target.value)
+                    setConfirmDiscard(false)
+                  }}
+                  disabled={editorSaving}
+                  spellCheck={false}
+                  autoComplete="off"
+                  autoCapitalize="off"
+                  wrap="off"
+                  aria-label={`Contents of ${editing.name}`}
+                />
+                {editorError && (
+                  <div className="banner-error" role="alert">
+                    <p>{editorError}</p>
+                  </div>
+                )}
+                <div className="editor-foot">
+                  <span className="editor-status">
+                    {editorText.split('\n').length} lines ·{' '}
+                    {formatSize(new Blob([editorText]).size)}
+                    {editorDirty ? ' · unsaved' : ' · saved'}
+                    {editorSaving ? ' · saving…' : ''}
+                  </span>
+                  <div className="row-actions editor-actions">
+                    <a
+                      className="btn btn-sm"
+                      href={downloadUrl(editing.path)}
+                      download={editing.name}
+                    >
+                      Get
+                    </a>
+                    <button
+                      type="button"
+                      className="btn btn-sm btn-primary"
+                      disabled={!editorDirty || editorSaving}
+                      onClick={() => void saveEditor()}
+                    >
+                      {editorSaving ? 'Saving…' : 'Save'}
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-sm"
+                      disabled={editorSaving}
+                      onClick={() => closeEditor()}
+                    >
+                      {editorDirty
+                        ? confirmDiscard
+                          ? 'Discard?'
+                          : 'Close'
+                        : 'Close'}
+                    </button>
+                  </div>
+                </div>
+              </>
+            ) : (
+              <div className="editor-fallback">
+                <p>
+                  {editorKind === 'binary'
+                    ? 'This looks like a binary file, so it cannot be edited here.'
+                    : 'This file is too large to edit here (over 1 MB).'}
+                </p>
+                <div className="row-actions">
+                  <a
+                    className="btn btn-sm btn-primary"
+                    href={downloadUrl(editing.path)}
+                    download={editing.name}
+                  >
+                    Download
+                  </a>
+                  <button
+                    type="button"
+                    className="btn btn-sm"
+                    onClick={() => closeEditor()}
+                  >
+                    Close
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </section>
   )
 }
