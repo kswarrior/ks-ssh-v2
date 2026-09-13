@@ -7,7 +7,7 @@ use axum::{
     Router,
     http::{StatusCode, header},
     response::{IntoResponse, Response},
-    routing::get,
+    routing::{delete, get, post},
 };
 use clap::Parser;
 use ui::Ui;
@@ -70,7 +70,8 @@ fn relay_ws_base(relay: &str) -> String {
 async fn serve(host: String, port: u16) {
     let app = Router::new()
         .route("/api/hello", get(api_hello))
-        .route("/api/files", get(files::api_list_files))
+        .route("/api/files", get(files::api_list_files).delete(files::api_delete_file))
+        .route("/api/files/rename", post(files::api_rename_file))
         .route("/api/files/download", get(files::api_download_file))
         .route("/v1/shell", get(shell::ws_handler))
         .fallback(serve_ui);

@@ -207,6 +207,123 @@ pub async fn api_list_files(Query(q): Query<ListQuery>) -> Response {
     (StatusCode::OK, Json(res)).into_response()
 }
 
+/// A new file/folder name must be a single path component.
+fn valid_file_name(name: &str) -> bool {
+    let t = name.trim();
+    if t.is_empty() || t == "." || t == ".." {
+        return false;
+    }
+    !t.contains('/') && !t.contains('\\') && !t.contains('\0')
+}
+
+/// DELETE /api/files?path=<file|dir> — delete a file or folder inside HOME.
+pub async fn api_delete_file(Query(q): Query<DownloadQuery>) -> Response {
+    let (home, target) = match resolve_inside_home(Some(&q.path)) {
+        Ok(v) => v,
+        Err((code, msg)) => return (code, msg).into_response(),
+    };
+    if target == home {
+        return (
+            StatusCode::BAD_REQUEST,
+            "cannot delete HOME itself".to_string(),
+        )
+            .into_response();
+    }
+    let meta = match std::fs::symlink_metadata(&target) {
+        Ok(m) => m,
+        Err(_) => {
+            return (
+                StatusCode::NOT_FOUND,
+                format!("not found: {}", target.display()),
+            )
+                .into_response()
+        }
+    };
+    let res = if meta.is_dir() && !meta.is_symlink() {
+        std::fs::remove_dir_all(&target)
+    } else {
+        std::fs::remove_file(&target)
+    };
+    match res {
+        Ok(()) => (
+            StatusCode::OK,
+            Json(serde_json::json!({ "ok": true, "path": target.to_string_lossy() })),
+        )
+            .into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("cannot delete {}: {e}", target.display()),
+        )
+            .into_response(),
+    }
+}
+
+/// POST /api/files/rename {"from": "...", "to": "..."} — rename/move inside HOME.
+pub async fn api_rename_file(Json(b): Json<RenameBody>) -> Response {
+    let (home, from) = match resolve_inside_home(Some(&b.from)) {
+        Ok(v) => v,
+        Err((code, msg)) => return (code, msg).into_response(),
+    };
+    let (_, to) = match resolve_inside_home(Some(&b.to)) {
+        Ok(v) => v,
+        Err((code, msg)) => return (code, msg).into_response(),
+    };
+    if from == home {
+        return (
+            StatusCode::BAD_REQUEST,
+            "cannot rename HOME itself".to_string(),
+        )
+            .into_response();
+    }
+    if std::fs::symlink_metadata(&from).is_err() {
+        return (
+            StatusCode::NOT_FOUND,
+            format!("not found: {}", from.display()),
+        )
+            .into_response();
+    }
+    if std::fs::symlink_metadata(&to).is_ok() {
+        return (
+            StatusCode::CONFLICT,
+            format!("already exists: {}", to.display()),
+        )
+            .into_response();
+    }
+    let Some(file_name) = to.file_name().map(|n| n.to_string_lossy().to_string()) else {
+        return (StatusCode::BAD_REQUEST, "bad destination name".to_string()).into_response();
+    };
+    if !valid_file_name(&file_name) {
+        return (
+            StatusCode::BAD_REQUEST,
+            format!("invalid name: {file_name}"),
+        )
+            .into_response();
+    }
+    let Some(parent) = to.parent() else {
+        return (StatusCode::BAD_REQUEST, "bad destination".to_string()).into_response();
+    };
+    if !parent.is_dir() {
+        return (
+            StatusCode::BAD_REQUEST,
+            format!("destination folder missing: {}", parent.display()),
+        )
+            .into_response();
+    }
+    match std::fs::rename(&from, &to) {
+        Ok(()) => (
+            StatusCode::OK,
+            Json(
+                serde_json::json!({ "ok": true, "from": from.to_string_lossy(), "to": to.to_string_lossy() }),
+            ),
+        )
+            .into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("cannot rename {}: {e}", from.display()),
+        )
+            .into_response(),
+    }
+}
 /// GET /api/files/download?path=<file> — download a single file inside HOME.
 pub async fn api_download_file(Query(q): Query<DownloadQuery>) -> Response {
     let (home, target) = match resolve_inside_home(Some(&q.path)) {
@@ -291,5 +408,38 @@ mod tests {
         let home = home_dir().to_string_lossy().to_string();
         let entries = std::fs::read_dir(&home).expect("home readable");
         assert!(entries.count() > 0 || home == "/");
+    }
+
+    #[test]
+    fn valid_names() {
+        assert!(valid_file_name("notes.txt"));
+        assert!(valid_file_name("my folder"));
+        assert!(!valid_file_name(""));
+        assert!(!valid_file_name("."));
+        assert!(!valid_file_name(".."));
+        assert!(!valid_file_name("a/b"));
+        assert!(!valid_file_name("a\\b"));
+    }
+
+    #[test]
+    fn rename_and_delete_roundtrip_inside_home() {
+        let home = home_dir();
+        let dir = home.join(format!(".ks-ssh-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("test dir");
+        let a = dir.join("a.txt");
+        let b = dir.join("b.txt");
+        std::fs::write(&a, "hi").expect("write a");
+        // from-exists / to-missing / name checks live in the handler;
+        // here we exercise the same fs ops on the resolved paths.
+        let (home_canon, _) = resolve_inside_home(None).expect("home");
+        let (_, ra) = resolve_inside_home(Some(&a.to_string_lossy())).expect("a inside home");
+        let (_, rb) = resolve_inside_home(Some(&b.to_string_lossy())).expect("b inside home");
+        assert!(ra.starts_with(&home_canon));
+        std::fs::rename(&ra, &rb).expect("rename");
+        assert!(rb.is_file());
+        std::fs::remove_file(&rb).expect("delete file");
+        std::fs::remove_dir_all(&dir).expect("delete dir");
+        assert!(!dir.exists());
     }
 }

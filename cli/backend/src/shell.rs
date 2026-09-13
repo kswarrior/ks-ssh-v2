@@ -106,7 +106,15 @@ async fn handle_socket(socket: WebSocket) {
     });
 
     // PTY writer lives behind a mutex so the WS loop can write from async.
-    let writer = master.take_writer();
+    let writer = match master.take_writer() {
+        Ok(w) => w,
+        Err(e) => {
+            let _ = ws_tx
+                .send(Message::Text(format!("ks-ssh: cannot write pty: {e}").into()))
+                .await;
+            return;
+        }
+    };
     let writer = std::sync::Arc::new(tokio::sync::Mutex::new(writer));
     let writer_clone = writer.clone();
 
