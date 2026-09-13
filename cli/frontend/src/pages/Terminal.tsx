@@ -412,6 +412,7 @@ export default function TerminalPage({
       }
       onChange((prev) => [...prev, next])
       closeForm()
+      setVisitingId(next.id)
       attemptConnect(next)
     }
   }
