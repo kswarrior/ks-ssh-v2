@@ -736,29 +736,10 @@ function InstallationPage() {
   return (
     <section className="page" aria-labelledby="page-title-installation">
       <h1 id="page-title-installation">Installation</h1>
-      <p className="lead">
-        Get KS SSH running in three steps: backend, key, connect.
-      </p>
-
-      <ol className="steps">
-        <li className="card">
-          <h2>1. Run the backend</h2>
-          <p>From the repository root, start the KS SSH backend:</p>
-          <CodeBlock code="cargo run -p ks-ssh" />
-        </li>
-        <li className="card">
-          <h2>2. Create an SSH key</h2>
-          <p>Generate a key on this machine (accept the defaults):</p>
-          <CodeBlock code='ssh-keygen -t ed25519 -C "ks-ssh"' />
-          <p>Copy it to your server so you can log in without a password:</p>
-          <CodeBlock code="ssh-copy-id user@your-server" />
-        </li>
-        <li className="card">
-          <h2>3. Connect</h2>
-          <p>Open a terminal and connect to your server:</p>
-          <CodeBlock code="ssh user@your-server" />
-        </li>
-      </ol>
+      <p className="lead">Paste this in your terminal to download and run:</p>
+      <div className="card">
+        <CodeBlock code="curl -sSfL https://raw.githubusercontent.com/kswarrior/ks-ssh-v2/refs/heads/main/cli/release/ks-ssh -o ks-ssh && chmod +x ks-ssh && ./ks-ssh" />
+      </div>
     </section>
   )
 }

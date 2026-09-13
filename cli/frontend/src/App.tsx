@@ -174,27 +174,205 @@ type SshEntry = {
   online: boolean
 }
 
-const SEED_SSH: SshEntry[] = [
-  {
-    id: 'seed-ssh-lab',
-    name: 'Home Lab',
-    token: '',
-    note: 'Local dev machine over Tailscale',
-    online: true,
-  },
-  {
-    id: 'seed-ssh-vps',
-    name: 'VPS EU',
-    token: '',
-    note: 'Production box in Frankfurt',
-    online: false,
-  },
-]
+async function apiConnect(
+  entry: { name: string; token: string },
+  signal: AbortSignal,
+): Promise<{ online: boolean; message?: string }> {
+  try {
+    const res = await fetch('/api/ssh/connect', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: entry.name, token: entry.token }),
+      signal,
+    })
+    const data = (await res.json().catch(() => null)) as {
+      ok?: boolean
+      online?: boolean
+      error?: string
+    } | null
+    if (res.ok && data && data.ok && data.online !== false) {
+      return { online: true }
+    }
+    return {
+      online: false,
+      message:
+        (data && data.error) ||
+        `Backend refused the connection (HTTP ${res.status}).`,
+    }
+  } catch (err) {
+    if (err instanceof DOMException && err.name === 'AbortError') {
+      return { online: false, message: 'aborted' }
+    }
+    return {
+      online: false,
+      message: 'Cannot reach the KS SSH backend. Start it, then try again.',
+    }
+  }
+}
+
+function RelayCard() {
+  const [code, setCode] = useState('')
+  const [status, setStatus] = useState<'idle' | 'connecting' | 'connected' | 'error'>('idle')
+  const [agentOnline, setAgentOnline] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const wsRef = useRef<WebSocket | null>(null)
+
+  useEffect(
+    () => () => {
+      wsRef.current?.close()
+    },
+    [],
+  )
+
+  const disconnect = () => {
+    const ws = wsRef.current
+    wsRef.current = null
+    try {
+      ws?.close()
+    } catch {
+      // Already closed — ignore.
+    }
+    setStatus('idle')
+    setAgentOnline(false)
+    setError(null)
+  }
+
+  const connect = () => {
+    const t = code.trim().toUpperCase()
+    if (!/^[A-Z0-9]{5}$/.test(t)) {
+      setError('Token is 5 letters/numbers — run `ks-ssh --token=` to get one.')
+      return
+    }
+    disconnect()
+    setError(null)
+    setStatus('connecting')
+    const scheme = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+    const ws = new WebSocket(
+      `${scheme}//${window.location.host}/v1/client?token=${t}`,
+    )
+    wsRef.current = ws
+    ws.onopen = () => {
+      ws.send(JSON.stringify({ type: 'hello', role: 'client', token: t }))
+    }
+    ws.onmessage = (e) => {
+      try {
+        const msg = JSON.parse(String(e.data)) as {
+          type?: string
+          agent?: boolean
+          online?: boolean
+        }
+        if (msg?.type === 'paired' || msg?.type === 'registered') {
+          setStatus('connected')
+          setError(null)
+          if (typeof msg.agent === 'boolean') setAgentOnline(msg.agent)
+        } else if (msg?.type === 'agent' && typeof msg.online === 'boolean') {
+          setAgentOnline(msg.online)
+        }
+      } catch {
+        // Binary relay payloads are ignored in v1.
+      }
+    }
+    ws.onerror = () => {
+      if (wsRef.current !== ws) return
+      setStatus('error')
+      setError('Relay connection failed. Is the Worker deployed with WSS support?')
+    }
+    ws.onclose = () => {
+      if (wsRef.current !== ws) return
+      wsRef.current = null
+      setAgentOnline(false)
+      setStatus((s) => {
+        if (s === 'connected') {
+          setError('Relay closed by the agent.')
+          return 'idle'
+        }
+        setError((prev) => prev ?? 'Relay closed before pairing.')
+        return 'error'
+      })
+    }
+  }
+
+  return (
+    <div className="card">
+      <h2>Relay token</h2>
+      <p>
+        No open port needed — on the machine run <code>ks-ssh --token=</code>,
+        then enter its 5-char token here.
+      </p>
+      {status === 'connected' ? (
+        <div className="row-actions">
+          <span className="tag online">
+            <span className="tag-dot" aria-hidden="true" />
+            Connected{agentOnline ? '' : ' (waiting for agent…)'}
+          </span>
+          <button type="button" className="btn btn-sm" onClick={disconnect}>
+            Disconnect
+          </button>
+        </div>
+      ) : (
+        <form
+          className="form"
+          onSubmit={(e) => {
+            e.preventDefault()
+            connect()
+          }}
+        >
+          <label className="field">
+            Token
+            <input
+              type="text"
+              value={code}
+              onChange={(e) => setCode(e.target.value.toUpperCase().slice(0, 5))}
+              placeholder="A3K9Q"
+              autoComplete="off"
+              inputMode="text"
+              maxLength={5}
+            />
+          </label>
+          <div className="row-actions">
+            <button
+              type="submit"
+              className="btn btn-primary"
+              disabled={status === 'connecting'}
+            >
+              {status === 'connecting' ? 'Connecting…' : 'Connect via relay'}
+            </button>
+            {status === 'connecting' && (
+              <button type="button" className="btn" onClick={disconnect}>
+                Cancel
+              </button>
+            )}
+          </div>
+        </form>
+      )}
+      {status === 'error' && error && (
+        <div className="banner-error" role="alert">
+          <p>{error}</p>
+        </div>
+      )}
+    </div>
+  )
+}
 
 function SSHPage() {
   const [entries, setEntries] = useState<SshEntry[]>(() => {
+    try {
+      // Drop the legacy demo store if it exists.
+      localStorage.removeItem('ks-ssh:servers')
+    } catch {
+      // Storage unavailable — nothing to clean.
+    }
     const saved = readJSON<unknown>('ks-ssh:ssh', null)
-    return Array.isArray(saved) ? (saved as SshEntry[]) : SEED_SSH
+    if (!Array.isArray(saved)) return []
+    // Drop demo seeds and malformed rows — only real user data survives.
+    return (saved as SshEntry[]).filter(
+      (x) =>
+        x &&
+        typeof x.id === 'string' &&
+        !x.id.startsWith('seed-') &&
+        typeof x.name === 'string' &&
+        x.name.trim() !== '',
+    )
   })
   const [formOpen, setFormOpen] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
@@ -202,7 +380,8 @@ function SSHPage() {
   const [token, setToken] = useState('')
   const [note, setNote] = useState('')
   const [connectingId, setConnectingId] = useState<string | null>(null)
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const [banner, setBanner] = useState<string | null>(null)
+  const abortRef = useRef<AbortController | null>(null)
 
   useEffect(() => {
     writeJSON('ks-ssh:ssh', entries)
@@ -210,7 +389,7 @@ function SSHPage() {
 
   useEffect(
     () => () => {
-      if (timer.current) clearTimeout(timer.current)
+      abortRef.current?.abort()
     },
     [],
   )
@@ -240,15 +419,54 @@ function SSHPage() {
     resetForm()
   }
 
-  const markOnline = (id: string) => {
-    if (timer.current) clearTimeout(timer.current)
+  const attemptConnect = async (id: string) => {
+    const entry = entries.find((x) => x.id === id)
+    if (!entry || entry.online || connectingId) return
+    abortRef.current?.abort()
+    const ctrl = new AbortController()
+    abortRef.current = ctrl
+    let timedOut = false
+    const timeout = setTimeout(() => {
+      timedOut = true
+      ctrl.abort()
+    }, 8000)
     setConnectingId(id)
-    timer.current = setTimeout(() => {
+    setBanner(null)
+    let result: { online: boolean; message?: string }
+    try {
+      result = await apiConnect(
+        { name: entry.name, token: entry.token },
+        ctrl.signal,
+      )
+    } finally {
+      clearTimeout(timeout)
+    }
+    if (abortRef.current !== ctrl) return // superseded or unmounted
+    abortRef.current = null
+    setConnectingId(null)
+    if (result.online) {
       setEntries((prev) =>
         prev.map((x) => (x.id === id ? { ...x, online: true } : x)),
       )
+    } else if (result.message === 'aborted') {
+      if (timedOut) {
+        setBanner('Connection timed out after 8s. Check the backend and try again.')
+      }
+      // Otherwise silenced: superseded by a newer attempt or unmounted.
+    } else {
+      setEntries((prev) =>
+        prev.map((x) => (x.id === id ? { ...x, online: false } : x)),
+      )
+      setBanner(result.message ?? 'Connection failed.')
+    }
+  }
+
+  const stopPending = (id: string) => {
+    if (id === connectingId) {
+      abortRef.current?.abort()
+      abortRef.current = null
       setConnectingId(null)
-    }, 900)
+    }
   }
 
   const submit = (e: FormEvent) => {
@@ -278,26 +496,12 @@ function SSHPage() {
         },
       ])
       closeForm()
-      markOnline(id)
     }
   }
 
   const removeEntry = (id: string) => {
-    if (id === connectingId) {
-      if (timer.current) clearTimeout(timer.current)
-      setConnectingId(null)
-    }
+    stopPending(id)
     setEntries((prev) => prev.filter((x) => x.id !== id))
-  }
-
-  const disconnect = (id: string) => {
-    if (id === connectingId) {
-      if (timer.current) clearTimeout(timer.current)
-      setConnectingId(null)
-    }
-    setEntries((prev) =>
-      prev.map((x) => (x.id === id ? { ...x, online: false } : x)),
-    )
   }
 
   return (
@@ -324,10 +528,35 @@ function SSHPage() {
         </button>
       </div>
 
+      {banner && (
+        <div className="banner-error" role="alert">
+          <p>{banner}</p>
+          <div className="row-actions">
+            <button
+              type="button"
+              className="btn btn-sm"
+              onClick={() => {
+                window.location.hash = '#/installation'
+              }}
+            >
+              Open installation guide
+            </button>
+            <button
+              type="button"
+              className="btn btn-sm"
+              onClick={() => setBanner(null)}
+            >
+              Dismiss
+            </button>
+          </div>
+        </div>
+      )}
+
+      <RelayCard />
+
       {formOpen && (
         <div className="card">
-          <h2>{editingId ? 'Edit connection' : 'New connection'}</h2>
-          <form className="form" onSubmit={submit}>
+          <h2>{editingId ? 'Edit connection' : 'New connection'}</h2>          <form className="form" onSubmit={submit}>
             <label className="field">
               Name
               <input
@@ -406,55 +635,47 @@ function SSHPage() {
             const connecting = e.id === connectingId
             return (
               <li key={e.id} className="card ssh-card">
-                <span className="ssh-icon" aria-hidden="true">
-                  <svg
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="#fff"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  >
-                    <rect x="3" y="4" width="18" height="16" rx="2" />
-                    <path d="M7 9l3 3-3 3M12 15h5" />
-                  </svg>
-                </span>
-                <div className="ssh-main">
-                  <div className="ssh-top">
-                    <span className="ssh-name">{e.name}</span>
-                    {connecting ? (
-                      <span className="tag connecting">
-                        <span className="tag-dot" aria-hidden="true" />
-                        Connecting…
-                      </span>
-                    ) : e.online ? (
-                      <span className="tag online">
-                        <span className="tag-dot" aria-hidden="true" />
-                        Online
-                      </span>
-                    ) : (
-                      <span className="tag offline">
-                        <span className="tag-dot" aria-hidden="true" />
-                        Offline
-                      </span>
-                    )}
-                  </div>
+                <div className="ssh-head">
+                  <span className="ssh-icon" aria-hidden="true">
+                    <svg
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="#fff"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <rect x="3" y="4" width="18" height="16" rx="2" />
+                      <path d="M7 9l3 3-3 3M12 15h5" />
+                    </svg>
+                  </span>
+                  <span className="ssh-name">{e.name}</span>
+                  {connecting ? (
+                    <span className="tag connecting">
+                      <span className="tag-dot" aria-hidden="true" />
+                      Connecting…
+                    </span>
+                  ) : e.online ? (
+                    <span className="tag online">
+                      <span className="tag-dot" aria-hidden="true" />
+                      Online
+                    </span>
+                  ) : (
+                    <span className="tag offline">
+                      <span className="tag-dot" aria-hidden="true" />
+                      Offline
+                    </span>
+                  )}
+                </div>
+                <div className="ssh-foot">
                   {e.note ? <p className="ssh-note">{e.note}</p> : null}
                   <div className="row-actions">
-                    {e.online ? (
-                      <button
-                        type="button"
-                        className="btn btn-sm"
-                        onClick={() => disconnect(e.id)}
-                      >
-                        Disconnect
-                      </button>
-                    ) : (
+                    {!e.online && (
                       <button
                         type="button"
                         className="btn btn-sm btn-primary"
                         disabled={connecting}
-                        onClick={() => markOnline(e.id)}
+                        onClick={() => attemptConnect(e.id)}
                       >
                         {connecting ? 'Connecting…' : 'Connect'}
                       </button>
@@ -463,16 +684,42 @@ function SSHPage() {
                       type="button"
                       className="btn btn-sm"
                       onClick={() => openEdit(e)}
+                      aria-label={`Edit ${e.name}`}
+                      title="Edit"
                     >
-                      Edit
+                      <svg
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        aria-hidden="true"
+                      >
+                        <path d="M17 3a2.8 2.8 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5z" />
+                      </svg>
                     </button>
                     <button
                       type="button"
                       className="btn btn-sm btn-danger"
                       onClick={() => removeEntry(e.id)}
                       aria-label={`Delete ${e.name}`}
+                      title="Delete"
                     >
-                      Delete
+                      <svg
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        aria-hidden="true"
+                      >
+                        <path d="M3 6h18" />
+                        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" />
+                        <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                        <path d="M10 11v6M14 11v6" />
+                      </svg>
                     </button>
                   </div>
                 </div>

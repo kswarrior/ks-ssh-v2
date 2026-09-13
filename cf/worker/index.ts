@@ -1,4 +1,4 @@
-import { TunnelRoom } from './room'
+import { TunnelRoom } from './room.js'
 
 export { TunnelRoom }
 
