@@ -779,8 +779,7 @@
 }
 
 .card.ssh-card {
-  flex-direction: row;
-  align-items: flex-start;
+  flex-direction: column;
   gap: 14px;
 }
 
@@ -805,30 +804,43 @@
   display: block;
 }
 
-.ssh-main {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.ssh-main .row-actions {
-  margin-top: 0;
-  padding-top: 4px;
-}
-
-.ssh-top {
+.ssh-head {
   display: flex;
   align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.ssh-head .ssh-name {
+  flex: 1;
+}
+
+.ssh-head .tag {
+  margin-left: auto;
+}
+
+.ssh-foot {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  margin-top: auto;
+}
+
+.ssh-foot .ssh-note {
+  flex: 1;
+}
+
+.ssh-foot .row-actions {
+  margin-top: 0;
+  margin-left: auto;
+  padding-top: 0;
+  flex-shrink: 0;
 }
 
 .ssh-name {
   font-weight: 700;
   font-size: 16px;
   color: var(--text-h);
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -915,5 +927,18 @@
 
   .card.ssh-card {
     padding: 16px;
+  }
+
+  .ssh-foot {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .ssh-foot .row-actions {
+    margin-left: 0;
+  }
+
+  .ssh-foot .row-actions .btn {
+    flex: 1 1 auto;
   }
 }
