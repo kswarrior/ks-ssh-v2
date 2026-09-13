@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 
 export type SshEntry = {
   id: string
@@ -30,28 +30,40 @@ function applyChunk(prev: string, chunk: string): string {
 type TermStatus = 'connecting' | 'online' | 'offline'
 
 function ShellSession({
-  name: _name,
+  id,
   onStatus,
 }: {
-  name: string
-  onStatus?: (s: TermStatus) => void
+  id: string
+  onStatus: (id: string, s: TermStatus) => void
 }) {
-  void _name
   const [output, setOutput] = useState('')
   const [status, setStatus] = useState<TermStatus>('offline')
+  // "↓ latest" pill when the user scrolled up to read older output.
+  const [stuck, setStuck] = useState(true)
 
   const wsRef = useRef<WebSocket | null>(null)
   const bodyRef = useRef<HTMLDivElement | null>(null)
   const keyRef = useRef<HTMLInputElement | null>(null)
+  // Keystrokes typed while the socket is still connecting.
+  const pendingRef = useRef<string[]>([])
+  // Whether the view is pinned to the bottom.
+  const stickRef = useRef(true)
 
   const focusKeys = () => {
     setTimeout(() => keyRef.current?.focus({ preventScroll: true }), 30)
   }
 
   const send = (data: string) => {
+    if (!data) return
     const ws = wsRef.current
-    if (ws && ws.readyState === WebSocket.OPEN && data) {
+    if (ws && ws.readyState === WebSocket.OPEN) {
       ws.send(data)
+    } else if (ws && ws.readyState === WebSocket.CONNECTING) {
+      // Queue keystrokes typed while connecting; flushed on open.
+      pendingRef.current.push(data)
+      if (pendingRef.current.length > 256) {
+        pendingRef.current.splice(0, pendingRef.current.length - 256)
+      }
     }
   }
 
@@ -72,6 +84,9 @@ function ShellSession({
 
     ws.onopen = () => {
       setStatus('online')
+      for (const p of pendingRef.current.splice(0)) {
+        if (ws.readyState === WebSocket.OPEN) ws.send(p)
+      }
       sendResize()
     }
     ws.onmessage = (e) => {
@@ -95,7 +110,8 @@ function ShellSession({
     ws.onclose = () => {
       if (wsRef.current !== ws) return
       wsRef.current = null
-      setStatus((s) => (s === 'online' ? 'offline' : s))
+      // Always go offline — a failed connect must not stick on amber.
+      setStatus('offline')
       setOutput((prev) =>
         prev.endsWith('\n') ? prev + 'disconnected\n' : prev + '\ndisconnected\n',
       )
