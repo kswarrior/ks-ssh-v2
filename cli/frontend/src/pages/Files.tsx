@@ -1049,6 +1049,192 @@ export default function FilesPage() {
           </div>
         </div>
       )}
+
+      {uploading && (
+        <div
+          className="editor-overlay"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Upload to this folder"
+          onClick={() => {
+            if (!uploadBusy) setUploading(null)
+          }}
+        >
+          <div
+            className="editor-window create-window"
+            onClick={(ev) => ev.stopPropagation()}
+          >
+            <div className="editor-head">
+              <div className="editor-title">
+                <strong>Upload to this folder</strong>
+                <code title={data?.path}>{data?.path}</code>
+              </div>
+              <button
+                type="button"
+                className="icon-btn editor-close"
+                aria-label="Close upload dialog"
+                title="Close"
+                disabled={uploadBusy}
+                onClick={() => setUploading(null)}
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="create-tabs" role="tablist" aria-label="Upload source">
+              {(['local', 'url'] as const).map((t) => (
+                <button
+                  key={t}
+                  type="button"
+                  role="tab"
+                  aria-selected={uploading === t}
+                  className={uploading === t ? 'create-tab active' : 'create-tab'}
+                  disabled={uploadBusy}
+                  onClick={() => {
+                    setUploading(t)
+                    setUploadError(null)
+                    setUploadDone([])
+                  }}
+                >
+                  {t === 'local' ? 'Local' : 'URL'}
+                </button>
+              ))}
+            </div>
+
+            {uploading === 'local' ? (
+              <>
+                <label className="create-field">
+                  Choose files
+                  <input
+                    ref={fileInputRef}
+                    className="upload-input"
+                    type="file"
+                    multiple
+                    disabled={uploadBusy}
+                    onChange={(ev) => {
+                      setUploadFiles(Array.from(ev.target.files ?? []))
+                      setUploadError(null)
+                      setUploadDone([])
+                    }}
+                  />
+                </label>
+                {uploadFiles.length > 0 && (
+                  <ul className="upload-list" aria-label="Selected files">
+                    {uploadFiles.map((f) => (
+                      <li key={`${f.name}-${f.size}-${f.lastModified}`} className="upload-row">
+                        <span className="upload-name" title={f.name}>
+                          {f.name}
+                        </span>
+                        <span className="upload-size">{formatSize(f.size)}</span>
+                        <button
+                          type="button"
+                          className="file-dots"
+                          aria-label={`Remove ${f.name}`}
+                          title="Remove"
+                          disabled={uploadBusy}
+                          onClick={() =>
+                            setUploadFiles((prev) => prev.filter((x) => x !== f))
+                          }
+                        >
+                          ×
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </>
+            ) : (
+              <form
+                className="upload-url-form"
+                onSubmit={(ev) => {
+                  ev.preventDefault()
+                  void submitUrlUpload()
+                }}
+              >
+                <label className="create-field">
+                  File URL
+                  <input
+                    className="file-rename-input"
+                    type="url"
+                    value={uploadUrl}
+                    onChange={(ev) => {
+                      setUploadUrl(ev.target.value)
+                      setUploadError(null)
+                    }}
+                    placeholder="https://example.com/file.zip"
+                    disabled={uploadBusy}
+                    autoComplete="off"
+                    spellCheck={false}
+                  />
+                </label>
+                <label className="create-field">
+                  Save as (optional)
+                  <input
+                    className="file-rename-input"
+                    type="text"
+                    value={uploadName}
+                    onChange={(ev) => {
+                      setUploadName(ev.target.value)
+                      setUploadError(null)
+                    }}
+                    placeholder="keeps the URL file name when empty"
+                    maxLength={255}
+                    disabled={uploadBusy}
+                    autoComplete="off"
+                    spellCheck={false}
+                  />
+                </label>
+              </form>
+            )}
+
+            {uploadProgress && <p className="files-sub">{uploadProgress}</p>}
+
+            {uploadDone.length > 0 && (
+              <div className="upload-done" role="status">
+                <p>Uploaded: {uploadDone.join(', ')}</p>
+              </div>
+            )}
+
+            {uploadError && (
+              <div className="banner-error" role="alert">
+                <p>{uploadError}</p>
+              </div>
+            )}
+
+            <div className="row-actions editor-actions">
+              <button
+                type="button"
+                className="btn btn-sm"
+                disabled={uploadBusy}
+                onClick={() => setUploading(null)}
+              >
+                {uploadDone.length > 0 ? 'Done' : 'Cancel'}
+              </button>
+              {uploading === 'local' ? (
+                <button
+                  type="button"
+                  className="btn btn-sm btn-primary"
+                  disabled={uploadFiles.length === 0 || uploadBusy}
+                  onClick={() => void submitLocalUpload()}
+                >
+                  {uploadBusy
+                    ? 'Uploading…'
+                    : `Upload ${uploadFiles.length > 0 ? `${uploadFiles.length} file${uploadFiles.length > 1 ? 's' : ''}` : ''}`}
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="btn btn-sm btn-primary"
+                  disabled={!uploadUrl.trim() || uploadBusy}
+                  onClick={() => void submitUrlUpload()}
+                >
+                  {uploadBusy ? 'Fetching…' : 'Fetch file'}
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </section>
   )
 }
