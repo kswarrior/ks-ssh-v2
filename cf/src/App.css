@@ -50,37 +50,6 @@
   min-width: 0;
 }
 
-.brand-mark {
-  width: 36px;
-  height: 36px;
-  flex-shrink: 0;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 8px;
-  font-size: 18px;
-  font-weight: 800;
-  color: #fff;
-  background: linear-gradient(135deg, var(--accent-hi), var(--accent-lo) 60%, var(--accent-glow) 140%);
-  border: 1px solid rgba(255, 255, 255, 0.25);
-  box-shadow:
-    0 6px 18px -4px var(--accent-shadow),
-    0 0 16px -2px var(--accent-shadow),
-    inset 0 1px 0 rgba(255, 255, 255, 0.35);
-}
-
-.brand {
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--text-h);
-  font-size: 16px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  min-width: 0;
-}
-
 .header-spacer {
   flex: 1;
   min-width: 8px;
@@ -211,15 +180,6 @@
   -webkit-backdrop-filter: blur(22px) saturate(150%);
   backdrop-filter: blur(22px) saturate(150%);
   border-right: 1px solid var(--glass-border);
-}
-
-.sidebar-brand {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 2px 8px 16px;
-  margin-bottom: 8px;
-  border-bottom: 1px solid var(--glass-border);
 }
 
 .sidebar nav {

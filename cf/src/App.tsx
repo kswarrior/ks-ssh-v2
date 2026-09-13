@@ -643,12 +643,6 @@ export default function App() {
           aria-hidden={drawerHidden ? true : undefined}
           aria-label="Primary"
         >
-          <div className="sidebar-brand">
-            <span className="brand-mark" aria-hidden="true">
-              S
-            </span>
-            <span className="brand">KS SSH</span>
-          </div>
           <nav aria-label="Primary">
             {NAV.map((item) => {
               const isActive = item.id === page
