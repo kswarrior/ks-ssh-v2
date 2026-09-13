@@ -451,26 +451,13 @@ function RelayCard() {
   )
 }
 
-function SSHPage() {
-  const [entries, setEntries] = useState<SshEntry[]>(() => {
-    try {
-      // Drop the legacy demo store if it exists.
-      localStorage.removeItem('ks-ssh:servers')
-    } catch {
-      // Storage unavailable — nothing to clean.
-    }
-    const saved = readJSON<unknown>('ks-ssh:ssh', null)
-    if (!Array.isArray(saved)) return []
-    // Drop demo seeds and malformed rows — only real user data survives.
-    return (saved as SshEntry[]).filter(
-      (x) =>
-        x &&
-        typeof x.id === 'string' &&
-        !x.id.startsWith('seed-') &&
-        typeof x.name === 'string' &&
-        x.name.trim() !== '',
-    )
-  })
+function SSHPage({
+  entries,
+  onChange,
+}: {
+  entries: SshEntry[]
+  onChange: (fn: (prev: SshEntry[]) => SshEntry[]) => void
+}) {
   const [formOpen, setFormOpen] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [name, setName] = useState('')
@@ -479,10 +466,6 @@ function SSHPage() {
   const [connectingId, setConnectingId] = useState<string | null>(null)
   const [banner, setBanner] = useState<string | null>(null)
   const abortRef = useRef<AbortController | null>(null)
-
-  useEffect(() => {
-    writeJSON('ks-ssh:ssh', entries)
-  }, [entries])
 
   useEffect(
     () => () => {
@@ -542,7 +525,7 @@ function SSHPage() {
     abortRef.current = null
     setConnectingId(null)
     if (result.online) {
-      setEntries((prev) =>
+      onChange((prev) =>
         prev.map((x) => (x.id === id ? { ...x, online: true } : x)),
       )
     } else if (result.message === 'aborted') {
@@ -551,7 +534,7 @@ function SSHPage() {
       }
       // Otherwise silenced: superseded by a newer attempt or unmounted.
     } else {
-      setEntries((prev) =>
+      onChange((prev) =>
         prev.map((x) => (x.id === id ? { ...x, online: false } : x)),
       )
       setBanner(result.message ?? 'Connection failed.')
@@ -572,7 +555,7 @@ function SSHPage() {
     const cleanToken = token.trim()
     if (!cleanName || !cleanToken) return
     if (editingId) {
-      setEntries((prev) =>
+      onChange((prev) =>
         prev.map((x) =>
           x.id === editingId
             ? { ...x, name: cleanName, token: cleanToken, note: note.trim() }
@@ -582,7 +565,7 @@ function SSHPage() {
       closeForm()
     } else {
       const id = `ssh-${Date.now().toString(36)}-${Math.floor(Math.random() * 10000)}`
-      setEntries((prev) => [
+      onChange((prev) => [
         ...prev,
         {
           id,
@@ -598,7 +581,7 @@ function SSHPage() {
 
   const removeEntry = (id: string) => {
     stopPending(id)
-    setEntries((prev) => prev.filter((x) => x.id !== id))
+    onChange((prev) => prev.filter((x) => x.id !== id))
   }
 
   return (
@@ -734,35 +717,10 @@ function SSHPage() {
               <li key={e.id} className="card ssh-card">
                 <div className="ssh-head">
                   <span className="ssh-icon" aria-hidden="true">
-                    <svg
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="#fff"
-                      strokeWidth="2"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    >
-                      <rect x="3" y="4" width="18" height="16" rx="2" />
-                      <path d="M7 9l3 3-3 3M12 15h5" />
-                    </svg>
+                    <SshGlyph />
                   </span>
                   <span className="ssh-name">{e.name}</span>
-                  {connecting ? (
-                    <span className="tag connecting">
-                      <span className="tag-dot" aria-hidden="true" />
-                      Connecting…
-                    </span>
-                  ) : e.online ? (
-                    <span className="tag online">
-                      <span className="tag-dot" aria-hidden="true" />
-                      Online
-                    </span>
-                  ) : (
-                    <span className="tag offline">
-                      <span className="tag-dot" aria-hidden="true" />
-                      Offline
-                    </span>
-                  )}
+                  <StatusTag online={e.online} connecting={connecting} />
                 </div>
                 <div className="ssh-foot">
                   {e.note ? <p className="ssh-note">{e.note}</p> : null}
@@ -900,6 +858,25 @@ export default function App() {
   const [settings, setSettings] = useState<Settings>(() =>
     readJSON<Settings>('ks-ssh:settings', DEFAULT_SETTINGS),
   )
+  const [entries, setEntries] = useState<SshEntry[]>(() => {
+    try {
+      // Drop the legacy demo store if it exists.
+      localStorage.removeItem('ks-ssh:servers')
+    } catch {
+      // Storage unavailable — nothing to clean.
+    }
+    const saved = readJSON<unknown>('ks-ssh:ssh', null)
+    if (!Array.isArray(saved)) return []
+    // Drop demo seeds and malformed rows — only real user data survives.
+    return (saved as SshEntry[]).filter(
+      (x) =>
+        x &&
+        typeof x.id === 'string' &&
+        !x.id.startsWith('seed-') &&
+        typeof x.name === 'string' &&
+        x.name.trim() !== '',
+    )
+  })
   const [theme, setTheme] = useState<Theme>(initialTheme)
 
   // Derived state: drawer can only be open on phones; resizing to desktop
@@ -937,6 +914,10 @@ export default function App() {
   useEffect(() => {
     writeJSON('ks-ssh:settings', settings)
   }, [settings])
+
+  useEffect(() => {
+    writeJSON('ks-ssh:ssh', entries)
+  }, [entries])
 
   // Lock background scroll while the phone drawer is open
   useEffect(() => {
@@ -1128,8 +1109,8 @@ export default function App() {
           id="main"
           tabIndex={-1}
         >
-          {page === 'home' && <HomePage go={go} />}
-          {page === 'ssh' && <SSHPage />}
+          {page === 'home' && <HomePage go={go} entries={entries} />}
+          {page === 'ssh' && <SSHPage entries={entries} onChange={setEntries} />}
           {page === 'installation' && <InstallationPage />}
           {page === 'settings' && (
             <SettingsPage settings={settings} onChange={patchSettings} />
