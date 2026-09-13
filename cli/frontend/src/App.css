@@ -3080,3 +3080,60 @@ a.file-link {
   font-weight: 700;
   color: var(--text-h);
 }
+
+/* ---------- Settings: placeholder page (flush top like Files) ---------- */
+
+.content-settings {
+  padding-top: 8px;
+}
+
+.content-settings .tab-panel {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.settings-page {
+  max-width: none;
+  flex: 1;
+  padding-top: 0;
+  gap: 8px;
+}
+
+.settings-soon {
+  align-items: center;
+  text-align: center;
+  padding: clamp(28px, 6vh, 56px) 24px;
+  gap: 12px;
+}
+
+.settings-soon h2 {
+  margin: 0;
+}
+
+.settings-soon p {
+  color: var(--text);
+  font-size: 14px;
+}
+
+.settings-soon-icon {
+  width: 56px;
+  height: 56px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  color: #fff;
+  background: linear-gradient(135deg, var(--accent-hi), var(--accent-lo));
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  box-shadow:
+    0 6px 16px -6px var(--accent-shadow),
+    inset 0 1px 0 rgba(255, 255, 255, 0.3);
+}
+
+.settings-soon-icon svg {
+  width: 28px;
+  height: 28px;
+  display: block;
+}

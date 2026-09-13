@@ -3,8 +3,9 @@ import TerminalPage, { type SshEntry } from './pages/Terminal'
 import FilesPage from './pages/Files'
 import PortsPage from './pages/Ports'
 import HostPage from './pages/Host'
+import SettingsPage from './pages/Settings'
 
-type TabId = 'terminal' | 'files' | 'ports' | 'host'
+type TabId = 'terminal' | 'files' | 'ports' | 'host' | 'settings'
 
 type TabItem = { id: TabId; label: string; hash: string }
 
@@ -14,8 +15,10 @@ const TABS: TabItem[] = [
   { id: 'ports', label: 'Ports', hash: '#/ports' },
 ]
 
-// Host is not a tab — it opens only from the header icon button.
+// Host and Settings are not tabs — they open only from header icon buttons.
 const HOST_ITEM: TabItem = { id: 'host', label: 'Host', hash: '#/host' }
+const SETTINGS_ITEM: TabItem = { id: 'settings', label: 'Settings', hash: '#/settings' }
+const EXTRA_ITEMS: TabItem[] = [HOST_ITEM, SETTINGS_ITEM]
 
 type Theme = 'light' | 'dark'
 
@@ -54,8 +57,8 @@ function hashToTab(hash: string): TabId | null {
   const clean = hash.replace(/^#\/?/, '')
   const found = TABS.find((t) => t.hash.replace(/^#\/?/, '') === clean)
   if (found) return found.id
-  if (HOST_ITEM.hash.replace(/^#\/?/, '') === clean) return HOST_ITEM.id
-  return null
+  const extra = EXTRA_ITEMS.find((t) => t.hash.replace(/^#\/?/, '') === clean)
+  return extra ? extra.id : null
 }
 
 type PingTone = 'good' | 'mid' | 'bad' | 'off'
@@ -167,7 +170,7 @@ export default function App() {
   useEffect(() => {
     const label =
       TABS.find((t) => t.id === tab)?.label ??
-      (tab === HOST_ITEM.id ? HOST_ITEM.label : undefined)
+      EXTRA_ITEMS.find((t) => t.id === tab)?.label
     document.title = label ? `KS SSH — ${label}` : 'KS SSH'
   }, [tab])
 
@@ -280,6 +283,27 @@ export default function App() {
           </button>
           <button
             type="button"
+            className={`icon-btn${tab === 'settings' ? ' active' : ''}`}
+            aria-label="Settings"
+            title="Settings"
+            aria-current={tab === 'settings' ? 'page' : undefined}
+            onClick={() => go(SETTINGS_ITEM)}
+          >
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <circle cx="12" cy="12" r="3" />
+              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h.01a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h.01a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.01a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+            </svg>
+          </button>
+          <button
+            type="button"
             className="icon-btn"
             aria-label={theme === 'light' ? 'Switch to dark mode' : 'Switch to light mode'}
             title={theme === 'light' ? 'Switch to dark mode' : 'Switch to light mode'}
@@ -315,7 +339,7 @@ export default function App() {
         </header>
 
         <main
-          className={`content${tab === 'terminal' ? ' content-term' : tab === 'files' ? ' content-files' : tab === 'host' ? ' content-host' : ''}`}
+          className={`content${tab === 'terminal' ? ' content-term' : tab === 'files' ? ' content-files' : tab === 'host' ? ' content-host' : tab === 'settings' ? ' content-settings' : ''}`}
           id="main"
           tabIndex={-1}
         >
@@ -330,6 +354,9 @@ export default function App() {
           </div>
           <div hidden={tab !== 'host'} className="tab-panel">
             <HostPage />
+          </div>
+          <div hidden={tab !== 'settings'} className="tab-panel">
+            <SettingsPage />
           </div>
         </main>
 
