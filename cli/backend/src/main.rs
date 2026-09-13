@@ -31,10 +31,7 @@ struct Cli {
     #[arg(long, num_args(0..=1), require_equals(true), default_missing_value = "")]
     token: Option<String>,
     /// Relay base URL (https/wss).
-    #[arg(
-        long,
-        default_value = "https://ks-ssh-v2.kswarriorpro.workers.dev"
-    )]
+    #[arg(long, default_value = "https://ks-ssh-v2.kswarriorpro.workers.dev")]
     relay: String,
     /// Skip pushing the frontend UI bundle over WSS (relay only).
     #[arg(long)]
@@ -71,7 +68,10 @@ fn relay_ws_base(relay: &str) -> String {
 async fn serve(host: String, port: u16) {
     let app = Router::new()
         .route("/api/hello", get(api_hello))
-        .route("/api/files", get(files::api_list_files).delete(files::api_delete_file))
+        .route(
+            "/api/files",
+            get(files::api_list_files).delete(files::api_delete_file),
+        )
         .route("/api/files/rename", post(files::api_rename_file))
         .route("/api/files/mkdir", post(files::api_mkdir))
         .route("/api/files/upload", post(files::api_upload_file))

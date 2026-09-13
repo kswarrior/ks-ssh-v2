@@ -17,9 +17,7 @@ const TOKEN_ALPHABET: &[u8] = b"ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 const UI_CHUNK_RAW: usize = 48 * 1024;
 
 type WsTx = futures_util::stream::SplitSink<
-    tokio_tungstenite::WebSocketStream<
-        tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
-    >,
+    tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>,
     Message,
 >;
 
@@ -111,7 +109,9 @@ pub async fn run_agent(relay: &str, token: &str, push_ui: bool) {
 }
 
 async fn agent_session(url: &str, token: &str, push_ui: bool) -> anyhow::Result<()> {
-    let (ws, _) = connect_async(url).await.map_err(|e| anyhow::anyhow!("{e}"))?;
+    let (ws, _) = connect_async(url)
+        .await
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
     println!("relay connected");
     let (mut tx, mut rx) = ws.split();
 
@@ -122,9 +122,7 @@ async fn agent_session(url: &str, token: &str, push_ui: bool) -> anyhow::Result<
     })?;
     tx.send(Message::Text(hello.into())).await?;
 
-    if push_ui
-        && let Err(e) = push_ui_bundle(&mut tx).await
-    {
+    if push_ui && let Err(e) = push_ui_bundle(&mut tx).await {
         eprintln!("ui push failed: {e:#}");
     }
 
@@ -155,9 +153,7 @@ async fn push_ui_bundle(tx: &mut WsTx) -> anyhow::Result<()> {
     let bytes = html.as_bytes();
     let chunks: Vec<String> = bytes
         .chunks(UI_CHUNK_RAW)
-        .map(|c| {
-            base64::Engine::encode(&base64::engine::general_purpose::STANDARD, c)
-        })
+        .map(|c| base64::Engine::encode(&base64::engine::general_purpose::STANDARD, c))
         .collect();
     let begin = serde_json::to_string(&UiBegin {
         kind: "ui-begin",

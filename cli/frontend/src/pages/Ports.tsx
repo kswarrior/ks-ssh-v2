@@ -133,6 +133,10 @@ export default function PortsPage() {
         <div className="row-actions ports-actions">
           <label className="ports-search">
             <span className="sr-only">Search ports</span>
+            <svg className="ports-search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <circle cx="11" cy="11" r="7" />
+              <path d="m21 21-4.3-4.3" />
+            </svg>
             <input
               type="text"
               value={query}

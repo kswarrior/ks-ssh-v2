@@ -82,21 +82,21 @@ pub struct ListResponse {
 
 /// Resolve the host HOME directory.
 pub fn home_dir() -> PathBuf {
-    if let Ok(h) = std::env::var("HOME") {
-        if !h.trim().is_empty() {
-            return PathBuf::from(h);
-        }
+    if let Ok(h) = std::env::var("HOME")
+        && !h.trim().is_empty()
+    {
+        return PathBuf::from(h);
     }
-    if let Ok(h) = std::env::var("USERPROFILE") {
-        if !h.trim().is_empty() {
-            return PathBuf::from(h);
-        }
+    if let Ok(h) = std::env::var("USERPROFILE")
+        && !h.trim().is_empty()
+    {
+        return PathBuf::from(h);
     }
     PathBuf::from("/")
 }
 
 /// Lexically normalize a path (resolve `.`/`..` without touching the FS).
-fn normalize(path: &PathBuf) -> PathBuf {
+fn normalize(path: &std::path::Path) -> PathBuf {
     let mut out = PathBuf::new();
     for comp in path.components() {
         match comp {
@@ -127,11 +127,7 @@ fn resolve_inside_home(raw: Option<&str>) -> Result<(PathBuf, PathBuf), (StatusC
         None | Some("") => home.clone(),
         Some(p) => {
             let pb = PathBuf::from(p);
-            if pb.is_absolute() {
-                pb
-            } else {
-                home.join(pb)
-            }
+            if pb.is_absolute() { pb } else { home.join(pb) }
         }
     };
     let normalized = normalize(&joined);
@@ -152,11 +148,11 @@ fn resolve_inside_home(raw: Option<&str>) -> Result<(PathBuf, PathBuf), (StatusC
     Ok((home_canon, canon))
 }
 
-fn canonicalize_lossy(p: &PathBuf) -> PathBuf {
+fn canonicalize_lossy(p: &std::path::Path) -> PathBuf {
     std::fs::canonicalize(p).unwrap_or_else(|_| normalize(p))
 }
 
-fn parent_of(home: &PathBuf, dir: &PathBuf) -> Option<String> {
+fn parent_of(home: &PathBuf, dir: &std::path::Path) -> Option<String> {
     let parent = dir.parent()?;
     let s = parent.to_string_lossy().to_string();
     // Stop at HOME — no "up" above it.
@@ -199,10 +195,15 @@ pub async fn api_list_files(Query(q): Query<ListQuery>) -> Response {
     let read = match std::fs::read_dir(&dir) {
         Ok(r) => r,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            return (StatusCode::NOT_FOUND, format!("not found: {}", dir.display()))
-                .into_response()
+            return (
+                StatusCode::NOT_FOUND,
+                format!("not found: {}", dir.display()),
+            )
+                .into_response();
         }
-        Err(e) => return (StatusCode::BAD_REQUEST, format!("cannot read dir: {e}")).into_response(),
+        Err(e) => {
+            return (StatusCode::BAD_REQUEST, format!("cannot read dir: {e}")).into_response();
+        }
     };
 
     if !dir.is_dir() {
@@ -267,7 +268,7 @@ pub async fn api_delete_file(Query(q): Query<DownloadQuery>) -> Response {
                 StatusCode::NOT_FOUND,
                 format!("not found: {}", target.display()),
             )
-                .into_response()
+                .into_response();
         }
     };
     let res = if meta.is_dir() && !meta.is_symlink() {
@@ -424,18 +425,22 @@ pub async fn api_save_content(Json(b): Json<SaveBody>) -> Response {
     if b.content.len() > SAVE_MAX_BYTES {
         return (
             StatusCode::PAYLOAD_TOO_LARGE,
-            format!("content too large (max {} MB)", SAVE_MAX_BYTES / 1024 / 1024),
+            format!(
+                "content too large (max {} MB)",
+                SAVE_MAX_BYTES / 1024 / 1024
+            ),
         )
             .into_response();
     }
-    if let Ok(meta) = std::fs::symlink_metadata(&target) {
-        if meta.is_dir() && !meta.is_symlink() {
-            return (
-                StatusCode::BAD_REQUEST,
-                "cannot overwrite a folder".to_string(),
-            )
-                .into_response();
-        }
+    if let Ok(meta) = std::fs::symlink_metadata(&target)
+        && meta.is_dir()
+        && !meta.is_symlink()
+    {
+        return (
+            StatusCode::BAD_REQUEST,
+            "cannot overwrite a folder".to_string(),
+        )
+            .into_response();
     }
     let Some(parent) = target.parent() else {
         return (StatusCode::BAD_REQUEST, "bad path".to_string()).into_response();
@@ -514,11 +519,7 @@ pub async fn api_upload_file(Query(q): Query<UploadQuery>, body: Bytes) -> Respo
     }
     let name = q.name.trim();
     if !valid_file_name(name) {
-        return (
-            StatusCode::BAD_REQUEST,
-            format!("invalid name: {name}"),
-        )
-            .into_response();
+        return (StatusCode::BAD_REQUEST, format!("invalid name: {name}")).into_response();
     }
     if body.len() > UPLOAD_MAX_BYTES {
         return (
@@ -574,8 +575,7 @@ fn valid_upload_url(url: &str) -> bool {
         return false;
     }
     let lower = t.to_ascii_lowercase();
-    (lower.starts_with("http://") || lower.starts_with("https://"))
-        && t[8..].contains('.')
+    (lower.starts_with("http://") || lower.starts_with("https://")) && t[8..].contains('.')
 }
 
 /// POST /api/files/upload-url {"dir","url","name"?} — fetch a URL into HOME.
@@ -608,11 +608,7 @@ pub async fn api_upload_url(Json(b): Json<UploadUrlBody>) -> Response {
         .map(str::to_string)
         .unwrap_or_else(|| filename_from_url(&url));
     if !valid_file_name(&name) {
-        return (
-            StatusCode::BAD_REQUEST,
-            format!("invalid name: {name}"),
-        )
-            .into_response();
+        return (StatusCode::BAD_REQUEST, format!("invalid name: {name}")).into_response();
     }
     let target = dir.join(&name);
     if std::fs::symlink_metadata(&target).is_ok() {
@@ -661,7 +657,11 @@ pub async fn api_upload_url(Json(b): Json<UploadUrlBody>) -> Response {
             Ok(out) => {
                 let tail = String::from_utf8_lossy(&out.stderr);
                 let tail = tail.trim().lines().last().unwrap_or("fetch failed");
-                last_err = format!("{}: {}", args[0], tail.chars().take(200).collect::<String>());
+                last_err = format!(
+                    "{}: {}",
+                    args[0],
+                    tail.chars().take(200).collect::<String>()
+                );
             }
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
             Err(e) => {
@@ -688,9 +688,7 @@ pub async fn api_upload_url(Json(b): Json<UploadUrlBody>) -> Response {
     }
     (
         StatusCode::OK,
-        Json(
-            serde_json::json!({ "ok": true, "path": target.to_string_lossy(), "size": size }),
-        ),
+        Json(serde_json::json!({ "ok": true, "path": target.to_string_lossy(), "size": size })),
     )
         .into_response()
 }
@@ -769,7 +767,10 @@ mod tests {
     #[test]
     fn rejects_escape_from_home() {
         let home = home_dir().to_string_lossy().to_string();
-        assert!(resolve_inside_home(Some("/etc/passwd")).is_err(), "home={home}");
+        assert!(
+            resolve_inside_home(Some("/etc/passwd")).is_err(),
+            "home={home}"
+        );
         assert!(resolve_inside_home(Some("../../..")).is_err());
     }
 
@@ -807,7 +808,10 @@ mod tests {
         assert!(!valid_upload_url("ftp://example.com/x"));
         assert!(!valid_upload_url("https://no dot"));
         assert!(!valid_upload_url("javascript:alert(1)"));
-        assert_eq!(filename_from_url("https://example.com/a/my%20file.zip?v=2"), "my file.zip");
+        assert_eq!(
+            filename_from_url("https://example.com/a/my%20file.zip?v=2"),
+            "my file.zip"
+        );
         assert_eq!(filename_from_url("https://example.com/"), "download");
     }
 
@@ -826,13 +830,18 @@ mod tests {
         // 200 OK — easiest assertion without draining the body type.
         let res = res.into_response();
         assert_eq!(res.status(), StatusCode::OK);
-        assert_eq!(std::fs::read(dir.join("up.txt")).expect("written"), b"hello upload");
+        assert_eq!(
+            std::fs::read(dir.join("up.txt")).expect("written"),
+            b"hello upload"
+        );
         // Duplicate name is refused.
         let q2 = UploadQuery {
             dir: dir.to_string_lossy().to_string(),
             name: "up.txt".to_string(),
         };
-        let res2 = api_upload_file(Query(q2), Bytes::from("again")).await.into_response();
+        let res2 = api_upload_file(Query(q2), Bytes::from("again"))
+            .await
+            .into_response();
         assert_eq!(res2.status(), StatusCode::CONFLICT);
         std::fs::remove_dir_all(&dir).expect("cleanup");
     }
@@ -842,13 +851,9 @@ mod tests {
         let home = home_dir();
         let dir = home.join(format!(".ks-ssh-test-mkdir-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
-        let (_, resolved) =
-            resolve_inside_home(Some(&dir.to_string_lossy())).expect("inside home");
+        let (_, resolved) = resolve_inside_home(Some(&dir.to_string_lossy())).expect("inside home");
         assert!(valid_file_name(
-            &resolved
-                .file_name()
-                .expect("name")
-                .to_string_lossy()
+            &resolved.file_name().expect("name").to_string_lossy()
         ));
         std::fs::create_dir_all(&resolved).expect("mkdir");
         assert!(resolved.is_dir());

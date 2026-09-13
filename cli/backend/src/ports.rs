@@ -4,7 +4,11 @@
 //! inodes to processes via `/proc/<pid>/fd`. Falls back to `ss -tuln`
 //! when `/proc/net` is unavailable (non-Linux / containers).
 
-use axum::{Json, http::StatusCode, response::{IntoResponse, Response}};
+use axum::{
+    Json,
+    http::StatusCode,
+    response::{IntoResponse, Response},
+};
 use serde::Serialize;
 use std::collections::HashMap;
 use std::net::{Ipv4Addr, Ipv6Addr};
@@ -102,13 +106,7 @@ fn inode_to_process() -> HashMap<u64, (u32, String)> {
                         b.split(|c| *c == 0)
                             .next()
                             .and_then(|s| std::str::from_utf8(s).ok())
-                            .map(|s| {
-                                s.rsplit('/')
-                                    .next()
-                                    .unwrap_or(s)
-                                    .trim()
-                                    .to_string()
-                            })
+                            .map(|s| s.rsplit('/').next().unwrap_or(s).trim().to_string())
                     })
                     .filter(|s| !s.is_empty())
                     .unwrap_or_else(|| "?".to_string())
@@ -122,10 +120,10 @@ fn inode_to_process() -> HashMap<u64, (u32, String)> {
             };
             let s = link.to_string_lossy();
             // Links look like `socket:[12345]`.
-            if let Some(inner) = s.strip_prefix("socket:[").and_then(|t| t.strip_suffix(']')) {
-                if let Ok(inode) = inner.parse::<u64>() {
-                    map.entry(inode).or_insert((pid, pname.clone()));
-                }
+            if let Some(inner) = s.strip_prefix("socket:[").and_then(|t| t.strip_suffix(']'))
+                && let Ok(inode) = inner.parse::<u64>()
+            {
+                map.entry(inode).or_insert((pid, pname.clone()));
             }
         }
     }
@@ -218,11 +216,12 @@ fn parse_ss_output(text: &str) -> Vec<(String, RawSocket)> {
             continue;
         };
         // ss columns: Netid State Recv-Q Send-Q Local:Port Peer:Port
-        let (state, local) = if parts.len() >= 6 && !parts[1].chars().next().is_some_and(|c| c.is_ascii_digit()) {
-            (parts[1].to_string(), parts[4])
-        } else {
-            ("LISTEN".to_string(), parts[3])
-        };
+        let (state, local) =
+            if parts.len() >= 6 && !parts[1].chars().next().is_some_and(|c| c.is_ascii_digit()) {
+                (parts[1].to_string(), parts[4])
+            } else {
+                ("LISTEN".to_string(), parts[3])
+            };
         if is_tcp && state != "LISTEN" && state != "UNCONN" {
             continue;
         }
@@ -261,13 +260,13 @@ fn parse_ss_output(text: &str) -> Vec<(String, RawSocket)> {
 
 fn collect_from_ss() -> Vec<(String, RawSocket)> {
     for args in [&["-tulnH"], &["-tuln"]] {
-        if let Ok(out) = std::process::Command::new("ss").args(args).output() {
-            if out.status.success() {
-                let text = String::from_utf8_lossy(&out.stdout).into_owned();
-                let parsed = parse_ss_output(&text);
-                if !parsed.is_empty() {
-                    return parsed;
-                }
+        if let Ok(out) = std::process::Command::new("ss").args(args).output()
+            && out.status.success()
+        {
+            let text = String::from_utf8_lossy(&out.stdout).into_owned();
+            let parsed = parse_ss_output(&text);
+            if !parsed.is_empty() {
+                return parsed;
             }
         }
     }
@@ -275,8 +274,7 @@ fn collect_from_ss() -> Vec<(String, RawSocket)> {
 }
 
 fn build_entries() -> Vec<PortEntry> {
-    let raw: Vec<(String, RawSocket)> =
-        collect_from_proc().unwrap_or_else(collect_from_ss);
+    let raw: Vec<(String, RawSocket)> = collect_from_proc().unwrap_or_else(collect_from_ss);
     let proc_map = inode_to_process();
     let mut entries: Vec<PortEntry> = raw
         .into_iter()
@@ -290,7 +288,11 @@ fn build_entries() -> Vec<PortEntry> {
                 (None, None)
             };
             // UDP has no connection state in /proc (always 07) — show OPEN.
-            let state = if proto.starts_with("UDP") { "OPEN".to_string() } else { r.state };
+            let state = if proto.starts_with("UDP") {
+                "OPEN".to_string()
+            } else {
+                r.state
+            };
             PortEntry {
                 proto,
                 addr: r.addr,
@@ -339,7 +341,8 @@ mod tests {
 
     #[test]
     fn parses_ipv6_any() {
-        let (addr, port) = parse_local_addr("00000000000000000000000000000000:0050").expect("parse");
+        let (addr, port) =
+            parse_local_addr("00000000000000000000000000000000:0050").expect("parse");
         assert_eq!(port, 80);
         assert!(addr.contains(':'), "addr={addr}");
     }
@@ -347,8 +350,7 @@ mod tests {
     #[test]
     fn parses_ipv6_loopback() {
         // ::1 shows up per-word little-endian: ...01000000
-        let (addr, _) =
-            parse_local_addr("00000000000000000000000001000000:1F90").expect("parse");
+        let (addr, _) = parse_local_addr("00000000000000000000000001000000:1F90").expect("parse");
         assert_eq!(addr, "::1");
     }
 

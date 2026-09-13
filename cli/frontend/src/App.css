@@ -2183,9 +2183,24 @@ a.file-link {
 }
 
 .ports-search {
+  position: relative;
   flex: 1 1 220px;
   min-width: 180px;
+  max-width: 320px;
+  width: 100%;
   display: flex;
+  align-items: center;
+}
+
+.ports-search-icon {
+  position: absolute;
+  left: 12px;
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  color: var(--text);
+  opacity: 0.7;
+  pointer-events: none;
 }
 
 .ports-search input {
@@ -2193,7 +2208,7 @@ a.file-link {
   font-size: 14px;
   width: 100%;
   min-height: 44px;
-  padding: 10px 14px;
+  padding: 10px 14px 10px 38px;
   border-radius: 8px;
   border: 1px solid var(--glass-border);
   background: var(--field-bg);
@@ -2396,6 +2411,7 @@ a.file-link {
 
   .ports-search {
     flex: 1 1 100%;
+    max-width: none;
   }
 
   .ports-filter {

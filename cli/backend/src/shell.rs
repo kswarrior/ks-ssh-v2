@@ -88,9 +88,8 @@ fn decode_with_carry(data: &[u8], carry: &mut Vec<u8>) -> String {
                 if valid_up_to > 0 {
                     // Valid prefix before the problem — emit it.
                     // SAFETY: valid_up_to is a valid UTF-8 boundary by contract.
-                    let s = unsafe {
-                        std::str::from_utf8_unchecked(&data[start..start + valid_up_to])
-                    };
+                    let s =
+                        unsafe { std::str::from_utf8_unchecked(&data[start..start + valid_up_to]) };
                     out.push_str(s);
                     start += valid_up_to;
                     continue;
@@ -124,7 +123,9 @@ async fn handle_socket(socket: WebSocket) {
         Ok(v) => v,
         Err(e) => {
             let _ = ws_tx
-                .send(Message::Text(format!("ks-ssh: cannot spawn shell: {e}").into()))
+                .send(Message::Text(
+                    format!("ks-ssh: cannot spawn shell: {e}").into(),
+                ))
                 .await;
             return;
         }
@@ -142,7 +143,9 @@ async fn handle_socket(socket: WebSocket) {
         Ok(r) => r,
         Err(e) => {
             let _ = ws_tx
-                .send(Message::Text(format!("ks-ssh: cannot read pty: {e}").into()))
+                .send(Message::Text(
+                    format!("ks-ssh: cannot read pty: {e}").into(),
+                ))
                 .await;
             return;
         }
@@ -157,7 +160,7 @@ async fn handle_socket(socket: WebSocket) {
                 Ok(n) => {
                     let mut data = std::mem::take(&mut carry);
                     data.extend_from_slice(&buf[..n]);
-                    let text = decode_with_carry(&mut data, &mut carry);
+                    let text = decode_with_carry(&data, &mut carry);
                     if !text.is_empty() && out_tx.blocking_send(text).is_err() {
                         break;
                     }
@@ -178,7 +181,9 @@ async fn handle_socket(socket: WebSocket) {
         Ok(w) => w,
         Err(e) => {
             let _ = ws_tx
-                .send(Message::Text(format!("ks-ssh: cannot write pty: {e}").into()))
+                .send(Message::Text(
+                    format!("ks-ssh: cannot write pty: {e}").into(),
+                ))
                 .await;
             return;
         }
@@ -265,15 +270,12 @@ async fn handle_socket(socket: WebSocket) {
                     // Only the exact resize shape is control traffic —
                     // anything else (even typed JSON) is shell input.
                     if let Ok(v) = serde_json::from_str::<serde_json::Value>(s) {
-                        let is_resize = v.get("type").and_then(|t| t.as_str())
-                            == Some("resize")
+                        let is_resize = v.get("type").and_then(|t| t.as_str()) == Some("resize")
                             && v.get("cols").and_then(|c| c.as_u64()).is_some()
                             && v.get("rows").and_then(|r| r.as_u64()).is_some();
                         if is_resize {
-                            let cols =
-                                v.get("cols").and_then(|c| c.as_u64()).unwrap_or(80) as u16;
-                            let rows =
-                                v.get("rows").and_then(|r| r.as_u64()).unwrap_or(24) as u16;
+                            let cols = v.get("cols").and_then(|c| c.as_u64()).unwrap_or(80) as u16;
+                            let rows = v.get("rows").and_then(|r| r.as_u64()).unwrap_or(24) as u16;
                             let _ = master.resize(PtySize {
                                 rows: rows.clamp(2, 300),
                                 cols: cols.clamp(2, 500),
@@ -324,21 +326,21 @@ mod tests {
         let split_at = full.len() - 2;
         let (a, b) = full.split_at(split_at);
         let mut carry = Vec::new();
-        let mut first = a.to_vec();
-        let t1 = decode_with_carry(&mut first, &mut carry);
+        let first = a.to_vec();
+        let t1 = decode_with_carry(&first, &mut carry);
         let mut second = carry.clone();
         second.extend_from_slice(b);
         // carry from first decode feeds the second
         let mut carry2 = carry;
-        let t2 = decode_with_carry(&mut second.clone(), &mut carry2);
+        let t2 = decode_with_carry(&second.clone(), &mut carry2);
         assert_eq!(format!("{t1}{t2}"), "héllo 🌍");
     }
 
     #[test]
     fn invalid_bytes_become_replacement_not_panic() {
-        let mut data = vec![0x66, 0x6f, 0xff, 0x6f]; // fo\xffo
+        let data = vec![0x66, 0x6f, 0xff, 0x6f]; // fo\xffo
         let mut carry = Vec::new();
-        let s = decode_with_carry(&mut data, &mut carry);
+        let s = decode_with_carry(&data, &mut carry);
         assert!(s.contains('\u{FFFD}'));
         assert!(carry.is_empty());
     }

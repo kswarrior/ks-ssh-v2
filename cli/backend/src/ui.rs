@@ -10,8 +10,8 @@ pub struct Ui;
 /// Build a standalone HTML page with all local assets inlined.
 /// Falls back to raw index.html when assets are missing.
 pub fn build_single_file() -> anyhow::Result<String> {
-    let index = Ui::get("index.html")
-        .ok_or_else(|| anyhow::anyhow!("frontend dist missing index.html"))?;
+    let index =
+        Ui::get("index.html").ok_or_else(|| anyhow::anyhow!("frontend dist missing index.html"))?;
     let mut html = String::from_utf8_lossy(&index.data).into_owned();
 
     // Collect embedded asset contents.
@@ -35,7 +35,13 @@ pub fn build_single_file() -> anyhow::Result<String> {
     // Replace <script ... src="/assets/*.js"> with inline module.
     // Vite emits exactly one module script; handle generically.
     if !js_inline.is_empty() {
-        html = replace_asset_tag(&html, "script", &js_inline, "<script type=\"module\">\n", "\n</script>");
+        html = replace_asset_tag(
+            &html,
+            "script",
+            &js_inline,
+            "<script type=\"module\">\n",
+            "\n</script>",
+        );
     }
     if !css_inline.is_empty() {
         html = replace_asset_tag(&html, "link", &css_inline, "<style>\n", "\n</style>");
@@ -43,10 +49,7 @@ pub fn build_single_file() -> anyhow::Result<String> {
 
     // Inline favicon as data URI so the bundle has zero external fetches.
     if let Some(icon) = Ui::get("favicon.svg") {
-        let b64 = base64::Engine::encode(
-            &base64::engine::general_purpose::STANDARD,
-            &icon.data,
-        );
+        let b64 = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &icon.data);
         let uri = format!("data:image/svg+xml;base64,{b64}");
         html = html.replace("/favicon.svg", &uri);
     }
@@ -64,13 +67,7 @@ pub fn build_single_file() -> anyhow::Result<String> {
 /// Replace the first external asset tag of a given kind with inline content.
 /// `script` -> replaces `<script ... src=...>...</script>`; `link` -> replaces
 /// `<link ... href=...stylesheet...>`.
-fn replace_asset_tag(
-    html: &str,
-    kind: &str,
-    inline: &str,
-    open: &str,
-    close: &str,
-) -> String {
+fn replace_asset_tag(html: &str, kind: &str, inline: &str, open: &str, close: &str) -> String {
     if kind == "script" {
         // Find <script ... src="...assets..."> ... </script> and swap it.
         let mut out = String::with_capacity(html.len() + inline.len());
