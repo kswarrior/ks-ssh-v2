@@ -4,6 +4,7 @@ import FilesPage from './pages/Files'
 import PortsPage from './pages/Ports'
 import HostPage from './pages/Host'
 import SettingsPage from './pages/Settings'
+import LoginPage from './pages/Login'
 
 type TabId = 'terminal' | 'files' | 'ports' | 'host' | 'settings'
 

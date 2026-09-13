@@ -1338,6 +1338,7 @@ function ViewPage() {
         <h1 id="page-title-view">View</h1>
         {activeToken && (meta?.hasUi || srcDoc) && (
           <div className="row-actions">
+            <E2eBadge status={parseFragmentKey() ? 'on' : 'off'} />
             <button type="button" className="btn btn-sm btn-primary" onClick={openFullscreen}>
               Fullscreen
             </button>
@@ -1355,6 +1356,8 @@ function ViewPage() {
       <p className="lead">
         Open the full UI pushed by your CLI over WSS — no port forwarding.
         Run <code>ks-ssh --no-serve --token=ABCDE</code>, then enter the token.
+        UI bundle is public (plaintext); session content needs the full link
+        with <code>#k=...</code> for 🔒 E2E.
       </p>
       <div className="card">
         <form className="form" onSubmit={submit}>
@@ -1497,7 +1500,17 @@ async function loadViaWss(
       resolve()
     })
     ws.onopen = () => {
-      ws.send(JSON.stringify({ type: 'hello', role: 'client', token }))
+      // hello carries token+role only (no k); e2e advertises capability.
+      // `k` never leaves fragment/memory. ui-request stays plaintext
+      // (UI bundle exception — public build output).
+      const k = parseFragmentKey()
+      ws.send(
+        JSON.stringify(
+          k
+            ? { type: 'hello', role: 'client', token, e2e: E2E_ALG }
+            : { type: 'hello', role: 'client', token },
+        ),
+      )
       ws.send(JSON.stringify({ type: 'ui-request' }))
     }
     ws.onmessage = (e) => {
@@ -1510,6 +1523,8 @@ async function loadViaWss(
           i?: number
           data?: string
         }
+        // `enc` is opaque sealed session traffic — ignore for UI fetch.
+        if (msg?.type === 'enc') return
         if (msg?.type === 'ui-begin') {
           const n = Number(msg.chunks) || 0
           if (n > 0 && n <= 256) chunks = new Array(n).fill(null)
