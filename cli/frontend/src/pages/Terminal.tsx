@@ -29,6 +29,40 @@ function applyChunk(prev: string, chunk: string): string {
 
 type TermStatus = 'connecting' | 'online' | 'offline'
 
+/** Copy text to the clipboard with a legacy fallback. */
+function copyText(text: string): void {
+  const fallback = () => {
+    try {
+      const ta = document.createElement('textarea')
+      ta.value = text
+      ta.style.position = 'fixed'
+      ta.style.top = '0'
+      ta.style.opacity = '0'
+      document.body.appendChild(ta)
+      ta.select()
+      try {
+        document.execCommand('copy')
+      } finally {
+        document.body.removeChild(ta)
+      }
+    } catch {
+      // Clipboard unavailable — nothing else we can do.
+    }
+  }
+  try {
+    if (navigator.clipboard?.writeText) {
+      navigator.clipboard.writeText(text).then(
+        () => {},
+        () => fallback(),
+      )
+      return
+    }
+  } catch {
+    // Permission / secure-context issue — use the fallback below.
+  }
+  fallback()
+}
+
 function ShellSession({
   id,
   onStatus,
