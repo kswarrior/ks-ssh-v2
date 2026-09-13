@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
 
-type PageId = 'home' | 'ssh' | 'installation' | 'settings' | 'session'
+type PageId = 'home' | 'ssh' | 'installation' | 'settings'
 
 type NavItem = { id: PageId; label: string; hash: string }
 
@@ -56,7 +56,6 @@ function writeJSON(key: string, value: unknown) {
 /** Map a location hash to a page, or null when it is not a page route. */
 function hashToPage(hash: string): PageId | null {
   const clean = hash.replace(/^#\/?/, '')
-  if (clean === 'session') return 'session'
   const found = NAV.find((p) => p.hash.replace(/^#\/?/, '') === clean)
   return found ? found.id : null
 }
@@ -322,19 +321,13 @@ type SshEntry = {
   online: boolean
 }
 
-type RelaySession = { name: string; token: string }
-
-function readRelaySession(): RelaySession | null {
-  const saved = readJSON<unknown>('ks-ssh:relay', null)
-  if (!saved || typeof saved !== 'object') return null
-  const s = saved as { name?: unknown; token?: unknown }
-  if (typeof s.name !== 'string' || typeof s.token !== 'string') return null
-  if (!/^[A-Z0-9]{5}$/.test(s.token)) return null
-  return { name: s.name, token: s.token }
-}
-
-function SessionPage() {
-  const [session] = useState<RelaySession | null>(() => readRelaySession())
+function ActiveSession({
+  entry,
+  onBack,
+}: {
+  entry: SshEntry
+  onBack: () => void
+}) {
   const [lines, setLines] = useState<string[]>([])
   const [draft, setDraft] = useState('')
   const wsRef = useRef<WebSocket | null>(null)
@@ -343,9 +336,8 @@ function SessionPage() {
   const push = (line: string) =>
     setLines((prev) => [...prev.slice(-99), line])
 
-  const token = session?.token ?? null
+  const token = entry.token.trim().toUpperCase()
   useEffect(() => {
-    if (!token) return
     const scheme = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
     const ws = new WebSocket(
       `${scheme}//${window.location.host}/v1/client?token=${token}`,
@@ -413,50 +405,34 @@ function SessionPage() {
     setDraft('')
   }
 
-  if (!session) {
-    return (
-      <section className="page" aria-labelledby="page-title-session">
-        <h1 id="page-title-session">Session</h1>
-        <div className="card">
-          <p>No relay session. Connect from the SSH page first.</p>
-          <div className="row-actions">
-            <a className="btn btn-primary" href="#/ssh">
-              Back to SSH
-            </a>
-          </div>
-        </div>
-      </section>
-    )
-  }
-
   return (
-    <section className="page" aria-labelledby="page-title-session">
+    <div className="card">
       <div className="page-head">
-        <h1 id="page-title-session">{session.name}</h1>
-        <a className="btn btn-sm" href="#/ssh">
+        <h2>
+          {entry.name} <code>{token}</code>
+        </h2>
+        <button type="button" className="btn btn-sm" onClick={onBack}>
           Back
-        </a>
+        </button>
       </div>
-      <div className="card">
-        <div className="ws-log" ref={logRef} aria-live="polite">
-          {lines.map((l, i) => (
-            <div key={i}>{l}</div>
-          ))}
-        </div>
-        <form className="form" onSubmit={send}>
-          <label className="field">
-            Send
-            <input
-              type="text"
-              value={draft}
-              onChange={(e) => setDraft(e.target.value)}
-              placeholder="type + Enter"
-              autoComplete="off"
-            />
-          </label>
-        </form>
+      <div className="ws-log" ref={logRef} aria-live="polite">
+        {lines.map((l, i) => (
+          <div key={i}>{l}</div>
+        ))}
       </div>
-    </section>
+      <form className="form" onSubmit={send}>
+        <label className="field">
+          Send
+          <input
+            type="text"
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            placeholder="type + Enter"
+            autoComplete="off"
+          />
+        </label>
+      </form>
+    </div>
   )
 }
 
@@ -473,6 +449,7 @@ function SSHPage({
   const [token, setToken] = useState('')
   const [note, setNote] = useState('')
   const [connectingId, setConnectingId] = useState<string | null>(null)
+  const [visitingId, setVisitingId] = useState<string | null>(null)
   const [banner, setBanner] = useState<string | null>(null)
   const socketsRef = useRef(new Map<string, WebSocket>())
 
@@ -593,17 +570,14 @@ function SSHPage({
   const disconnectEntry = (id: string) => {
     closeSocket(id)
     setConnectingId((cur) => (cur === id ? null : cur))
+    setVisitingId((cur) => (cur === id ? null : cur))
     onChange((prev) =>
       prev.map((x) => (x.id === id ? { ...x, online: false } : x)),
     )
   }
 
   const visitEntry = (entry: SshEntry) => {
-    writeJSON('ks-ssh:relay', {
-      name: entry.name,
-      token: entry.token.trim().toUpperCase(),
-    })
-    window.location.hash = '#/session'
+    setVisitingId(entry.id)
   }
 
   const submit = (e: FormEvent) => {
@@ -642,8 +616,11 @@ function SSHPage({
   const removeEntry = (id: string) => {
     closeSocket(id)
     setConnectingId((cur) => (cur === id ? null : cur))
+    setVisitingId((cur) => (cur === id ? null : cur))
     onChange((prev) => prev.filter((x) => x.id !== id))
   }
+
+  const visiting = entries.find((x) => x.id === visitingId) ?? null
 
   const total = entries.length
   const online = entries.filter((x) => x.online).length
@@ -782,7 +759,9 @@ function SSHPage({
         </div>
       )}
 
-      {entries.length === 0 && !formOpen ? (
+      {visiting ? (
+        <ActiveSession entry={visiting} onBack={() => setVisitingId(null)} />
+      ) : entries.length === 0 && !formOpen ? (
         <div className="card">
           <h2>No connections yet</h2>
           <p>Press Connect to add your first one.</p>
