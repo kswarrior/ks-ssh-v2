@@ -1,3 +1,4 @@
+mod auth;
 mod e2e;
 mod files;
 mod host;
@@ -6,6 +7,9 @@ mod relay;
 mod shell;
 mod ui;
 
+use std::sync::Arc;
+
+use auth::{AppState, AuthState};
 use axum::{
     Router,
     http::{StatusCode, header},
@@ -25,6 +29,14 @@ struct Cli {
     /// Port to serve the web UI on.
     #[arg(long, default_value_t = 8080)]
     port: u16,
+    /// Username that must log in to use the web UI (shows a login page).
+    /// Must be used together with `--pass`. Omit both for open access.
+    #[arg(long, alias = "username")]
+    user: Option<String>,
+    /// Password that must log in to use the web UI (shows a login page).
+    /// Must be used together with `--user`. Omit both for open access.
+    #[arg(long, alias = "password")]
+    pass: Option<String>,
     /// Skip the local web UI (no open port at all).
     #[arg(long)]
     no_serve: bool,
@@ -74,9 +86,19 @@ fn relay_ws_base(relay: &str) -> String {
     }
 }
 
-async fn serve(host: String, port: u16) {
-    let app = Router::new()
+async fn serve(host: String, port: u16, auth: Option<Arc<AuthState>>) {
+    let state = AppState { auth: auth.clone() };
+
+    // Public: health ping + login flow (needed to show the login page).
+    let public = Router::new()
         .route("/api/hello", get(api_hello))
+        .route("/api/auth/status", get(auth::api_status))
+        .route("/api/auth/login", post(auth::api_login))
+        .route("/api/auth/logout", post(auth::api_logout))
+        .with_state(state);
+
+    // Protected: everything that touches the host.
+    let protected = Router::new()
         .route(
             "/api/files",
             get(files::api_list_files).delete(files::api_delete_file),
@@ -96,8 +118,18 @@ async fn serve(host: String, port: u16) {
         .route(
             "/v1/shell",
             get(shell::ws_handler).delete(shell::api_kill_session),
-        )
-        .fallback(serve_ui);
+        );
+
+    let app = match auth {
+        Some(ref arc) => {
+            let guarded = protected.route_layer(axum::middleware::from_fn_with_state(
+                arc.clone(),
+                auth::require_auth,
+            ));
+            public.merge(guarded).fallback(serve_ui)
+        }
+        None => public.merge(protected).fallback(serve_ui),
+    };
 
     let addr = format!("{host}:{port}");
     let listener = tokio::net::TcpListener::bind(&addr)
@@ -114,6 +146,28 @@ async fn serve(host: String, port: u16) {
 async fn main() {
     let cli = Cli::parse();
     println!("KS SSH — hello world");
+
+    // Optional login gate: --user + --pass together show a login page.
+    // Omit both for open access (previous behaviour).
+    let auth: Option<Arc<AuthState>> = match (cli.user, cli.pass) {
+        (Some(u), Some(p)) => {
+            let u = u.trim().to_string();
+            if u.is_empty() || p.is_empty() {
+                eprintln!("--user/--pass must both be non-empty");
+                std::process::exit(2);
+            }
+            println!("Auth: ON (user '{u}') — login required for the web UI.");
+            Some(Arc::new(AuthState::new(&u, &p)))
+        }
+        (None, None) => {
+            println!("Auth: OFF (open access — anyone who can reach the port can run commands).");
+            None
+        }
+        _ => {
+            eprintln!("--user and --pass must be used together (or omit both)");
+            std::process::exit(2);
+        }
+    };
 
     let token: Option<String> = cli.token.map(|t| {
         if t.is_empty() {
@@ -168,12 +222,15 @@ async fn main() {
         }
         // Local UI plus relay agent alongside.
         (false, Some(t)) => {
+            if auth.is_some() {
+                eprintln!("note: --user/--pass protects the local UI only; the relay share link stays open to whoever holds it");
+            }
             let ws_base = relay_ws_base(&cli.relay);
             let push_ui = !cli.no_ui;
             tokio::spawn(async move { relay::run_agent(&ws_base, &t, push_ui, e2e_key).await });
-            serve(cli.host, cli.port).await;
+            serve(cli.host, cli.port, auth).await;
         }
         // Local UI only (previous behaviour).
-        (false, None) => serve(cli.host, cli.port).await,
+        (false, None) => serve(cli.host, cli.port, auth).await,
     }
 }
