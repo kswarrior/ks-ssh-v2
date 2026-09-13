@@ -1494,6 +1494,7 @@
   min-width: 0;
   box-shadow: var(--glow-line), var(--shadow-md);
   transition: border-color 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease;
+  cursor: pointer;
 }
 
 .file-card:hover {
@@ -1509,7 +1510,6 @@
   align-items: center;
   gap: 10px;
   min-width: 0;
-  cursor: pointer;
 }
 
 .file-card-top .file-name {

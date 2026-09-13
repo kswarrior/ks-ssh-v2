@@ -373,11 +373,14 @@ export default function FilesPage() {
               const isRenaming = renaming === e.path
               const isConfirm = confirmDelete === e.path
               return (
-                <li key={e.path} className="file-card">
+                <li
+                  key={e.path}
+                  className="file-card"
+                  onClick={() => openEntry(e)}
+                  title={e.is_dir ? `Open ${e.path}` : `Edit ${e.path}`}
+                >
                   <div
                     className={`file-card-top${e.is_dir ? ' is-dir' : ''}`}
-                    onClick={() => openEntry(e)}
-                    title={e.is_dir ? `Open ${e.path}` : `Edit ${e.path}`}
                   >
                     <span
                       className="file-icon"
@@ -523,7 +526,10 @@ export default function FilesPage() {
                   </div>
 
                   {isRenaming && (
-                    <div className="file-inline-actions">
+                    <div
+                      className="file-inline-actions"
+                      onClick={(ev) => ev.stopPropagation()}
+                    >
                       <button
                         type="button"
                         className="btn btn-sm btn-primary"
