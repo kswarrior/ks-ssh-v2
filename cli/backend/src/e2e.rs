@@ -194,10 +194,10 @@ pub fn encrypt_with_nonce(
 ) -> anyhow::Result<Envelope> {
     let subkey = key.derive();
     let cipher = Aes256Gcm::new_from_slice(&subkey).expect("32-byte key");
-    let nonce = aes_gcm::Nonce::from_slice(nonce_bytes);
+    let nonce = (*nonce_bytes).into();
     let ct = cipher
         .encrypt(
-            nonce,
+            &nonce,
             Payload {
                 msg: plaintext,
                 aad: token.to_uppercase().as_bytes(),
@@ -233,10 +233,13 @@ pub fn decrypt_envelope(
         anyhow::bail!("bad nonce length");
     }
     let ct = decode_b64url(&env.ct)?;
-    let nonce = aes_gcm::Nonce::from_slice(&nonce_raw);
+    let nonce_arr: [u8; 12] = nonce_raw
+        .try_into()
+        .map_err(|_| anyhow::anyhow!("bad nonce length"))?;
+    let nonce = nonce_arr.into();
     let pt = cipher
         .decrypt(
-            nonce,
+            &nonce,
             Payload {
                 msg: &ct,
                 aad: token.to_uppercase().as_bytes(),
