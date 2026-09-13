@@ -22,7 +22,6 @@ export class TunnelRoom implements DurableObject {
   private uiLoaded = false
   // In-progress upload from the agent (base64 chunks, independently padded).
   private uiPending: (string | null)[] | null = null
-  private uiPendingSize = 0
 
   constructor(state: DurableObjectState) {
     this.state = state
@@ -156,7 +155,6 @@ export class TunnelRoom implements DurableObject {
             return
           }
           this.uiPending = new Array(chunks).fill(null)
-          this.uiPendingSize = size
           return // don't relay upload traffic to clients
         }
         if (role === 'agent' && msg?.type === 'ui-chunk') {

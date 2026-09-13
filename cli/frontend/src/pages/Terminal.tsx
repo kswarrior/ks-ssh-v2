@@ -428,6 +428,40 @@ export default function TerminalPage({
   const total = entries.length
   const online = entries.filter((x) => x.online).length
 
+  // First run: web-SSH style blank screen with only a centered + Terminal button.
+  const isBlank = entries.length === 0 && !formOpen && !visiting && !banner
+  if (isBlank) {
+    return (
+      <section
+        className="page terminal-blank"
+        aria-labelledby="page-title-terminal"
+      >
+        <h1 id="page-title-terminal" className="sr-only">
+          Terminal
+        </h1>
+        <button
+          type="button"
+          className="btn btn-primary terminal-add-btn"
+          onClick={openNew}
+          autoFocus
+        >
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+          >
+            <path d="M12 5v14M5 12h14" />
+          </svg>
+          Terminal
+        </button>
+      </section>
+    )
+  }
+
   return (
     <section className="page" aria-labelledby="page-title-terminal">
       <div className="page-head">
