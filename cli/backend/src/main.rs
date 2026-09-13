@@ -1,4 +1,5 @@
 mod relay;
+mod ui;
 
 use axum::{
     Router,
@@ -7,7 +8,7 @@ use axum::{
     routing::get,
 };
 use clap::Parser;
-use rust_embed::RustEmbed;
+use ui::Ui;
 
 /// KS SSH — local backend + embedded web UI + WSS relay agent.
 #[derive(Parser)]
@@ -32,11 +33,10 @@ struct Cli {
         default_value = "https://ks-ssh-v2.kswarriorpro.workers.dev"
     )]
     relay: String,
+    /// Skip pushing the frontend UI bundle over WSS (relay only).
+    #[arg(long)]
+    no_ui: bool,
 }
-
-#[derive(RustEmbed)]
-#[folder = "../frontend/dist/"]
-struct Ui;
 
 async fn api_hello() -> &'static str {
     "KS SSH — hello world"
@@ -101,7 +101,7 @@ async fn main() {
 
     match (cli.no_serve, token) {
         // Pure agent: no open port, only outbound WSS.
-        (true, Some(t)) => relay::run_agent(&relay_ws_base(&cli.relay), &t).await,
+        (true, Some(t)) => relay::run_agent(&relay_ws_base(&cli.relay), &t, !cli.no_ui).await,
         (true, None) => {
             eprintln!("--no-serve needs --token (try --token= for a random one)");
             std::process::exit(2);
@@ -109,7 +109,8 @@ async fn main() {
         // Local UI plus relay agent alongside.
         (false, Some(t)) => {
             let ws_base = relay_ws_base(&cli.relay);
-            tokio::spawn(async move { relay::run_agent(&ws_base, &t).await });
+            let push_ui = !cli.no_ui;
+            tokio::spawn(async move { relay::run_agent(&ws_base, &t, push_ui).await });
             serve(cli.host, cli.port).await;
         }
         // Local UI only (previous behaviour).
