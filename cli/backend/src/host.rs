@@ -292,15 +292,17 @@ fn memory_info() -> MemoryInfo {
 }
 
 /// Pseudo filesystems that add noise to the disk list.
+/// tmpfs/devtmpfs are memory-backed (already covered by the RAM card).
 fn is_pseudo(fstype: &str, mount: &str) -> bool {
+    if matches!(fstype, "tmpfs" | "devtmpfs") {
+        return true;
+    }
     matches!(
         fstype,
-        "tmpfs" | "devtmpfs" | "devpts" | "sysfs" | "proc" | "cgroup" | "cgroup2" | "overlay"
-            if mount.starts_with("/proc")
-                || mount.starts_with("/sys")
-                || mount.starts_with("/dev")
-                || mount == "/dev/shm"
-    ) || matches!(fstype, "sysfs" | "proc" | "devpts" | "cgroup" | "cgroup2" | "securityfs" | "pstore" | "bpf" | "tracefs" | "debugfs" | "fusectl" | "configfs")
+        "devpts" | "sysfs" | "proc" | "cgroup" | "cgroup2" | "securityfs" | "pstore" | "bpf" | "tracefs" | "debugfs" | "fusectl" | "configfs" | "efivarfs"
+    ) || mount.starts_with("/proc")
+        || mount.starts_with("/sys")
+        || mount.starts_with("/dev")
 }
 
 /// Parse `df -kP -T` (POSIX + filesystem type).
@@ -436,7 +438,7 @@ mod tests {
     fn parses_df_with_type() {
         let text = "Filesystem Type 1024-blocks Used Available Capacity Mounted on\n\
             /dev/sda1 ext4 100000 40000 60000 40% /\n\
-            tmpfs tmpfs 1000 0 1000 0% /dev/shm\n";
+            tmpfs tmpfs 1000 0 1000 0% /run\n";
         let disks = parse_df(text);
         assert_eq!(disks.len(), 1);
         assert_eq!(disks[0].mount, "/");
@@ -449,9 +451,13 @@ mod tests {
     fn skips_pseudo_filesystems() {
         assert!(is_pseudo("proc", "/proc"));
         assert!(is_pseudo("sysfs", "/sys"));
+        assert!(is_pseudo("tmpfs", "/run"));
         assert!(is_pseudo("tmpfs", "/dev/shm"));
+        assert!(is_pseudo("devtmpfs", "/dev"));
+        assert!(is_pseudo("efivarfs", "/sys/firmware/efi/efivars"));
         assert!(!is_pseudo("ext4", "/"));
         assert!(!is_pseudo("vfat", "/boot/efi"));
+        assert!(!is_pseudo("overlay", "/"));
     }
 
     #[test]
