@@ -73,7 +73,7 @@ fn spawn_shell(
 /// Decode PTY bytes to text, holding an incomplete UTF-8 tail in `carry`
 /// for the next read. Invalid sequences become U+FFFD; only a truncated
 /// sequence at the very end is deferred.
-fn decode_with_carry(data: &mut Vec<u8>, carry: &mut Vec<u8>) -> String {
+fn decode_with_carry(data: &[u8], carry: &mut Vec<u8>) -> String {
     let mut out = String::with_capacity(data.len());
     let mut start = 0;
     loop {
