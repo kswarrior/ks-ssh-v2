@@ -122,10 +122,10 @@ async fn agent_session(url: &str, token: &str, push_ui: bool) -> anyhow::Result<
     })?;
     tx.send(Message::Text(hello.into())).await?;
 
-    if push_ui {
-        if let Err(e) = push_ui_bundle(&mut tx).await {
-            eprintln!("ui push failed: {e:#}");
-        }
+    if push_ui
+        && let Err(e) = push_ui_bundle(&mut tx).await
+    {
+        eprintln!("ui push failed: {e:#}");
     }
 
     let mut keepalive = tokio::time::interval(std::time::Duration::from_secs(20));

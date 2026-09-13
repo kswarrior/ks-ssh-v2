@@ -107,11 +107,11 @@ async fn main() {
             t.to_uppercase()
         }
     });
-    if let Some(ref t) = token {
-        if !relay::valid_token(t) {
-            eprintln!("bad token (want 5 letters/numbers)");
-            std::process::exit(2);
-        }
+    if let Some(ref t) = token
+        && !relay::valid_token(t)
+    {
+        eprintln!("bad token (want 5 letters/numbers)");
+        std::process::exit(2);
     }
 
     match (cli.no_serve, token) {

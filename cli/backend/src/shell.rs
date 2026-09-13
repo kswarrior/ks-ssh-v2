@@ -62,6 +62,7 @@ fn spawn_shell(
         Err(_) => {
             let mut plain = CommandBuilder::new(&shell);
             plain.env("TERM", "xterm-256color");
+            plain.env("COLORTERM", "truecolor");
             plain.env("KS_SSH", "1");
             pair.slave.spawn_command(plain)?
         }
@@ -216,12 +217,20 @@ async fn handle_socket(socket: WebSocket) {
 
     // PTY -> WebSocket.
     let mut send_task = tokio::spawn(async move {
+        // Helper: announce exit then close so the UI can distinguish a
+        // real exit (JSON + close) from shell output that merely looks
+        // like JSON (e.g. `echo '{"type":"exit"}'` keeps the socket open).
+        let send_exit = async |ws_tx: &mut futures_util::stream::SplitSink<WebSocket, Message>| {
+            let _ = ws_tx
+                .send(Message::Text(r#"{"type":"exit"}"#.to_string().into()))
+                .await;
+            let _ = ws_tx.send(Message::Close(None)).await;
+        };
         loop {
             tokio::select! {
                 chunk = out_rx.recv() => {
                     match chunk {
-                        Some(bytes) => {
-                            let text = String::from_utf8_lossy(&bytes).into_owned();
+                        Some(text) => {
                             if ws_tx.send(Message::Text(text.into())).await.is_err() {
                                 break;
                             }
@@ -230,17 +239,13 @@ async fn handle_socket(socket: WebSocket) {
                         // (the exit watcher is only a backup: EOF usually
                         // wins the race against its 200ms poll).
                         None => {
-                            let _ = ws_tx
-                                .send(Message::Text(r#"{"type":"exit"}"#.to_string().into()))
-                                .await;
+                            send_exit(&mut ws_tx).await;
                             break;
                         }
                     }
                 }
                 _ = &mut exit_rx => {
-                    let _ = ws_tx
-                        .send(Message::Text(r#"{"type":"exit"}"#.to_string().into()))
-                        .await;
+                    send_exit(&mut ws_tx).await;
                     break;
                 }
             }
@@ -270,24 +275,23 @@ async fn handle_socket(socket: WebSocket) {
                             let rows =
                                 v.get("rows").and_then(|r| r.as_u64()).unwrap_or(24) as u16;
                             let _ = master.resize(PtySize {
-                                rows: rows.max(2).min(300),
-                                cols: cols.max(2).min(500),
+                                rows: rows.clamp(2, 300),
+                                cols: cols.clamp(2, 500),
                                 pixel_width: 0,
                                 pixel_height: 0,
                             });
                             continue;
                         }
                     }
-                    let mut w = writer_clone.lock().await;
-                    use std::io::Write as _;
-                    let _ = w.write_all(s.as_bytes());
-                    let _ = w.flush();
+                    // Queue for the blocking writer thread (backpressure ok).
+                    if in_tx.send(s.as_bytes().to_vec()).await.is_err() {
+                        break;
+                    }
                 }
                 Message::Binary(bin) => {
-                    let mut w = writer_clone.lock().await;
-                    use std::io::Write as _;
-                    let _ = w.write_all(&bin);
-                    let _ = w.flush();
+                    if in_tx.send(bin.to_vec()).await.is_err() {
+                        break;
+                    }
                 }
                 Message::Close(_) => break,
                 _ => {}
@@ -300,10 +304,42 @@ async fn handle_socket(socket: WebSocket) {
         _ = (&mut recv_task) => { send_task.abort(); }
     }
     // Session over — reap the shell so a closed tab never leaks a process.
-    if let Ok(mut guard) = child.lock() {
-        if let Some(mut c) = guard.take() {
-            let _ = c.kill();
-            let _ = c.wait();
-        }
+    if let Ok(mut guard) = child.lock()
+        && let Some(mut c) = guard.take()
+    {
+        let _ = c.kill();
+        let _ = c.wait();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn utf8_split_rune_survives_chunk_boundary() {
+        // "é" is 2 bytes; split it across two reads.
+        let full = "héllo 🌍".as_bytes().to_vec();
+        // Split inside the emoji (4-byte rune).
+        let split_at = full.len() - 2;
+        let (a, b) = full.split_at(split_at);
+        let mut carry = Vec::new();
+        let mut first = a.to_vec();
+        let t1 = decode_with_carry(&mut first, &mut carry);
+        let mut second = carry.clone();
+        second.extend_from_slice(b);
+        // carry from first decode feeds the second
+        let mut carry2 = carry;
+        let t2 = decode_with_carry(&mut second.clone(), &mut carry2);
+        assert_eq!(format!("{t1}{t2}"), "héllo 🌍");
+    }
+
+    #[test]
+    fn invalid_bytes_become_replacement_not_panic() {
+        let mut data = vec![0x66, 0x6f, 0xff, 0x6f]; // fo\xffo
+        let mut carry = Vec::new();
+        let s = decode_with_carry(&mut data, &mut carry);
+        assert!(s.contains('\u{FFFD}'));
+        assert!(carry.is_empty());
     }
 }
