@@ -52,6 +52,40 @@ function hashToTab(hash: string): TabId | null {
   return found ? found.id : null
 }
 
+type PingTone = 'good' | 'mid' | 'bad' | 'off'
+
+function pingTone(ms: number | null): PingTone {
+  if (ms == null) return 'off'
+  if (ms < 150) return 'good'
+  if (ms < 400) return 'mid'
+  return 'bad'
+}
+
+function PingBadge({ ms }: { ms: number | null }) {
+  const tone = pingTone(ms)
+  const lit = tone === 'good' ? 4 : tone === 'mid' ? 3 : tone === 'bad' ? 2 : 1
+  const label =
+    ms == null ? 'Server unreachable' : `Ping ${Math.round(ms)} milliseconds`
+  return (
+    <span className="ping-badge" data-tone={tone} role="status" aria-label={label} title={label}>
+      <svg viewBox="0 0 24 18" aria-hidden="true">
+        {[5, 9, 13, 17].map((h, i) => (
+          <rect
+            key={h}
+            x={1 + i * 6}
+            y={18 - h}
+            width="4"
+            height={h}
+            rx="1"
+            className={i < lit ? 'on' : undefined}
+          />
+        ))}
+      </svg>
+      <span className="ping-value">{ms == null ? '−−' : `${Math.round(ms)}ms`}</span>
+    </span>
+  )
+}
+
 export default function App() {
   const [tab, setTab] = useState<TabId>(
     () =>
@@ -80,6 +114,37 @@ export default function App() {
     )
   })
   const [theme, setTheme] = useState<Theme>(initialTheme)
+  const [pingMs, setPingMs] = useState<number | null>(null)
+
+  // Ping the local backend (UI <-> server RTT). Green <150ms,
+  // yellow <400ms, red above that or unreachable.
+  useEffect(() => {
+    let alive = true
+    let timer: number | undefined
+    const check = async () => {
+      const start = performance.now()
+      try {
+        const ctrl = new AbortController()
+        const timeout = window.setTimeout(() => ctrl.abort(), 5000)
+        const res = await fetch('/api/hello', {
+          cache: 'no-store',
+          signal: ctrl.signal,
+        })
+        window.clearTimeout(timeout)
+        if (!res.ok) throw new Error(`http ${res.status}`)
+        await res.text()
+        if (alive) setPingMs(performance.now() - start)
+      } catch {
+        if (alive) setPingMs(null)
+      }
+      if (alive) timer = window.setTimeout(check, 5000)
+    }
+    void check()
+    return () => {
+      alive = false
+      if (timer !== undefined) window.clearTimeout(timer)
+    }
+  }, [])
 
   // Keep tab in sync with the URL hash (back/forward buttons, deep links).
   // Unknown hashes (e.g. #main from the skip link) are ignored.
@@ -159,6 +224,7 @@ export default function App() {
               KS SSH
             </span>
           </span>
+          <PingBadge ms={pingMs} />
 
           <span className="header-spacer" />
 

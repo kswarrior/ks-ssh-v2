@@ -74,6 +74,57 @@
   filter: drop-shadow(0 4px 10px var(--accent-shadow));
 }
 
+/* Ping badge: signal svg on top, ms number below in small text. */
+.ping-badge {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  flex-shrink: 0;
+  min-width: 42px;
+  line-height: 1;
+  margin-left: 2px;
+}
+
+.ping-badge svg {
+  width: 22px;
+  height: 16px;
+  display: block;
+  filter: none;
+}
+
+.ping-badge svg rect {
+  fill: currentColor;
+  opacity: 0.22;
+}
+
+.ping-badge svg rect.on {
+  opacity: 1;
+}
+
+.ping-badge[data-tone='good'] {
+  color: #22c55e;
+}
+
+.ping-badge[data-tone='mid'] {
+  color: #eab308;
+}
+
+.ping-badge[data-tone='bad'],
+.ping-badge[data-tone='off'] {
+  color: #ef4444;
+}
+
+.ping-value {
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: currentColor;
+  white-space: nowrap;
+}
+
 @media (max-width: 380px) {
   .header-brand-text {
     display: none;

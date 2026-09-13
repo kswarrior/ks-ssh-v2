@@ -205,7 +205,46 @@ export default function PortsPage() {
             </div>
           </div>
         ) : loading && !data ? (
-          <p aria-busy="true">Scanning…</p>
+          <div
+            className="ports-table-wrap"
+            role="status"
+            aria-busy="true"
+            aria-label="Scanning host ports…"
+          >
+            <table className="ports-table" aria-hidden="true">
+              <thead>
+                <tr>
+                  <th scope="col">Port</th>
+                  <th scope="col">Proto</th>
+                  <th scope="col">Listen address</th>
+                  <th scope="col">State</th>
+                  <th scope="col">Process</th>
+                </tr>
+              </thead>
+              <tbody>
+                {Array.from({ length: 8 }, (_, i) => (
+                  <tr key={i} className="ports-skeleton-row">
+                    <td>
+                      <span className="skeleton skeleton-port" />
+                    </td>
+                    <td>
+                      <span className="skeleton skeleton-pill" />
+                    </td>
+                    <td>
+                      <span className="skeleton skeleton-addr" />
+                    </td>
+                    <td>
+                      <span className="skeleton skeleton-pill" />
+                    </td>
+                    <td>
+                      <span className="skeleton skeleton-proc" />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <span className="sr-only">Scanning host ports…</span>
+          </div>
         ) : visible.length === 0 ? (
           <div className="card">
             <h2>No open ports found</h2>
