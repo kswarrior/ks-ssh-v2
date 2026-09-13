@@ -352,23 +352,16 @@ function SSHPage() {
         },
       ])
       closeForm()
-      markOnline(id)
     }
   }
 
   const removeEntry = (id: string) => {
-    if (id === connectingId) {
-      if (timer.current) clearTimeout(timer.current)
-      setConnectingId(null)
-    }
+    stopPending(id)
     setEntries((prev) => prev.filter((x) => x.id !== id))
   }
 
   const disconnect = (id: string) => {
-    if (id === connectingId) {
-      if (timer.current) clearTimeout(timer.current)
-      setConnectingId(null)
-    }
+    stopPending(id)
     setEntries((prev) =>
       prev.map((x) => (x.id === id ? { ...x, online: false } : x)),
     )
@@ -397,6 +390,30 @@ function SSHPage() {
           <span className="btn-label">Connect</span>
         </button>
       </div>
+
+      {banner && (
+        <div className="banner-error" role="alert">
+          <p>{banner}</p>
+          <div className="row-actions">
+            <button
+              type="button"
+              className="btn btn-sm"
+              onClick={() => {
+                window.location.hash = '#/installation'
+              }}
+            >
+              Open installation guide
+            </button>
+            <button
+              type="button"
+              className="btn btn-sm"
+              onClick={() => setBanner(null)}
+            >
+              Dismiss
+            </button>
+          </div>
+        </div>
+      )}
 
       {formOpen && (
         <div className="card">
@@ -528,7 +545,7 @@ function SSHPage() {
                         type="button"
                         className="btn btn-sm btn-primary"
                         disabled={connecting}
-                        onClick={() => markOnline(e.id)}
+                        onClick={() => attemptConnect(e.id)}
                       >
                         {connecting ? 'Connecting…' : 'Connect'}
                       </button>

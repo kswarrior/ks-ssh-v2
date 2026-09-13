@@ -870,6 +870,27 @@
   grid-column: 1 / -1;
 }
 
+.banner-error {
+  border: 1px solid rgba(255, 90, 120, 0.4);
+  background: var(--danger-soft);
+  border-radius: 8px;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.banner-error p {
+  color: var(--text-h);
+  font-size: 14px;
+  max-width: 62ch;
+}
+
+.banner-error .row-actions {
+  margin-top: 0;
+  padding-top: 0;
+}
+
 @media (max-width: 560px) {
   .ssh-connect-btn .btn-label {
     display: none;
