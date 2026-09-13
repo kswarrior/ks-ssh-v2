@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type FormEvent } from 'react'
+import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
 
 type PageId = 'home' | 'ssh' | 'installation' | 'settings' | 'session'
 
