@@ -1,5 +1,6 @@
 mod files;
 mod relay;
+mod shell;
 mod ui;
 
 use axum::{
@@ -71,6 +72,7 @@ async fn serve(host: String, port: u16) {
         .route("/api/hello", get(api_hello))
         .route("/api/files", get(files::api_list_files))
         .route("/api/files/download", get(files::api_download_file))
+        .route("/v1/shell", get(shell::ws_handler))
         .fallback(serve_ui);
 
     let addr = format!("{host}:{port}");
