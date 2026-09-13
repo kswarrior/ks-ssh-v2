@@ -2303,8 +2303,54 @@ a.file-link {
     0 0 18px -4px var(--accent-shadow);
 }
 
-.ports-filter {
+.ports-right {
+  display: flex;
+  gap: 10px;
+  align-items: center;
   flex-shrink: 0;
+  margin-left: auto;
+}
+
+.ports-select-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.ports-select {
+  appearance: none;
+  -webkit-appearance: none;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  min-height: 36px;
+  padding: 8px 32px 8px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--glass-border);
+  background: var(--card-bg);
+  color: var(--text-h);
+  box-shadow: var(--glow-line), var(--shadow-md);
+  cursor: pointer;
+}
+
+.ports-select:hover {
+  background: var(--hover-bg);
+}
+
+.ports-select:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.ports-select-chevron {
+  position: absolute;
+  right: 10px;
+  width: 16px;
+  height: 16px;
+  color: var(--text);
+  pointer-events: none;
 }
 
 .ports-empty {
@@ -2487,12 +2533,16 @@ a.file-link {
     max-width: none;
   }
 
-  .ports-filter {
-    flex: 1 1 auto;
-    display: flex;
+  .ports-right {
+    width: 100%;
+    margin-left: 0;
   }
 
-  .ports-filter .create-tab {
+  .ports-select-wrap {
     flex: 1 1 auto;
+  }
+
+  .ports-select {
+    width: 100%;
   }
 }

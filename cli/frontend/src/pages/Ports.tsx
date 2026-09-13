@@ -146,39 +146,33 @@ export default function PortsPage() {
               spellCheck={false}
             />
           </label>
-          <div
-            className="create-tabs ports-filter"
-            role="tablist"
-            aria-label="Protocol filter"
-          >
-            {(
-              [
-                ['all', 'All'],
-                ['tcp', 'TCP'],
-                ['udp', 'UDP'],
-              ] as const
-            ).map(([id, label]) => (
-              <button
-                key={id}
-                type="button"
-                role="tab"
-                aria-selected={filter === id}
-                className={filter === id ? 'create-tab active' : 'create-tab'}
-                onClick={() => setFilter(id)}
+          <div className="ports-right">
+            <label className="ports-select-wrap">
+              <span className="sr-only">Protocol filter</span>
+              <select
+                className="ports-select"
+                value={filter}
+                onChange={(e) => setFilter(e.target.value as ProtoFilter)}
+                aria-label="Protocol filter"
               >
-                {label}
-              </button>
-            ))}
+                <option value="all">All</option>
+                <option value="tcp">TCP</option>
+                <option value="udp">UDP</option>
+              </select>
+              <svg className="ports-select-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="m6 9 6 6 6-6" />
+              </svg>
+            </label>
+            <button
+              type="button"
+              className="btn btn-sm btn-primary"
+              onClick={() => void load()}
+              disabled={loading}
+              title="Rescan host ports"
+            >
+              {loading ? 'Scanning…' : 'Refresh'}
+            </button>
           </div>
-          <button
-            type="button"
-            className="btn btn-sm btn-primary"
-            onClick={() => void load()}
-            disabled={loading}
-            title="Rescan host ports"
-          >
-            {loading ? 'Scanning…' : 'Refresh'}
-          </button>
         </div>
       </div>
 
