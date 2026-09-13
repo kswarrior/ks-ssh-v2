@@ -370,8 +370,10 @@ export default function FilesPage() {
 
   return (
     <section className="page files-page" aria-labelledby="page-title-files">
-      <div className="page-head">
-        <h1 id="page-title-files">Files</h1>
+      <div className="page-head files-head">
+        <h1 id="page-title-files" className="sr-only">
+          Files
+        </h1>
         <div className="row-actions files-actions">
           <button
             type="button"

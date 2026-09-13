@@ -4,11 +4,12 @@
 //! login shell (`$SHELL`, else `bash`, else `sh`) inside a real PTY so
 //! prompts, colors, `clear`, `vim`, etc. behave like a real terminal.
 //!
-//! Protocol (both directions are text for simplicity):
-//! * client -> server: raw keystrokes / `"cmd\n"`. JSON
-//!   `{"type":"resize","cols":N,"rows":N}` resizes the PTY.
-//! * server -> client: raw PTY output (UTF-8 lossy). JSON status lines
-//!   (`{"type":"exit",...}`) are only sent on process exit.
+//! Protocol:
+//! * client -> server: raw keystrokes. Only the exact JSON
+//!   `{"type":"resize","cols":N,"rows":N}` is control traffic —
+//!   everything else (even typed JSON) goes to the shell as input.
+//! * server -> client: raw PTY output (UTF-8 lossy). `{"type":"exit"}`
+//!   is sent once when the shell process exits.
 
 use axum::{
     extract::ws::{Message, WebSocket, WebSocketUpgrade},
@@ -69,7 +70,7 @@ fn spawn_shell(
 async fn handle_socket(socket: WebSocket) {
     let (mut ws_tx, mut ws_rx) = socket.split();
 
-    let (master, mut child) = match spawn_shell(80, 24) {
+    let (master, child) = match spawn_shell(80, 24) {
         Ok(v) => v,
         Err(e) => {
             let _ = ws_tx
@@ -78,8 +79,13 @@ async fn handle_socket(socket: WebSocket) {
             return;
         }
     };
+    // Shared so the session end always reaps the shell — a tab that is
+    // closed must never leave an orphaned bash behind.
+    let child = std::sync::Arc::new(std::sync::Mutex::new(Some(child)));
 
-    // PTY reader runs on a blocking thread, pushes bytes through a channel.
+    // PTY reader runs on a blocking thread, pushes bytes through a
+    // bounded channel. `blocking_send` applies backpressure into the PTY
+    // so `cat` on a huge file slows the reader instead of OOMing us.
     let mut reader = match master.try_clone_reader() {
         Ok(r) => r,
         Err(e) => {
@@ -89,14 +95,14 @@ async fn handle_socket(socket: WebSocket) {
             return;
         }
     };
-    let (out_tx, mut out_rx) = tokio::sync::mpsc::unbounded_channel::<Vec<u8>>();
+    let (out_tx, mut out_rx) = tokio::sync::mpsc::channel::<Vec<u8>>(64);
     std::thread::spawn(move || {
         let mut buf = [0u8; 8192];
         loop {
             match reader.read(&mut buf) {
                 Ok(0) => break,
                 Ok(n) => {
-                    if out_tx.send(buf[..n].to_vec()).is_err() {
+                    if out_tx.blocking_send(buf[..n].to_vec()).is_err() {
                         break;
                     }
                 }
@@ -118,10 +124,24 @@ async fn handle_socket(socket: WebSocket) {
     let writer = std::sync::Arc::new(tokio::sync::Mutex::new(writer));
     let writer_clone = writer.clone();
 
-    // Watch child exit so we can tell the UI the shell is gone.
+    // Watch child exit (polled — lets the session end kill the shell
+    // through the same handle instead of leaking it).
+    let child_watch = child.clone();
     let (exit_tx, mut exit_rx) = tokio::sync::oneshot::channel::<()>();
     std::thread::spawn(move || {
-        let _ = child.wait();
+        loop {
+            let exited = child_watch
+                .lock()
+                .map(|mut guard| match guard.as_mut() {
+                    Some(c) => matches!(c.try_wait(), Ok(Some(_))),
+                    None => true,
+                })
+                .unwrap_or(true);
+            if exited {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(200));
+        }
         let _ = exit_tx.send(());
     });
 
@@ -156,24 +176,24 @@ async fn handle_socket(socket: WebSocket) {
             match msg {
                 Message::Text(text) => {
                     let s = text.as_str();
-                    // Resize request?
+                    // Only the exact resize shape is control traffic —
+                    // anything else (even typed JSON) is shell input.
                     if let Ok(v) = serde_json::from_str::<serde_json::Value>(s) {
-                        if v.get("type").and_then(|t| t.as_str()) == Some("resize") {
-                            let cols = v.get("cols").and_then(|c| c.as_u64()).unwrap_or(80) as u16;
-                            let rows = v.get("rows").and_then(|r| r.as_u64()).unwrap_or(24) as u16;
+                        let is_resize = v.get("type").and_then(|t| t.as_str())
+                            == Some("resize")
+                            && v.get("cols").and_then(|c| c.as_u64()).is_some()
+                            && v.get("rows").and_then(|r| r.as_u64()).is_some();
+                        if is_resize {
+                            let cols =
+                                v.get("cols").and_then(|c| c.as_u64()).unwrap_or(80) as u16;
+                            let rows =
+                                v.get("rows").and_then(|r| r.as_u64()).unwrap_or(24) as u16;
                             let _ = master.resize(PtySize {
                                 rows: rows.max(2).min(300),
                                 cols: cols.max(2).min(500),
                                 pixel_width: 0,
                                 pixel_height: 0,
                             });
-                            continue;
-                        }
-                        if let Some(data) = v.get("data").and_then(|d| d.as_str()) {
-                            let mut w = writer_clone.lock().await;
-                            use std::io::Write as _;
-                            let _ = w.write_all(data.as_bytes());
-                            let _ = w.flush();
                             continue;
                         }
                     }
@@ -198,5 +218,11 @@ async fn handle_socket(socket: WebSocket) {
         _ = (&mut send_task) => { recv_task.abort(); }
         _ = (&mut recv_task) => { send_task.abort(); }
     }
-    let _ = writer.lock().await;
+    // Session over — reap the shell so a closed tab never leaks a process.
+    if let Ok(mut guard) = child.lock() {
+        if let Some(mut c) = guard.take() {
+            let _ = c.kill();
+            let _ = c.wait();
+        }
+    }
 }
