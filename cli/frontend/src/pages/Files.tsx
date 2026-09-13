@@ -570,7 +570,30 @@ export default function FilesPage() {
             </div>
           </div>
         ) : loading && !data ? (
-          <p aria-busy="true">Loading…</p>
+          <ul
+            className="file-grid"
+            aria-label="Loading host files"
+            aria-busy="true"
+          >
+            {Array.from({ length: 8 }, (_, i) => (
+              <li
+                key={i}
+                className="file-card ports-skeleton"
+                aria-hidden="true"
+              >
+                <div className="file-card-top">
+                  <span className="skeleton skeleton-icon" />
+                  <span className="skeleton skeleton-title" />
+                </div>
+                <div className="file-meta">
+                  <span className="skeleton skeleton-meta" />
+                </div>
+              </li>
+            ))}
+            <span className="sr-only" role="status">
+              Loading host files…
+            </span>
+          </ul>
         ) : visible.length === 0 ? (
           <p>Empty folder.</p>
         ) : (
@@ -831,7 +854,16 @@ export default function FilesPage() {
             </div>
 
             {editorLoading ? (
-              <p aria-busy="true">Loading…</p>
+              <div className="editor-skeleton" aria-busy="true" aria-label="Loading file contents">
+                <span className="skeleton skeleton-line" />
+                <span className="skeleton skeleton-line" />
+                <span className="skeleton skeleton-line short" />
+                <span className="skeleton skeleton-line" />
+                <span className="skeleton skeleton-line medium" />
+                <span className="sr-only" role="status">
+                  Loading file…
+                </span>
+              </div>
             ) : editorError ? (
               <div className="banner-error" role="alert">
                 <p>{editorError}</p>

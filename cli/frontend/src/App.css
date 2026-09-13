@@ -2153,7 +2153,7 @@ a.file-link {
   flex-shrink: 0;
 }
 
-/* ---------- Ports loading skeleton ---------- */
+/* ---------- Shared loading skeleton (Ports + Files) ---------- */
 
 .skeleton {
   display: inline-block;
@@ -2186,15 +2186,47 @@ a.file-link {
   width: 90%;
 }
 
-.file-card.ports-skeleton {
+.file-card.ports-skeleton,
+.file-card.is-skeleton {
   pointer-events: none;
   cursor: default;
 }
 
-.file-card.ports-skeleton:hover {
+.file-card.ports-skeleton:hover,
+.file-card.is-skeleton:hover {
   transform: none;
   border-color: var(--glass-border);
   box-shadow: var(--glow-line), var(--shadow-md);
+}
+
+/* File editor content skeleton */
+.editor-skeleton {
+  flex: 1 1 auto;
+  min-height: 240px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  border-radius: 8px;
+  border: 1px solid var(--glass-border);
+  background: rgba(0, 0, 0, 0.32);
+}
+
+:root[data-theme='light'] .editor-skeleton {
+  background: rgba(255, 255, 255, 0.8);
+}
+
+.skeleton-line {
+  width: 100%;
+  height: 12px;
+}
+
+.skeleton-line.medium {
+  width: 72%;
+}
+
+.skeleton-line.short {
+  width: 45%;
 }
 
 @keyframes skeleton-shimmer {
