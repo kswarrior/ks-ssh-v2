@@ -1727,8 +1727,57 @@
   color: var(--accent-strong);
 }
 
-.file-icon[data-kind='file'] {
+.file-icon[data-kind='file'],
+.file-icon[data-kind='text'] {
   color: var(--text);
+}
+
+.file-icon[data-kind='code'] {
+  color: #22d3ee;
+}
+
+.file-icon[data-kind='script'] {
+  color: #a3e635;
+}
+
+.file-icon[data-kind='data'] {
+  color: #c084fc;
+}
+
+.file-icon[data-kind='image'] {
+  color: #34d399;
+}
+
+.file-icon[data-kind='video'] {
+  color: #fb7185;
+}
+
+.file-icon[data-kind='audio'] {
+  color: #fbbf24;
+}
+
+.file-icon[data-kind='archive'] {
+  color: #fb923c;
+}
+
+.file-icon[data-kind='pdf'] {
+  color: var(--danger);
+}
+
+.file-icon[data-kind='doc'] {
+  color: #60a5fa;
+}
+
+/* Smaller icon slot used in the editor header. */
+.file-icon.editor-file-icon {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+}
+
+.file-icon.editor-file-icon svg {
+  width: 17px;
+  height: 17px;
 }
 
 .file-icon svg {
@@ -2129,6 +2178,134 @@ a.file-link {
 .editor-page .banner-error {
   margin: 14px;
 }
+
+/* ---------- Code editor: line-number gutter + highlight overlay ---------- */
+
+.editor-page .editor-codewrap {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  overflow: hidden;
+}
+
+.editor-page .editor-gutter {
+  flex-shrink: 0;
+  width: 54px;
+  overflow: hidden;
+  background: rgba(0, 0, 0, 0.22);
+  border-right: 1px solid var(--glass-border);
+}
+
+:root[data-theme='light'] .editor-page .editor-gutter {
+  background: rgba(15, 31, 61, 0.05);
+}
+
+.editor-page .editor-gutter pre {
+  margin: 0;
+  padding: 14px 10px 14px 0;
+  text-align: right;
+  color: var(--text);
+  opacity: 0.65;
+  user-select: none;
+  white-space: pre;
+}
+
+.editor-page .editor-codebox {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.editor-page .editor-gutter pre,
+.editor-page .editor-highlight,
+.editor-page .editor-codebox .editor-input {
+  font-family: var(--mono);
+  font-size: 13.5px;
+  line-height: 1.6;
+  tab-size: 2;
+}
+
+.editor-page .editor-highlight {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  padding: 14px max(14px, env(safe-area-inset-right)) 14px 14px;
+  overflow: hidden;
+  white-space: pre;
+  pointer-events: none;
+  color: #e6edf3;
+}
+
+:root[data-theme='light'] .editor-page .editor-highlight {
+  color: var(--text-h);
+}
+
+.editor-page .editor-highlight code {
+  display: block;
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  white-space: pre;
+  overflow-wrap: normal;
+}
+
+.editor-page .editor-codebox .editor-input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  padding: 14px max(14px, env(safe-area-inset-right)) 14px 14px;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  color: transparent;
+  caret-color: var(--accent-hi);
+  white-space: pre;
+  overflow: auto;
+  resize: none;
+}
+
+.editor-page .editor-codebox .editor-input:focus {
+  outline: none;
+  border: none;
+  box-shadow: none;
+}
+
+.editor-page .editor-codebox .editor-input::selection {
+  background: var(--accent-soft);
+  color: #fff;
+}
+
+.editor-page .editor-codebox .editor-input:disabled {
+  opacity: 1;
+}
+
+/* Syntax token colors */
+.tok-kw { color: #b3a8ff; }
+.tok-str { color: #7ee0a3; }
+.tok-com { color: #7d8db0; font-style: italic; }
+.tok-num { color: #f5a97f; }
+.tok-fn { color: #82aaff; }
+.tok-tag { color: #7dd3fc; }
+.tok-attr { color: #c4b5fd; }
+.tok-var { color: #fbbf24; }
+.tok-sec { color: #7dd3fc; }
+.tok-pun { color: #8fa1c2; }
+
+:root[data-theme='light'] .tok-kw { color: #5b51e8; }
+:root[data-theme='light'] .tok-str { color: #15803d; }
+:root[data-theme='light'] .tok-com { color: #7c8aa5; }
+:root[data-theme='light'] .tok-num { color: #c2410c; }
+:root[data-theme='light'] .tok-fn { color: #1d4ed8; }
+:root[data-theme='light'] .tok-tag { color: #0284c7; }
+:root[data-theme='light'] .tok-attr { color: #7c3aed; }
+:root[data-theme='light'] .tok-var { color: #b45309; }
+:root[data-theme='light'] .tok-sec { color: #0284c7; }
+:root[data-theme='light'] .tok-pun { color: #64748b; }
 
 /* ---------- Create dialog ---------- */
 

@@ -491,17 +491,17 @@ export default function FilesPage() {
   const [confirmDiscard, setConfirmDiscard] = useState(false)
   const editorDirty = editorText !== editorSaved
   const editLang = detectLang(editing?.name ?? '')
-  const editCat: FileCat = fileCat(editing?.name ?? '', false)
-  const highlighted = useMemo(
+  const _editCat: FileCat = fileCat(editing?.name ?? '', false)
+  const _highlighted = useMemo(
     () => highlightCode(editorText, editLang.id),
     [editorText, editLang.id],
   )
-  const gutterText = useMemo(() => {
+  const _gutterText = useMemo(() => {
     const n = editorText.split('\n').length
     return Array.from({ length: n }, (_, i) => String(i + 1)).join('\n')
   }, [editorText])
 
-  const syncCodeScroll = () => {
+  const _syncCodeScroll = () => {
     const ta = codeRef.current
     if (!ta) return
     if (hlRef.current) {
@@ -1196,7 +1196,7 @@ export default function FilesPage() {
               const isMenu = menuOpen === e.path
               const isRenaming = renaming === e.path
               const isConfirm = confirmDelete === e.path
-              const cat: FileCat = e.is_dir ? 'dir' : fileCat(e.name, false)
+              const _cat: FileCat = e.is_dir ? 'dir' : fileCat(e.name, false)
               return (
                 <li
                   key={e.path}
@@ -1507,20 +1507,63 @@ export default function FilesPage() {
               </div>
             ) : editorKind === 'text' ? (
               <>
-                <textarea
-                  className="editor-area"
-                  value={editorText}
-                  onChange={(ev) => {
-                    setEditorText(ev.target.value)
-                    setConfirmDiscard(false)
-                  }}
-                  disabled={editorSaving}
-                  spellCheck={false}
-                  autoComplete="off"
-                  autoCapitalize="off"
-                  wrap="off"
-                  aria-label={`Contents of ${editing.name}`}
-                />
+                <div className="editor-codewrap">
+                  <div className="editor-gutter" aria-hidden="true" ref={gutRef}>
+                    <pre>{gutterText}</pre>
+                  </div>
+                  <div className="editor-codebox">
+                    <pre className="editor-highlight" aria-hidden="true" ref={hlRef}>
+                      <code dangerouslySetInnerHTML={{ __html: highlighted }} />
+                    </pre>
+                    <textarea
+                      ref={codeRef}
+                      className="editor-area editor-input"
+                      value={editorText}
+                      onChange={(ev) => {
+                        setEditorText(ev.target.value)
+                        setConfirmDiscard(false)
+                      }}
+                      onScroll={syncCodeScroll}
+                      onKeyDown={(ev) => {
+                        if (ev.key !== 'Tab' && ev.key !== 'Enter') return
+                        const ta = ev.currentTarget
+                        const s = ta.selectionStart
+                        const e2 = ta.selectionEnd
+                        const v = ta.value
+                        if (ev.key === 'Tab') {
+                          // Keep focus in the editor and indent with 2 spaces.
+                          ev.preventDefault()
+                          setEditorText(`${v.slice(0, s)}  ${v.slice(e2)}`)
+                          setConfirmDiscard(false)
+                          const pos = s + 2
+                          requestAnimationFrame(() => {
+                            ta.selectionStart = pos
+                            ta.selectionEnd = pos
+                          })
+                          return
+                        }
+                        // Enter keeps the current line indent.
+                        const lineStart = v.lastIndexOf('\n', s - 1) + 1
+                        const indent = /^[ \t]*/.exec(v.slice(lineStart, s))?.[0] ?? ''
+                        if (!indent) return
+                        ev.preventDefault()
+                        setEditorText(`${v.slice(0, s)}\n${indent}${v.slice(e2)}`)
+                        setConfirmDiscard(false)
+                        const pos = s + 1 + indent.length
+                        requestAnimationFrame(() => {
+                          ta.selectionStart = pos
+                          ta.selectionEnd = pos
+                        })
+                      }}
+                      disabled={editorSaving}
+                      spellCheck={false}
+                      autoComplete="off"
+                      autoCapitalize="off"
+                      wrap="off"
+                      aria-label={`Contents of ${editing.name}`}
+                    />
+                  </div>
+                </div>
                 {editorError && (
                   <div className="banner-error" role="alert">
                     <p>{editorError}</p>
@@ -1528,7 +1571,7 @@ export default function FilesPage() {
                 )}
                 <div className="editor-foot">
                   <span className="editor-status">
-                    {editorText.split('\n').length} lines ·{' '}
+                    {editLang.label} · {editorText.split('\n').length} lines ·{' '}
                     {formatSize(new Blob([editorText]).size)}
                     {editorDirty ? ' · unsaved' : ' · saved'}
                     {editorSaving ? ' · saving…' : ''}
