@@ -391,61 +391,96 @@ function SSHPage({
     resetForm()
   }
 
-  const attemptConnect = async (id: string) => {
-    const entry = entries.find((x) => x.id === id)
+  const attemptConnect = (entry: SshEntry) => {
     if (!entry || entry.online || connectingId) return
-    abortRef.current?.abort()
-    const ctrl = new AbortController()
-    abortRef.current = ctrl
-    let timedOut = false
-    const timeout = setTimeout(() => {
-      timedOut = true
-      ctrl.abort()
-    }, 8000)
-    setConnectingId(id)
-    setBanner(null)
-    let result: { online: boolean; message?: string }
-    try {
-      result = await apiConnect(
-        { name: entry.name, token: entry.token },
-        ctrl.signal,
-      )
-    } finally {
-      clearTimeout(timeout)
+    const t = entry.token.trim().toUpperCase()
+    if (!/^[A-Z0-9]{5}$/.test(t)) {
+      setBanner('Token is 5 letters/numbers — run `ks-ssh --token=` to get one.')
+      return
     }
-    if (abortRef.current !== ctrl) return // superseded or unmounted
-    abortRef.current = null
-    setConnectingId(null)
-    if (result.online) {
-      onChange((prev) =>
-        prev.map((x) => (x.id === id ? { ...x, online: true } : x)),
-      )
-    } else if (result.message === 'aborted') {
-      if (timedOut) {
-        setBanner('Connection timed out after 8s. Check the backend and try again.')
+    closeSocket(entry.id)
+    setConnectingId(entry.id)
+    setBanner(null)
+    const scheme = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+    const ws = new WebSocket(
+      `${scheme}//${window.location.host}/v1/client?token=${t}`,
+    )
+    socketsRef.current.set(entry.id, ws)
+    const timeout = setTimeout(() => {
+      if (socketsRef.current.get(entry.id) !== ws) return
+      closeSocket(entry.id)
+      setConnectingId((cur) => (cur === entry.id ? null : cur))
+      setBanner('Relay timed out. Is the agent running (`ks-ssh --token=`)?')
+    }, 8000)
+    ws.onopen = () => {
+      ws.send(JSON.stringify({ type: 'hello', role: 'client', token: t }))
+    }
+    ws.onmessage = (e) => {
+      if (socketsRef.current.get(entry.id) !== ws) return
+      try {
+        const msg = JSON.parse(String(e.data)) as {
+          type?: string
+          online?: boolean
+        }
+        if (msg?.type === 'paired' || msg?.type === 'registered') {
+          clearTimeout(timeout)
+          setConnectingId((cur) => (cur === entry.id ? null : cur))
+          onChange((prev) =>
+            prev.map((x) => (x.id === entry.id ? { ...x, online: true } : x)),
+          )
+        } else if (msg?.type === 'agent' && msg.online === false) {
+          closeSocket(entry.id)
+          onChange((prev) =>
+            prev.map((x) => (x.id === entry.id ? { ...x, online: false } : x)),
+          )
+        }
+      } catch {
+        // Binary relay payloads are handled in the session view.
       }
-      // Otherwise silenced: superseded by a newer attempt or unmounted.
-    } else {
+    }
+    ws.onerror = () => {
+      if (socketsRef.current.get(entry.id) !== ws) return
+      clearTimeout(timeout)
+      closeSocket(entry.id)
+      setConnectingId((cur) => (cur === entry.id ? null : cur))
+      setBanner('Relay connection failed. Is the Worker deployed with WSS support?')
+    }
+    ws.onclose = () => {
+      if (socketsRef.current.get(entry.id) !== ws) return
+      socketsRef.current.delete(entry.id)
+      clearTimeout(timeout)
+      setConnectingId((cur) => (cur === entry.id ? null : cur))
       onChange((prev) =>
-        prev.map((x) => (x.id === id ? { ...x, online: false } : x)),
+        prev.map((x) => (x.id === entry.id ? { ...x, online: false } : x)),
       )
-      setBanner(result.message ?? 'Connection failed.')
     }
   }
 
-  const stopPending = (id: string) => {
-    if (id === connectingId) {
-      abortRef.current?.abort()
-      abortRef.current = null
-      setConnectingId(null)
-    }
+  const disconnectEntry = (id: string) => {
+    closeSocket(id)
+    setConnectingId((cur) => (cur === id ? null : cur))
+    onChange((prev) =>
+      prev.map((x) => (x.id === id ? { ...x, online: false } : x)),
+    )
+  }
+
+  const visitEntry = (entry: SshEntry) => {
+    writeJSON('ks-ssh:relay', {
+      name: entry.name,
+      token: entry.token.trim().toUpperCase(),
+    })
+    window.location.hash = '#/session'
   }
 
   const submit = (e: FormEvent) => {
     e.preventDefault()
     const cleanName = name.trim()
-    const cleanToken = token.trim()
+    const cleanToken = token.trim().toUpperCase()
     if (!cleanName || !cleanToken) return
+    if (!/^[A-Z0-9]{5}$/.test(cleanToken)) {
+      setBanner('Token is 5 letters/numbers — run `ks-ssh --token=` to get one.')
+      return
+    }
     if (editingId) {
       onChange((prev) =>
         prev.map((x) =>
@@ -457,22 +492,22 @@ function SSHPage({
       closeForm()
     } else {
       const id = `ssh-${Date.now().toString(36)}-${Math.floor(Math.random() * 10000)}`
-      onChange((prev) => [
-        ...prev,
-        {
-          id,
-          name: cleanName,
-          token: cleanToken,
-          note: note.trim(),
-          online: false,
-        },
-      ])
+      const next: SshEntry = {
+        id,
+        name: cleanName,
+        token: cleanToken,
+        note: note.trim(),
+        online: false,
+      }
+      onChange((prev) => [...prev, next])
       closeForm()
+      attemptConnect(next)
     }
   }
 
   const removeEntry = (id: string) => {
-    stopPending(id)
+    closeSocket(id)
+    setConnectingId((cur) => (cur === id ? null : cur))
     onChange((prev) => prev.filter((x) => x.id !== id))
   }
 
@@ -541,8 +576,6 @@ function SSHPage({
         </div>
       )}
 
-      <RelayCard />
-
       {formOpen && (
         <div className="card">
           <h2>{editingId ? 'Edit connection' : 'New connection'}</h2>          <form className="form" onSubmit={submit}>
@@ -561,11 +594,13 @@ function SSHPage({
             <label className="field">
               Token
               <input
-                type="password"
+                type="text"
                 value={token}
-                onChange={(e) => setToken(e.target.value)}
-                placeholder="••••••••"
+                onChange={(e) => setToken(e.target.value.toUpperCase().slice(0, 5))}
+                placeholder="A3K9Q"
                 autoComplete="off"
+                inputMode="text"
+                maxLength={5}
                 required
               />
             </label>
@@ -639,10 +674,28 @@ function SSHPage({
                         type="button"
                         className="btn btn-sm btn-primary"
                         disabled={connecting}
-                        onClick={() => attemptConnect(e.id)}
+                        onClick={() => attemptConnect(e)}
                       >
                         {connecting ? 'Connecting…' : 'Connect'}
                       </button>
+                    )}
+                    {e.online && (
+                      <>
+                        <button
+                          type="button"
+                          className="btn btn-sm btn-primary"
+                          onClick={() => visitEntry(e)}
+                        >
+                          Visit
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-sm"
+                          onClick={() => disconnectEntry(e.id)}
+                        >
+                          Disconnect
+                        </button>
+                      </>
                     )}
                     <button
                       type="button"
