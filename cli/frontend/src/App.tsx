@@ -2,8 +2,9 @@ import { useEffect, useState } from 'react'
 import TerminalPage, { type SshEntry } from './pages/Terminal'
 import FilesPage from './pages/Files'
 import PortsPage from './pages/Ports'
+import HostPage from './pages/Host'
 
-type TabId = 'terminal' | 'files' | 'ports'
+type TabId = 'terminal' | 'files' | 'ports' | 'host'
 
 type TabItem = { id: TabId; label: string; hash: string }
 
@@ -11,6 +12,7 @@ const TABS: TabItem[] = [
   { id: 'terminal', label: 'Terminal', hash: '#/terminal' },
   { id: 'files', label: 'Files', hash: '#/files' },
   { id: 'ports', label: 'Ports', hash: '#/ports' },
+  { id: 'host', label: 'Host', hash: '#/host' },
 ]
 
 type Theme = 'light' | 'dark'
@@ -250,6 +252,28 @@ export default function App() {
 
           <button
             type="button"
+            className={`icon-btn${tab === 'host' ? ' active' : ''}`}
+            aria-label="Host info"
+            title="Host info"
+            aria-current={tab === 'host' ? 'page' : undefined}
+            onClick={() => go({ id: 'host', label: 'Host', hash: '#/host' })}
+          >
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <rect x="2" y="3" width="20" height="7" rx="2" />
+              <rect x="2" y="14" width="20" height="7" rx="2" />
+              <path d="M6 6.5h.01M6 17.5h.01" />
+            </svg>
+          </button>
+          <button
+            type="button"
             className="icon-btn"
             aria-label={theme === 'light' ? 'Switch to dark mode' : 'Switch to light mode'}
             title={theme === 'light' ? 'Switch to dark mode' : 'Switch to light mode'}
@@ -297,6 +321,9 @@ export default function App() {
           </div>
           <div hidden={tab !== 'ports'} className="tab-panel">
             <PortsPage />
+          </div>
+          <div hidden={tab !== 'host'} className="tab-panel">
+            <HostPage />
           </div>
         </main>
 
