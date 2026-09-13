@@ -38,18 +38,18 @@ Honest limits (visible in code today):
 - Files / Ports / Host call the **local** backend (`/api/*`). Over the relay
   fullscreen view they show `Cannot reach the host … not over the relay view`.
   They work when the browser can reach the agent's HTTP port.
-- Token = 5-char bearer (`ABCDEFGHJKLMNPQRSTUVWXYZ23456789`,
-  `cli/backend/src/relay.rs:15`). Short and typable, but guessable compared to
-  sshx's 128-bit link / URL-fragment key. Treat it as a short-lived secret.
-- No multi-cursor collaboration, no session recording/audit, no SSO/RBAC, no
-  claimed end-to-end encryption. One Cloudflare Worker/Durable Object relay,
-  not a global mesh.
+- Token = 5-char room ID (`ABCDEFGHJKLMNPQRSTUVWXYZ23456789`,
+  `cli/backend/src/relay.rs:15`). Guessable by design — routing only.
+  Secrecy comes from `k` (256-bit, fragment-only `#k=...`, never sent to the
+  relay). Relay session payloads are `enc` (AES-256-GCM, AAD=token).
+- No multi-cursor collaboration, no session recording/audit, no SSO/RBAC.
+  One Cloudflare Worker/Durable Object relay, not a global mesh.
 
 ## TL;DR comparison
 
 | Tool | Type | NAT / no open port | Browser access | E2E encrypted | Multi-user collab | Files / host mgmt | Self-host | Pick it when… |
 |---|---|---|---|---|---|---|---|---|
-| **KS SSH (this repo)** | Rust agent + CF relay + local web UI | ✅ outbound WSS | ✅ local UI + `/v/TOKEN` fullscreen | ❌ (WSS/TLS only) | ❌ | ✅ Files + Ports + Host + editor | ✅ binary + Worker | You want one binary = shell **plus** file/ports/host panel, with a no-port share link |
+| **KS SSH (this repo)** | Rust agent + CF relay + local web UI | ✅ outbound WSS | ✅ local UI + `/v/TOKEN` fullscreen | ✅ AES-256-GCM, key in fragment (sshx-style) | ❌ | ✅ Files + Ports + Host + editor | ✅ binary + Worker | You want one binary = shell **plus** file/ports/host panel, with a no-port share link |
 | **sshx.io** (`ekzhang/sshx`) | Rust collab terminal + Fly.io mesh | ✅ outbound | ✅ link | ✅ Argon2+AES, key in fragment | ✅ canvas, cursors, chat | ❌ terminal only | ⚠️ discouraged / non-trivial | 2+ people pairing / teaching on one terminal |
 | **tmate** | tmux fork + tmate.io relay | ✅ outbound SSH | ✅ web + SSH, ro/rw links | ❌ | ✅ shared tmux | ❌ | ✅ `tmate-server` | Fastest "look at this for 10 min" share, tmux-native |
 | **upterm** | SSH session relay | ✅ outbound SSH | ❌ SSH client needed | ✅ SSH | ✅ shared session | ❌ | ✅ | CI debugging / SSH-only sharing, no browser |
