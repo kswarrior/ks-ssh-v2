@@ -12,9 +12,20 @@ over WSS to `https://ks-ssh-v2.kswarriorpro.workers.dev` (see `--relay`):
 
 ```
 ./ks-ssh --no-serve --token=ABCDE
+# Relay token: ABCDE — enter it in the SSH page to connect.
+# E2E: ON (AES-256-GCM, aes-gcm-v1) — relay sees only ciphertext sizes.
+# Share link (contains secret — send directly, do not log):
+#   https://ks-ssh-v2.kswarriorpro.workers.dev/v/ABCDE#k=<SECRET>
+#   https://ks-ssh-v2.kswarriorpro.workers.dev/#/view/ABCDE#k=<SECRET>
 # Fullscreen UI: https://ks-ssh-v2.kswarriorpro.workers.dev/v/ABCDE
 #            or: https://ks-ssh-v2.kswarriorpro.workers.dev/#/view/ABCDE
 ```
+
+E2E (sshx-style): `token` routes, `k` (fragment-only `#k=...`) seals.
+Sensitive relay payloads are `enc` (AES-256-GCM, AAD=token, seq from 0).
+`hello` negotiates `{e2e:"aes-gcm-v1"}`; legacy peers fall back to plaintext
+with a `⚠️ relay-visible` banner. `--no-e2e` forces legacy;
+`--e2e-key=<SECRET>` reuses a key, otherwise `--token=` auto-generates `k`.
 
 CF caches the bundle per token (Durable Object) and serves it:
 

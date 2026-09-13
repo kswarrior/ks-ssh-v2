@@ -77,10 +77,12 @@ Honest limits (visible in code today):
   discouraged (needs gRPC + TLS + Redis + mesh ops), Windows PTY still maturing,
   no recording/replay.
 
-**KS SSH vs sshx:** pick sshx for multiplayer terminal collaboration with
-verifiable E2E. Pick KS SSH when you want a personal server panel (files, ports,
-host health, editor) plus a simple token link, and you accept TLS-to-relay
-instead of E2E.
+**KS SSH vs sshx:** pick sshx for multiplayer terminal collaboration
+(canvas, cursors, chat). Pick KS SSH when you want a personal server panel
+(files, ports, host health, editor) plus a share link with the same E2E shape
+(token routes, `#k=...` fragment seals, relay sees ciphertext). KS SSH uses
+HKDF-SHA256 (not Argon2 — `k` is already 256-bit CSPRNG) + AES-256-GCM via
+WebCrypto / `aes-gcm`; UI bundle stays plaintext (public build output).
 
 ### 2. tmate — the "just show someone" workhorse
 
@@ -197,9 +199,20 @@ use KS SSH relay links for NAT boxes and phone-browser triage.
 
 - Homelab / VPS / IoT behind NAT, and you want **one binary** for shell + files
   + ports + host health without opening ports.
-- Phone-first triage: token link → fullscreen UI, no SSH client/keys on the phone.
+- Phone-first triage: share link → fullscreen UI, no SSH client/keys on the phone.
 - Demos/support where the other side just opens a URL.
-- You already run Cloudflare and are fine with TLS-to-relay trust.
+- You already run Cloudflare and want the relay to see only ciphertext sizes.
+
+## E2E (sshx-style)
+
+- `token` (5-char) routes; `k` (256-bit, `#k=...` fragment only) seals.
+  `hello` negotiates `{e2e:"aes-gcm-v1"}`; sensitive payloads are `enc`
+  (AES-256-GCM, nonce 96-bit random, AAD=token, seq from 0, strict increment).
+- Relay learns NOTHING except room existence + sizes/timing. UI bundle
+  (`ui-begin/chunk/end`, `/v/TOKEN`) stays PLAINTEXT (public build output).
+- Legacy peers (no `e2e` in `hello`) fall back to plaintext with a
+  `⚠️ relay-visible` banner; `--no-e2e` forces legacy. Missing `k` in the
+  browser prompts `Paste the full link with #k=...` (never fetched/stored).
 
 ## When not to
 
@@ -208,8 +221,8 @@ use KS SSH relay links for NAT boxes and phone-browser triage.
 - Compliance (recording, SSO, RBAC, audit) → **Teleport / Tailscale SSH**.
 - Pure LAN web shell with existing ingress → **ttyd**.
 - SSH to arbitrary existing hosts from a random browser → **Sshwifty**.
-- Sensitive sessions where the relay must not see plaintext → self-hosted
-  tmate/upterm, Tailscale, or plain SSH — not a bearer-token relay without E2E.
+- Legacy `--no-e2e` sessions where the relay can see plaintext (use only for
+  debugging).
 
 ## Quick start (KS SSH)
 
@@ -218,13 +231,19 @@ curl -sSfL https://raw.githubusercontent.com/kswarrior/ks-ssh-v2/refs/heads/main
   && chmod +x ks-ssh \
   && ./ks-ssh            # local UI at http://127.0.0.1:8080
 
-./ks-ssh --no-serve --token=ABCDE   # relay only, fullscreen at /v/ABCDE
+./ks-ssh --no-serve --token=ABCDE   # relay only, prints share links with #k=...
+#   E2E: ON — Share link: https://<relay>/v/ABCDE#k=<SECRET>
+#                + https://<relay>/#/view/ABCDE#k=<SECRET>
 ./ks-ssh --token=ABCDE              # local UI + relay agent together
 ./ks-ssh --no-serve --token= --no-ui  # relay without pushing fullscreen UI
+./ks-ssh --no-serve --token=ABCDE --no-e2e  # legacy plaintext (relay-visible)
 ```
 
-Security notes: tokens are short-lived bearer secrets — rotate by restarting
-with a fresh `--token=`; prefer `--host 127.0.0.1` unless you mean to expose the
-LAN; Files APIs are jailed to `$HOME` and Ports kill is PID-scoped, but the
-local UI itself has no auth gate, so don't bind `0.0.0.0` on untrusted networks
-without a reverse-proxy auth layer.
+Security notes: tokens are short-lived room IDs (guessable) — rotate by
+restarting with a fresh `--token=`; `k` is the real secret (fragment only,
+never query/log/store). Manual check: share text over the relay, wipe Worker
+storage, confirm relay logs contain only `enc` sizes. Prefer
+`--host 127.0.0.1` unless you mean to expose the LAN; Files APIs are jailed
+to `$HOME` and Ports kill is PID-scoped, but the local UI itself has no auth
+gate, so don't bind `0.0.0.0` on untrusted networks without a reverse-proxy
+auth layer.
