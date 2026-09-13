@@ -12,8 +12,10 @@ const TABS: TabItem[] = [
   { id: 'terminal', label: 'Terminal', hash: '#/terminal' },
   { id: 'files', label: 'Files', hash: '#/files' },
   { id: 'ports', label: 'Ports', hash: '#/ports' },
-  { id: 'host', label: 'Host', hash: '#/host' },
 ]
+
+// Host is not a tab — it opens only from the header icon button.
+const HOST_ITEM: TabItem = { id: 'host', label: 'Host', hash: '#/host' }
 
 type Theme = 'light' | 'dark'
 
@@ -51,7 +53,9 @@ function writeJSON(key: string, value: unknown) {
 function hashToTab(hash: string): TabId | null {
   const clean = hash.replace(/^#\/?/, '')
   const found = TABS.find((t) => t.hash.replace(/^#\/?/, '') === clean)
-  return found ? found.id : null
+  if (found) return found.id
+  if (HOST_ITEM.hash.replace(/^#\/?/, '') === clean) return HOST_ITEM.id
+  return null
 }
 
 type PingTone = 'good' | 'mid' | 'bad' | 'off'
@@ -161,7 +165,9 @@ export default function App() {
 
   // Browser tab title follows the active tab.
   useEffect(() => {
-    const label = TABS.find((t) => t.id === tab)?.label
+    const label =
+      TABS.find((t) => t.id === tab)?.label ??
+      (tab === HOST_ITEM.id ? HOST_ITEM.label : undefined)
     document.title = label ? `KS SSH — ${label}` : 'KS SSH'
   }, [tab])
 
@@ -256,7 +262,7 @@ export default function App() {
             aria-label="Host info"
             title="Host info"
             aria-current={tab === 'host' ? 'page' : undefined}
-            onClick={() => go({ id: 'host', label: 'Host', hash: '#/host' })}
+            onClick={() => go(HOST_ITEM)}
           >
             <svg
               viewBox="0 0 24 24"

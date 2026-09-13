@@ -59,6 +59,404 @@ function buildCrumbs(home: string, path: string): Crumb[] {
 type ContentKind = 'text' | 'binary' | 'too-large'
 
 type FileTypeFilter = 'all' | 'dirs' | 'files'
+
+/* ---------- File categories: a distinct icon + color per kind ---------- */
+
+type FileCat =
+  | 'dir'
+  | 'image'
+  | 'video'
+  | 'audio'
+  | 'archive'
+  | 'pdf'
+  | 'doc'
+  | 'data'
+  | 'code'
+  | 'script'
+  | 'text'
+
+function extOf(name: string): string {
+  const base = name.split('/').pop() ?? name
+  const dot = base.lastIndexOf('.')
+  if (dot <= 0 || dot === base.length - 1) return ''
+  return base.slice(dot + 1).toLowerCase()
+}
+
+const IMAGE_EXT = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp', 'ico', 'avif', 'tif', 'tiff', 'heic', 'heif'])
+const VIDEO_EXT = new Set(['mp4', 'mkv', 'webm', 'mov', 'avi', 'm4v', '3gp', 'flv', 'wmv', 'mpg', 'mpeg'])
+const AUDIO_EXT = new Set(['mp3', 'wav', 'ogg', 'oga', 'opus', 'flac', 'm4a', 'aac', 'mid', 'midi'])
+const ARCHIVE_EXT = new Set(['zip', 'tar', 'gz', 'tgz', 'bz2', 'tbz2', 'xz', 'txz', 'rar', '7z', 'zst', 'deb', 'rpm', 'jar', 'war'])
+const DOC_EXT = new Set(['doc', 'docx', 'odt', 'rtf', 'pages', 'xls', 'xlsx', 'ods', 'numbers', 'ppt', 'pptx', 'odp', 'key'])
+const DATA_EXT = new Set(['json', 'jsonc', 'yml', 'yaml', 'toml', 'ini', 'cfg', 'conf', 'env', 'properties', 'csv', 'tsv', 'db', 'sqlite', 'sqlite3', 'sql', 'xml', 'plist'])
+const CODE_EXT = new Set(['js', 'jsx', 'ts', 'tsx', 'mjs', 'cjs', 'mts', 'cts', 'vue', 'svelte', 'astro', 'html', 'htm', 'xhtml', 'css', 'scss', 'less', 'sass', 'py', 'pyw', 'rb', 'php', 'java', 'kt', 'kts', 'swift', 'go', 'rs', 'c', 'h', 'cpp', 'hpp', 'hh', 'cc', 'cxx', 'cs', 'scala', 'pl', 'pm', 'lua', 'r', 'jl', 'dart', 'elm', 'ex', 'exs', 'hs', 'ml', 'groovy', 'coffee'])
+const SCRIPT_EXT = new Set(['sh', 'bash', 'zsh', 'fish', 'ksh', 'ps1', 'bat', 'cmd'])
+
+function fileCat(name: string, isDir: boolean): FileCat {
+  if (isDir) return 'dir'
+  const ext = extOf(name)
+  if (!ext) return 'text'
+  if (ext === 'pdf') return 'pdf'
+  if (IMAGE_EXT.has(ext)) return 'image'
+  if (VIDEO_EXT.has(ext)) return 'video'
+  if (AUDIO_EXT.has(ext)) return 'audio'
+  if (ARCHIVE_EXT.has(ext)) return 'archive'
+  if (DOC_EXT.has(ext)) return 'doc'
+  if (SCRIPT_EXT.has(ext)) return 'script'
+  if (CODE_EXT.has(ext)) return 'code'
+  if (DATA_EXT.has(ext)) return 'data'
+  return 'text'
+}
+
+function CatSvg({ children }: { children: ReactNode }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      {children}
+    </svg>
+  )
+}
+
+function FileCatIcon({ cat }: { cat: FileCat }) {
+  switch (cat) {
+    case 'dir':
+      return (
+        <CatSvg>
+          <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+        </CatSvg>
+      )
+    case 'image':
+      return (
+        <CatSvg>
+          <rect x="3" y="3" width="18" height="18" rx="2" />
+          <circle cx="9" cy="9" r="2" />
+          <path d="m21 15-5-5L5 21" />
+        </CatSvg>
+      )
+    case 'video':
+      return (
+        <CatSvg>
+          <path d="m22 8-6 4 6 4V8Z" />
+          <rect x="2" y="6" width="14" height="12" rx="2" />
+        </CatSvg>
+      )
+    case 'audio':
+      return (
+        <CatSvg>
+          <path d="M9 18V5l12-2v13" />
+          <circle cx="6" cy="18" r="3" />
+          <circle cx="18" cy="16" r="3" />
+        </CatSvg>
+      )
+    case 'archive':
+      return (
+        <CatSvg>
+          <rect x="2" y="3" width="20" height="5" rx="1" />
+          <path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8" />
+          <path d="M10 12h4" />
+        </CatSvg>
+      )
+    case 'pdf':
+      return (
+        <CatSvg>
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+          <path d="M14 2v6h6" />
+          <path d="M9 13h6M9 17h6" />
+        </CatSvg>
+      )
+    case 'doc':
+      return (
+        <CatSvg>
+          <path d="M17 3a2.8 2.8 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" />
+        </CatSvg>
+      )
+    case 'data':
+      return (
+        <CatSvg>
+          <ellipse cx="12" cy="5" rx="9" ry="3" />
+          <path d="M3 5v14a9 3 0 0 0 18 0V5" />
+          <path d="M3 12a9 3 0 0 0 18 0" />
+        </CatSvg>
+      )
+    case 'code':
+      return (
+        <CatSvg>
+          <path d="m16 18 6-6-6-6" />
+          <path d="m8 6-6 6 6 6" />
+        </CatSvg>
+      )
+    case 'script':
+      return (
+        <CatSvg>
+          <path d="m4 17 6-6-6-6" />
+          <path d="M12 19h8" />
+        </CatSvg>
+      )
+    case 'text':
+    default:
+      return (
+        <CatSvg>
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+          <path d="M14 2v6h6" />
+        </CatSvg>
+      )
+  }
+}
+
+/* ---------- Language detection + lightweight syntax highlighting ---------- */
+
+type LangId =
+  | 'ts' | 'js' | 'json' | 'html' | 'css' | 'md' | 'py' | 'sh'
+  | 'yaml' | 'toml' | 'ini' | 'sql' | 'rs' | 'go' | 'clang' | 'plain'
+
+function detectLang(name: string): { id: LangId; label: string } {
+  const ext = extOf(name)
+  switch (ext) {
+    case 'ts': case 'mts': case 'cts': return { id: 'ts', label: 'TypeScript' }
+    case 'tsx': return { id: 'ts', label: 'TSX' }
+    case 'js': case 'mjs': case 'cjs': return { id: 'js', label: 'JavaScript' }
+    case 'jsx': return { id: 'js', label: 'JSX' }
+    case 'json': case 'jsonc': return { id: 'json', label: 'JSON' }
+    case 'html': case 'htm': case 'xhtml': case 'vue': case 'svelte': case 'astro':
+      return { id: 'html', label: 'HTML' }
+    case 'xml': case 'xsl': case 'xsd': case 'plist': case 'svg':
+      return { id: 'html', label: 'XML' }
+    case 'css': case 'scss': case 'less': case 'sass': return { id: 'css', label: 'CSS' }
+    case 'md': case 'markdown': case 'mdown': return { id: 'md', label: 'Markdown' }
+    case 'py': case 'pyw': return { id: 'py', label: 'Python' }
+    case 'sh': case 'bash': case 'zsh': case 'fish': case 'ksh': return { id: 'sh', label: 'Shell' }
+    case 'yml': case 'yaml': return { id: 'yaml', label: 'YAML' }
+    case 'toml': return { id: 'toml', label: 'TOML' }
+    case 'ini': case 'cfg': case 'conf': case 'env': case 'properties':
+      return { id: 'ini', label: 'Config' }
+    case 'sql': return { id: 'sql', label: 'SQL' }
+    case 'rs': return { id: 'rs', label: 'Rust' }
+    case 'go': return { id: 'go', label: 'Go' }
+    case 'c': case 'h': return { id: 'clang', label: 'C' }
+    case 'cpp': case 'hpp': case 'hh': case 'cc': case 'cxx': return { id: 'clang', label: 'C++' }
+    case 'java': return { id: 'clang', label: 'Java' }
+    case 'cs': return { id: 'clang', label: 'C#' }
+    case 'php': return { id: 'clang', label: 'PHP' }
+    case 'swift': return { id: 'clang', label: 'Swift' }
+    case 'kt': case 'kts': return { id: 'clang', label: 'Kotlin' }
+    case 'rb': case 'pl': case 'lua': case 'scala': case 'dart': return { id: 'clang', label: 'Code' }
+    default: {
+      const base = (name.split('/').pop() ?? '').toLowerCase()
+      if (
+        base === 'dockerfile' || base === 'makefile' || base === 'gnumakefile' ||
+        ext === 'bat' || ext === 'cmd' || ext === 'ps1'
+      ) {
+        return { id: 'sh', label: 'Shell' }
+      }
+      return { id: 'plain', label: 'Text' }
+    }
+  }
+}
+
+function escapeHtml(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+}
+
+/** Walk a named-group master pattern, escaping plain text and wrapping tokens. */
+function paint(text: string, re: RegExp): string {
+  re.lastIndex = 0
+  let out = ''
+  let last = 0
+  for (;;) {
+    const m = re.exec(text)
+    if (!m) break
+    const tok = m[0]
+    const start = m.index
+    if (tok === '') {
+      re.lastIndex = start + 1
+      continue
+    }
+    out += escapeHtml(text.slice(last, start))
+    const g = m.groups ?? {}
+    const cls =
+      g.com ? 'tok-com'
+      : g.str ? 'tok-str'
+      : g.num ? 'tok-num'
+      : g.kw ? 'tok-kw'
+      : g.fn ? 'tok-fn'
+      : g.vari ? 'tok-var'
+      : g.attr ? 'tok-attr'
+      : g.tag ? 'tok-tag'
+      : g.sec ? 'tok-sec'
+      : g.pun ? 'tok-pun'
+      : ''
+    out += cls ? `<span class="${cls}">${escapeHtml(tok)}</span>` : escapeHtml(tok)
+    last = start + tok.length
+  }
+  return out + escapeHtml(text.slice(last))
+}
+
+const JS_KW = 'async|await|break|case|catch|class|const|continue|debugger|default|delete|do|else|export|extends|finally|for|from|function|get|if|import|in|instanceof|let|new|of|return|set|static|super|switch|this|throw|try|typeof|var|void|while|with|yield|as'
+const TS_KW = `${JS_KW}|type|interface|enum|namespace|readonly|private|protected|public|abstract|override|implements|keyof|infer|asserts|never|any|unknown|string|number|boolean|bigint|symbol|object|declare|satisfies`
+const PY_KW = 'False|None|True|and|as|assert|async|await|break|case|class|continue|def|del|elif|else|except|finally|for|from|global|if|import|in|is|lambda|match|nonlocal|not|or|pass|raise|return|try|while|with|yield'
+const RS_KW = 'as|async|await|break|const|continue|crate|dyn|else|enum|extern|false|fn|for|if|impl|in|let|loop|match|mod|move|mut|pub|ref|return|self|Self|static|struct|super|trait|true|type|union|unsafe|use|where|while|abstract|become|box|do|final|macro|override|priv|typeof|unsized|virtual|yield|try'
+const GO_KW = 'break|case|chan|const|continue|default|defer|else|fallthrough|for|func|go|goto|if|import|interface|map|package|range|return|select|struct|switch|type|var|nil|true|false|iota|append|cap|close|complex|copy|delete|imag|len|make|new|panic|print|println|real|recover'
+const CLANG_KW = 'auto|break|case|catch|char|class|const|constexpr|continue|default|delete|do|double|else|enum|explicit|export|extern|false|final|finally|float|for|friend|goto|if|inline|int|long|namespace|new|nullptr|private|protected|public|return|short|signed|sizeof|static|struct|switch|template|this|throw|true|try|typedef|typename|union|unsigned|using|virtual|void|volatile|while|extends|implements|import|instanceof|package|super|synchronized|throws|function|var|let|async|await|yield|val|fun|object|data|sealed|internal|is|override|open|abstract|self|nil|guard|defer|echo|print|foreach|require|include|operator|record|mutating|some|where'
+const SH_KW = 'if|then|else|elif|fi|for|while|until|in|do|done|case|esac|function|select|echo|cd|ls|export|source|alias|exit|return|set|local|readonly|declare|typeset|test|true|false|time|exec|trap|shift|continue|break|command|builtin|eval|pwd|pushd|popd|history|jobs|kill|wait|printf|read|mapfile|shopt|complete'
+const SQL_KW = 'select|from|where|insert|into|values|update|set|delete|create|table|alter|add|drop|join|left|right|full|inner|outer|cross|on|group|by|order|having|limit|offset|fetch|distinct|union|all|except|intersect|as|and|or|not|null|is|in|like|ilike|between|exists|case|when|then|else|end|primary|key|foreign|references|unique|check|constraint|index|view|trigger|procedure|begin|commit|rollback|transaction|grant|revoke|count|sum|avg|min|max|coalesce|cast|over|partition|rows|range|unbounded|preceding|following|current|row|only|with|recursive'
+
+function clPattern(kw: string): RegExp {
+  return new RegExp(
+    '(?<com>//[^\\n]*|/\\*[\\s\\S]*?(?:\\*/|$))' +
+      "|(?<str>'(?:[^'\\\\\\n]|\\\\.)*(?:'|$)|\"(?:[^\"\\\\\\n]|\\\\.)*(?:\"|$)|`(?:[^`\\\\]|\\\\.)*(?:`|$))" +
+      '|(?<num>\\b0[xX][\\dA-Fa-f_]+\\b|\\b\\d[\\d_]*(?:\\.\\d[\\d_]*)?(?:[eE][+-]?\\d[\\d_]*)?[nN]?\\b)' +
+      `|(?<kw>\\b(?:${kw})\\b)` +
+      '|(?<fn>\\b[A-Za-z_$][\\w$]*(?=\\s*\\())',
+    'g',
+  )
+}
+
+function pyPattern(): RegExp {
+  return new RegExp(
+    '(?<com>#[^\\n]*)' +
+      "|(?<str>[bBfFrR]{0,2}'''(?:[^\\\\]|\\\\.)*?(?:'''|$)|[bBfFrR]{0,2}\"\"\"(?:[^\\\\]|\\\\.)*?(?:\"\"\"|$)|[bBfFrR]?(?:'(?:[^'\\\\\\n]|\\\\.)*(?:'|$)|\"(?:[^\"\\\\\\n]|\\\\.)*(?:\"|$)))" +
+      '|(?<num>\\b0[xX][\\dA-Fa-f_]+\\b|\\b\\d[\\d_]*(?:\\.\\d[\\d_]*)?(?:[eE][+-]?\\d[\\d_]*)?[jJ]?\\b)' +
+      '|(?<vari>@[A-Za-z_]\\w*)' +
+      `|(?<kw>\\b(?:${PY_KW})\\b)` +
+      '|(?<fn>\\b[A-Za-z_]\\w*(?=\\s*\\())',
+    'g',
+  )
+}
+
+function shPattern(): RegExp {
+  return new RegExp(
+    '(?<com>#[^\\n]*)' +
+      "|(?<str>'[^']*(?:'|$)|\"(?:[^\"\\\\]|\\\\.)*(?:\"|$)|\\$'(?:[^'\\\\]|\\\\.)*(?:'|$))" +
+      '|(?<vari>\\$(?:[\\w#?*$!@-]+|\\{[^}\\n]*\\}?|\\([^)\\n]*\\)?))' +
+      '|(?<num>\\b\\d+\\b)' +
+      `|(?<kw>\\b(?:${SH_KW})\\b)`,
+    'g',
+  )
+}
+
+function jsonPattern(): RegExp {
+  return new RegExp(
+    '(?<com>//[^\\n]*|/\\*[\\s\\S]*?(?:\\*/|$))' +
+      '|(?<attr>"(?:[^"\\\\\\n]|\\\\.)*"(?=\\s*:))' +
+      "|(?<str>\"(?:[^\"\\\\\\n]|\\\\.)*(?:\"|$))" +
+      '|(?<num>-?\\b\\d+(?:\\.\\d+)?(?:[eE][+-]?\\d+)?\\b)' +
+      '|(?<kw>\\b(?:true|false|null)\\b)',
+    'g',
+  )
+}
+
+function yamlPattern(): RegExp {
+  return new RegExp(
+    '(?<com>#[^\\n]*)' +
+      "|(?<str>\"(?:[^\"\\\\\\n]|\\\\.)*(?:\"|$)|'(?:[^'\\n]|'')*(?:'|$))" +
+      '|(?<num>(?<![\\w/.:-])\\d+(?:\\.\\d+)?\\b)' +
+      '|(?<kw>\\b(?:true|false|null|yes|no|on|off)\\b|---|\\.\\.\\.)' +
+      '|(?<attr>[\\w./-]+(?=\\s*:))',
+    'gm',
+  )
+}
+
+function tomlPattern(): RegExp {
+  return new RegExp(
+    '(?<com>[#;][^\\n]*)' +
+      "|(?<str>\"(?:[^\"\\\\\\n]|\\\\.)*(?:\"|$)|'(?:[^'\\n])*(?:'|$))" +
+      '|(?<num>\\b\\d+(?:\\.\\d+)?\\b)' +
+      '|(?<kw>\\b(?:true|false)\\b)' +
+      '|(?<sec>^\\s*\\[[^\\]\\n]*\\]?)' +
+      '|(?<attr>[\\w.-]+(?=\\s*=))',
+    'gm',
+  )
+}
+
+function cssPattern(): RegExp {
+  return new RegExp(
+    '(?<com>/\\*[\\s\\S]*?(?:\\*/|$))' +
+      "|(?<str>\"(?:[^\"\\\\\\n]|\\\\.)*(?:\"|$)|'(?:[^'\\\\\\n]|\\\\.)*(?:'|$))" +
+      '|(?<num>#[\\dA-Fa-f]{3,8}\\b|\\b\\d+(?:\\.\\d+)?(?:px|r?em|%|s|ms|deg|fr|ch|ex|lh|rlh|vw|vh|vmin|vmax|svw|svh|dvw|dvh|cqw|cqh|pt|pc|in|cm|mm|q)?\\b)' +
+      '|(?<kw>@[\\w-]+|!important\\b)' +
+      '|(?<attr>[a-zA-Z-][\\w-]*(?=\\s*:))',
+    'g',
+  )
+}
+
+function mdPattern(): RegExp {
+  return new RegExp(
+    '(?<tag>^#{1,6}\\s+[^\\n]*|^\\s*```[^\\n]*|^\\s*\\|?(?::?-{3,}:?[ \\t]*\\|?)+[ \\t]*$|^>[^\\n]*|^\\s*[-*_]{3,}[ \\t]*$)' +
+      "|(?<str>`[^`\\n]+`|\\*\\*[^*\\n]+\\*\\*|\\*[^*\\n]+\\*|__[^_\\n]+__|_[^_\\n]+_|\\[[^\\]\\n]*\\]\\([^)\\n]*\\)|\\[[^\\]\\n]*\\]\\[[^\\]\\n]*\\])",
+    'gm',
+  )
+}
+
+function sqlPattern(): RegExp {
+  return new RegExp(
+    '(?<com>--[^\\n]*|/\\*[\\s\\S]*?(?:\\*/|$))' +
+      "|(?<str>'(?:[^']|'')*'|\"(?:[^\"]*)\"?|`(?:[^`\\\\]|\\\\.)*`?)" +
+      '|(?<num>\\b\\d+(?:\\.\\d+)?\\b)' +
+      `|(?<kw>\\b(?:${SQL_KW})\\b)`,
+    'gi',
+  )
+}
+
+function highlightTag(tok: string): string {
+  const open = /^(<\/?)([A-Za-z][\w:.-]*)/.exec(tok)
+  if (!open) return escapeHtml(tok)
+  let out = `<span class="tok-pun">${escapeHtml(open[1])}</span><span class="tok-tag">${escapeHtml(open[2])}</span>`
+  const rest = tok.slice(open[0].length)
+  const re = /[\w:.-]+(?=\s*=\s*)|"(?:[^"\n]*)"?|'(?:[^'\n]*)'?/g
+  let last = 0
+  for (;;) {
+    const m = re.exec(rest)
+    if (!m) break
+    const a = m[0]
+    if (a === '') {
+      re.lastIndex = m.index + 1
+      continue
+    }
+    out += escapeHtml(rest.slice(last, m.index))
+    const cls = a[0] === '"' || a[0] === "'" ? 'tok-str' : 'tok-attr'
+    out += `<span class="${cls}">${escapeHtml(a)}</span>`
+    last = m.index + a.length
+  }
+  return out + escapeHtml(rest.slice(last))
+}
+
+function highlightMarkup(text: string): string {
+  const re = /<!--[\s\S]*?(?:-->|$)|<\/?[A-Za-z][\w:.-]*(?:\s+[^\s<>/="']+(?:\s*=\s*(?:"[^"\n]*"?|'[^'\n]*'?|[^\s<>"'`]+))?)*\s*\/?>/g
+  let out = ''
+  let last = 0
+  for (;;) {
+    const m = re.exec(text)
+    if (!m) break
+    const tok = m[0]
+    if (tok === '') {
+      re.lastIndex = m.index + 1
+      continue
+    }
+    out += escapeHtml(text.slice(last, m.index))
+    out += tok.startsWith('<!--') ? `<span class="tok-com">${escapeHtml(tok)}</span>` : highlightTag(tok)
+    last = m.index + tok.length
+  }
+  return out + escapeHtml(text.slice(last))
+}
+
+function highlightCode(text: string, lang: LangId): string {
+  switch (lang) {
+    case 'ts': return paint(text, clPattern(TS_KW))
+    case 'js': return paint(text, clPattern(JS_KW))
+    case 'json': return paint(text, jsonPattern())
+    case 'html': return highlightMarkup(text)
+    case 'css': return paint(text, cssPattern())
+    case 'md': return paint(text, mdPattern())
+    case 'py': return paint(text, pyPattern())
+    case 'sh': return paint(text, shPattern())
+    case 'yaml': return paint(text, yamlPattern())
+    case 'toml':
+    case 'ini': return paint(text, tomlPattern())
+    case 'sql': return paint(text, sqlPattern())
+    case 'rs': return paint(text, clPattern(RS_KW))
+    case 'go': return paint(text, clPattern(GO_KW))
+    case 'clang': return paint(text, clPattern(CLANG_KW))
+    case 'plain': return escapeHtml(text)
+  }
+}
 type ContentResponse = {
   path: string
   name: string
@@ -92,6 +490,26 @@ export default function FilesPage() {
   const [editorSaving, setEditorSaving] = useState(false)
   const [confirmDiscard, setConfirmDiscard] = useState(false)
   const editorDirty = editorText !== editorSaved
+  const editLang = detectLang(editing?.name ?? '')
+  const editCat: FileCat = fileCat(editing?.name ?? '', false)
+  const highlighted = useMemo(
+    () => highlightCode(editorText, editLang.id),
+    [editorText, editLang.id],
+  )
+  const gutterText = useMemo(() => {
+    const n = editorText.split('\n').length
+    return Array.from({ length: n }, (_, i) => String(i + 1)).join('\n')
+  }, [editorText])
+
+  const syncCodeScroll = () => {
+    const ta = codeRef.current
+    if (!ta) return
+    if (hlRef.current) {
+      hlRef.current.scrollTop = ta.scrollTop
+      hlRef.current.scrollLeft = ta.scrollLeft
+    }
+    if (gutRef.current) gutRef.current.scrollTop = ta.scrollTop
+  }
   // Create dialog state.
   const [creating, setCreating] = useState<null | 'file' | 'folder'>(null)
   const [createName, setCreateName] = useState('')
@@ -108,6 +526,10 @@ export default function FilesPage() {
   const [uploadDone, setUploadDone] = useState<string[]>([])
   const [uploadProgress, setUploadProgress] = useState('')
   const fileInputRef = useRef<HTMLInputElement | null>(null)
+  // Code editor overlay refs (transparent textarea over highlighted <pre>).
+  const codeRef = useRef<HTMLTextAreaElement | null>(null)
+  const hlRef = useRef<HTMLPreElement | null>(null)
+  const gutRef = useRef<HTMLDivElement | null>(null)
 
   const load = useCallback(async (path?: string) => {
     setLoading(true)
@@ -183,6 +605,17 @@ export default function FilesPage() {
       document.body.style.overflow = prev
     }
   })
+
+  // Reset code scroll when another file is opened in the editor.
+  useEffect(() => {
+    if (!editing) return
+    codeRef.current?.scrollTo(0, 0)
+    if (hlRef.current) {
+      hlRef.current.scrollTop = 0
+      hlRef.current.scrollLeft = 0
+    }
+    if (gutRef.current) gutRef.current.scrollTop = 0
+  }, [editing])
 
   // Focus the create input + Escape closes the create dialog.
   useEffect(() => {
@@ -763,6 +1196,7 @@ export default function FilesPage() {
               const isMenu = menuOpen === e.path
               const isRenaming = renaming === e.path
               const isConfirm = confirmDelete === e.path
+              const cat: FileCat = e.is_dir ? 'dir' : fileCat(e.name, false)
               return (
                 <li
                   key={e.path}
@@ -776,18 +1210,9 @@ export default function FilesPage() {
                     <span
                       className="file-icon"
                       aria-hidden="true"
-                      data-kind={e.is_dir ? 'dir' : 'file'}
+                      data-kind={cat}
                     >
-                      {e.is_dir ? (
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                          <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
-                        </svg>
-                      ) : (
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                          <path d="M14 2v6h6" />
-                        </svg>
-                      )}
+                      <FileCatIcon cat={cat} />
                     </span>
                     {isRenaming ? (
                       <form
@@ -1013,6 +1438,13 @@ export default function FilesPage() {
             className="editor-window editor-page"
           >
             <div className="editor-head">
+              <span
+                className="file-icon editor-file-icon"
+                aria-hidden="true"
+                data-kind={editCat}
+              >
+                <FileCatIcon cat={editCat} />
+              </span>
               <div className="editor-title">
                 <strong>{editing.name}</strong>
                 <code title={editing.path}>{editing.path}</code>
