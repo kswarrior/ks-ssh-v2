@@ -507,7 +507,10 @@ export default function FilesPage() {
             disabled={loading || busy || !!error || !data}
             title="Create a file or folder here"
           >
-            Create
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M12 5v14M5 12h14" />
+            </svg>
+            <span className="btn-label">Create</span>
           </button>
           <button
             type="button"
@@ -516,7 +519,12 @@ export default function FilesPage() {
             disabled={loading || busy || !!error || !data}
             title="Upload files or fetch a URL here"
           >
-            Upload
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+              <path d="m17 8-5-5-5 5" />
+              <path d="M12 3v12" />
+            </svg>
+            <span className="btn-label">Upload</span>
           </button>
           <button
             type="button"
@@ -525,7 +533,11 @@ export default function FilesPage() {
             disabled={loading || busy}
             title="Go to HOME"
           >
-            Home
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="m3 10 9-7 9 7v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+              <path d="M9 22V12h6v10" />
+            </svg>
+            <span className="btn-label">Home</span>
           </button>
           <button
             type="button"
@@ -534,7 +546,11 @@ export default function FilesPage() {
             disabled={loading || busy || !data?.parent}
             title={data?.parent ?? 'Already at HOME'}
           >
-            Up
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M12 19V5" />
+              <path d="m5 12 7-7 7 7" />
+            </svg>
+            <span className="btn-label">Up</span>
           </button>
           <button
             type="button"
@@ -543,7 +559,11 @@ export default function FilesPage() {
             disabled={loading || busy}
             title="Refresh"
           >
-            Refresh
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M21 12a9 9 0 1 1-2.64-6.36" />
+              <path d="M21 3v6h-6" />
+            </svg>
+            <span className="btn-label">Refresh</span>
           </button>
         </div>
       </div>
@@ -625,8 +645,13 @@ export default function FilesPage() {
                 type="button"
                 className="btn btn-sm btn-primary"
                 onClick={() => void load(data?.path)}
+                title="Retry loading files"
               >
-                Retry
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M21 12a9 9 0 1 1-2.64-6.36" />
+                  <path d="M21 3v6h-6" />
+                </svg>
+                <span className="btn-label">Retry</span>
               </button>
             </div>
           </div>
@@ -826,8 +851,14 @@ export default function FilesPage() {
                         className="btn btn-sm btn-primary"
                         disabled={busy || !newName.trim() || newName.trim() === e.name}
                         onClick={() => void submitRename(e)}
+                        title="Save new name"
                       >
-                        Save
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                          <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" />
+                          <path d="M17 21v-8H7v8" />
+                          <path d="M7 3v5h8" />
+                        </svg>
+                        <span className="btn-label">Save</span>
                       </button>
                       <button
                         type="button"
@@ -837,8 +868,12 @@ export default function FilesPage() {
                           setRenaming(null)
                           setActionError(null)
                         }}
+                        title="Cancel rename"
                       >
-                        Cancel
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                          <path d="M18 6 6 18M6 6l12 12" />
+                        </svg>
+                        <span className="btn-label">Cancel</span>
                       </button>
                     </div>
                   )}
@@ -860,16 +895,27 @@ export default function FilesPage() {
                           className="btn btn-sm btn-danger"
                           disabled={busy}
                           onClick={() => void submitDelete(e)}
+                          title={`Delete ${e.name}`}
                         >
-                          {busy ? 'Deleting…' : 'Delete'}
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                            <path d="M3 6h18" />
+                            <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" />
+                          </svg>
+                          <span className="btn-label">{busy ? 'Deleting…' : 'Delete'}</span>
                         </button>
                         <button
                           type="button"
                           className="btn btn-sm"
                           disabled={busy}
                           onClick={() => setConfirmDelete(null)}
+                          title="Keep file"
                         >
-                          Keep
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                            <path d="M9 14 4 9l5-5" />
+                            <path d="M4 9h10a6 6 0 0 1 0 12h-3" />
+                          </svg>
+                          <span className="btn-label">Keep</span>
                         </button>
                       </div>
                     </div>
@@ -931,15 +977,24 @@ export default function FilesPage() {
                     type="button"
                     className="btn btn-sm btn-primary"
                     onClick={() => void openEditor(editing)}
+                    title="Retry opening file"
                   >
-                    Retry
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <path d="M21 12a9 9 0 1 1-2.64-6.36" />
+                      <path d="M21 3v6h-6" />
+                    </svg>
+                    <span className="btn-label">Retry</span>
                   </button>
                   <button
                     type="button"
                     className="btn btn-sm"
                     onClick={() => closeEditor()}
+                    title="Close editor"
                   >
-                    Close
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <path d="M18 6 6 18M6 6l12 12" />
+                    </svg>
+                    <span className="btn-label">Close</span>
                   </button>
                 </div>
               </div>
