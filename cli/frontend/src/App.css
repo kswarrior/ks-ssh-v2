@@ -1373,10 +1373,11 @@
 
 /* Appears when the user scrolled up — jumps back to live output. */
 .term-jump {
-  position: sticky;
-  bottom: 12px;
-  float: right;
-  margin-left: 12px;
+  position: absolute;
+  right: 14px;
+  bottom: 14px;
+  z-index: 5;
+  margin: 0;
   font: inherit;
   font-size: 12px;
   font-weight: 700;
@@ -1389,10 +1390,13 @@
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
 }
 
-/* Offline bar: pinned to the bottom of the terminal when the shell dies. */
+/* Offline bar: floats over the bottom of the terminal when the shell dies. */
 .term-offline {
-  position: sticky;
-  bottom: 0;
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: 12px;
+  z-index: 6;
   display: flex;
   align-items: center;
   gap: 12px;
@@ -1434,26 +1438,6 @@
   50% {
     opacity: 0;
   }
-}
-
-/* Invisible keystroke capture — anchored to the window (not the scrolling
-   body) so it never scrolls away, stays focusable, and keeps the mobile
-   keyboard alive. Near-zero opacity (not 0) keeps iOS willing to focus. */
-.term-keycapture {
-  position: absolute;
-  bottom: 8px;
-  left: 8px;
-  width: 8px;
-  height: 8px;
-  padding: 0;
-  opacity: 0.01;
-  border: none;
-  outline: none;
-  background: transparent;
-  color: transparent;
-  caret-color: transparent;
-  font-size: 16px; /* stops iOS zoom-on-focus */
-  pointer-events: none;
 }
 
 /* ---------- Files: host HOME browser (flush top like Terminal) ---------- */
