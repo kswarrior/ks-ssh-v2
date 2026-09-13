@@ -1343,68 +1343,32 @@
 .term-body {
   position: relative;
   flex: 1;
+  display: flex;
+  flex-direction: column;
   min-height: 40svh;
   max-height: none;
-  overflow-y: auto;
-  padding: 14px;
-  padding-bottom: calc(14px + env(safe-area-inset-bottom));
+  overflow: hidden;
+  padding: 0;
   background: #000;
-  color: #e6edf3;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 14px;
-  line-height: 1.55;
-  white-space: pre-wrap;
-  word-break: break-word;
   cursor: text;
 }
 
-.term-line:empty {
-  min-height: 1.55em;
-}
-
-.term-prompt-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin: 0;
-}
-
-.term-prompt {
-  color: #28c840;
-  font-weight: 700;
-  flex-shrink: 0;
-}
-
-.term-input {
+/* Real emulator surface (xterm.js owns scrolling inside). */
+.term-xterm {
   flex: 1;
   min-width: 0;
-  border: none;
-  outline: none;
-  background: transparent;
-  color: #e6edf3;
-  font: inherit;
-  padding: 0;
-  caret-color: #28c840;
+  min-height: 0;
+  overflow: hidden;
+  background: #000;
+  padding: 10px 0 10px 12px;
 }
 
-.term-input::placeholder {
-  color: #4b5563;
+.term-xterm .xterm {
+  height: 100%;
 }
 
-.term-caret {
-  display: none;
-}
-
-.term-output {
-  margin: 0;
-  font: inherit;
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-
-.term-cursor {
-  color: #28c840;
-  animation: term-blink 1.1s steps(1) infinite;
+.term-xterm .xterm-viewport {
+  background: #000;
 }
 
 /* Appears when the user scrolled up — jumps back to live output. */

@@ -1,4 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { Terminal } from 'xterm'
+import { FitAddon } from '@xterm/addon-fit'
+import 'xterm/css/xterm.css'
 
 export type SshEntry = {
   id: string
@@ -9,76 +12,6 @@ export type SshEntry = {
 }
 
 type TermSession = { id: string; name: string }
-
-/** Strip ANSI escape sequences but keep printable text. */
-function stripAnsi(s: string): string {
-  // CSI ... letter, OSC ... BEL, charset selects, plus single-char FE escapes.
-  // eslint-disable-next-line no-control-regex
-  return s.replace(/\x1b\[[0-9;?]*[a-zA-Z]|\x1b\][^\x07]*\x07|\x1b[()][0-9A-Z]|\x1b[c=>M78]/g, '')
-}
-
-/** Emulate the few line-editing controls a plain <pre> can honour. */
-function emulateEdits(s: string): string {
-  // Normalise CRLF first so lone-CR handling below only sees real overwrites.
-  s = s.replace(/\r\n/g, '\n')
-  // Backspace (BS) deletes the previous visible char.
-  if (s.includes('\x08')) {
-    let out = ''
-    for (const ch of s) {
-      if (ch === '\x08') out = out.slice(0, -1)
-      else out += ch
-    }
-    s = out
-  }
-  // Lone CR returns the cursor to the line start: keep the last segment
-  // (progress bars, spinners) instead of stacking garbage lines.
-  if (s.includes('\r')) {
-    s = s
-      .split('\n')
-      .map((line) => {
-        if (!line.includes('\r')) return line
-        const parts = line.split('\r')
-        return parts[parts.length - 1] ?? ''
-      })
-      .join('\n')
-  }
-  // Drop the terminal bell.
-  return s.replace(/\x07/g, '')
-}
-
-/** True when the raw chunk moves the cursor back to the current line start
-    (bash reprinting `user@host` after a resize, progress-bar tick, ...). */
-function isLineRedraw(raw: string): boolean {
-  // eslint-disable-next-line no-control-regex
-  return /\r(?!\n)/.test(raw) || raw.includes('\x1b[K') || raw.includes('\x1b[G')
-}
-
-/** Apply a PTY output chunk to the visible buffer. Handles clear-screen. */
-function applyChunk(prev: string, chunk: string): string {
-  const clearSeqs = ['\x1b[2J', '\x1b[3J', '\x1bc', '\x1b[H\x1b[2J']
-  let lastClear = -1
-  for (const seq of clearSeqs) {
-    const idx = chunk.lastIndexOf(seq)
-    if (idx > lastClear) lastClear = idx
-  }
-  if (lastClear >= 0) {
-    // Discard everything before (and including) the last clear sequence —
-    // `clear` must wipe, not append.
-    const after = chunk.slice(lastClear)
-    return emulateEdits(stripAnsi(after)).slice(-20000)
-  }
-  let base = prev
-  if (base && !base.endsWith('\n') && isLineRedraw(chunk)) {
-    // We are sitting mid-line (usually on the `user@host` prompt) and the
-    // shell is redrawing that same line — replace it instead of appending
-    // a second copy. Without this every resize multiplies the prompt.
-    const nl = base.lastIndexOf('\n')
-    base = nl >= 0 ? base.slice(0, nl + 1) : ''
-  }
-  const out = base + emulateEdits(stripAnsi(chunk))
-  if (out.length > 20000) return out.slice(-20000)
-  return out
-}
 
 type TermStatus = 'connecting' | 'online' | 'offline'
 
@@ -118,23 +51,6 @@ function copyText(text: string): void {
 
 const EXIT_SENTINEL = '{"type":"exit"}'
 
-async function messageToText(data: unknown): Promise<string> {
-  if (typeof data === 'string') return data
-  try {
-    if (data instanceof Blob) return await data.text()
-    if (data instanceof ArrayBuffer) return new TextDecoder().decode(data)
-    // Some browsers deliver Blob-like objects without instanceof matching.
-    const maybe = data as { arrayBuffer?: () => Promise<ArrayBuffer>; text?: () => Promise<string> }
-    if (maybe && typeof maybe.text === 'function') return await maybe.text()
-    if (maybe && typeof maybe.arrayBuffer === 'function') {
-      return new TextDecoder().decode(await maybe.arrayBuffer())
-    }
-  } catch {
-    return ''
-  }
-  return String(data ?? '')
-}
-
 function ShellSession({
   id,
   active,
@@ -144,7 +60,6 @@ function ShellSession({
   active: boolean
   onStatus: (id: string, s: TermStatus) => void
 }) {
-  const [output, setOutput] = useState('')
   const [status, setStatus] = useState<TermStatus>('offline')
   // "↓ latest" pill when the user scrolled up to read older output.
   const [stuck, setStuck] = useState(true)
@@ -152,31 +67,21 @@ function ShellSession({
   const [gen, setGen] = useState(0)
 
   const wsRef = useRef<WebSocket | null>(null)
-  const bodyRef = useRef<HTMLDivElement | null>(null)
-  const winRef = useRef<HTMLDivElement | null>(null)
-  const keyRef = useRef<HTMLInputElement | null>(null)
+  const containerRef = useRef<HTMLDivElement | null>(null)
+  const termRef = useRef<Terminal | null>(null)
+  const fitRef = useRef<FitAddon | null>(null)
   // Keystrokes typed while the socket is still connecting.
   const pendingRef = useRef<string[]>([])
-  // Chunk batching: coalesce bursty PTY output into one setState.
-  const outBufRef = useRef('')
-  const outTimerRef = useRef<number | undefined>(undefined)
-  // Whether the view is pinned to the bottom.
-  const stickRef = useRef(true)
-  // True once the backend announced exit (JSON + close); distinguishes a
-  // real exit from shell output that merely looks like the sentinel.
-  const gotExitRef = useRef(false)
   // Last size sent to the shell — resizes that change nothing are skipped.
   const sizeRef = useRef<{ cols: number; rows: number } | null>(null)
   const resizeTimerRef = useRef<number | undefined>(undefined)
+  // True once the backend announced exit (JSON + close); distinguishes a
+  // real exit from shell output that merely looks like the sentinel.
+  const gotExitRef = useRef(false)
 
   const focusKeys = () => {
-    setTimeout(() => keyRef.current?.focus({ preventScroll: true }), 30)
+    setTimeout(() => termRef.current?.focus(), 30)
   }
-
-  // Focus when this tab becomes the visible one.
-  useEffect(() => {
-    if (active) focusKeys()
-  }, [active])
 
   const send = (data: string) => {
     if (!data) return
@@ -194,17 +99,19 @@ function ShellSession({
 
   const sendResize = useCallback(() => {
     const ws = wsRef.current
-    if (!ws || ws.readyState !== WebSocket.OPEN) return
-    const el = bodyRef.current
-    // Measure the real terminal box, not the window (header/tab bars eat
-    // space). Fall back to the window when the box is not laid out yet.
-    const w = el?.clientWidth ?? window.innerWidth
-    const h = el?.clientHeight ?? window.innerHeight
-    // 14px mono ≈ 8.4px wide, 21.7px tall (14 * 1.55 line-height).
-    // Subtract body padding so the shell does not think it is taller
-    // than the visible box (hidden bottom lines otherwise).
-    const cols = Math.max(20, Math.min(500, Math.floor((w - 28) / 8.4)))
-    const rows = Math.max(5, Math.min(300, Math.floor((h - 28) / 21.7)))
+    const fit = fitRef.current
+    if (!ws || ws.readyState !== WebSocket.OPEN || !fit) return
+    // Fit first so the emulator grid matches the visible box, then report
+    // the real grid size (a hidden tab has no box — skip until visible).
+    try {
+      fit.fit()
+    } catch {
+      return
+    }
+    const dims = fit.proposeDimensions()
+    if (!dims?.cols || !dims?.rows) return
+    const cols = Math.max(2, Math.min(500, Math.floor(dims.cols)))
+    const rows = Math.max(2, Math.min(300, Math.floor(dims.rows)))
     // Skip when nothing changed — every resize is a SIGWINCH and bash
     // reprints the prompt on each one, so redundant resizes only churn.
     const last = sizeRef.current
@@ -227,38 +134,96 @@ function ShellSession({
     }, 150)
   }, [sendResize])
 
+  // The emulator instance lives for the whole tab; only the socket
+  // reconnects (so scrollback survives a reconnect).
   useEffect(() => {
+    const container = containerRef.current
+    if (!container) return
+    const term = new Terminal({
+      cursorBlink: true,
+      cursorStyle: 'block',
+      fontSize: 14,
+      fontFamily:
+        'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
+      lineHeight: 1.5,
+      scrollback: 5000,
+      rightClickSelectsWord: true,
+      macOptionIsMeta: true,
+      theme: {
+        background: '#000000',
+        foreground: '#e6edf3',
+        cursor: '#28c840',
+        cursorAccent: '#000000',
+        selectionBackground: 'rgba(139, 124, 255, 0.35)',
+      },
+    })
+    const fit = new FitAddon()
+    term.loadAddon(fit)
+    term.open(container)
+    termRef.current = term
+    fitRef.current = fit
+    // Ctrl/⌘+C copies when text is selected (otherwise SIGINT goes to the
+    // shell); Ctrl/⌘+V pastes via the helper textarea (fires onData).
+    term.attachCustomKeyEventHandler((e) => {
+      const mod = e.ctrlKey || e.metaKey
+      if ((e.key === 'c' || e.key === 'C') && mod && term.hasSelection()) {
+        return false
+      }
+      if ((e.key === 'v' || e.key === 'V') && mod && !e.altKey) {
+        return false
+      }
+      return true
+    })
+    const onData = term.onData((data) => send(data))
+    // xterm owns its scroll viewport — watch it for the "↓ latest" pill.
+    const vp = container.querySelector('.xterm-viewport')
+    const onVpScroll = () => {
+      const el = vp as HTMLElement | null
+      if (!el) return
+      const nearBottom =
+        el.scrollHeight - el.scrollTop - el.clientHeight < 48
+      setStuck((prev) => (prev === nearBottom ? prev : nearBottom))
+    }
+    vp?.addEventListener('scroll', onVpScroll)
+    return () => {
+      vp?.removeEventListener('scroll', onVpScroll)
+      onData.dispose()
+      termRef.current = null
+      fitRef.current = null
+      try {
+        term.dispose()
+      } catch {
+        // Already gone — ignore.
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // Fit + focus when this tab becomes the visible one (fit needs a
+  // laid-out box, so hidden tabs only size up once shown).
+  useEffect(() => {
+    if (!active) return
+    focusKeys()
+    requestAnimationFrame(() => sendResize())
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active])
+
+  useEffect(() => {
+    const term = termRef.current
+    if (!term) return
     gotExitRef.current = false
     sizeRef.current = null
     const scheme = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
     const ws = new WebSocket(`${scheme}//${window.location.host}/v1/shell`)
     wsRef.current = ws
-    // Binary blobs arrive as Blob objects (needs async decode below).
     try {
-      ws.binaryType = 'blob'
+      ws.binaryType = 'arraybuffer'
     } catch {
-      // Older browsers — messageToText still handles ArrayBuffer.
+      // Older browsers — Blob path below still works.
     }
     setStatus('connecting')
-    // No "connecting…" line in the terminal body — the tab-bar dot already
+    // No "connecting…" line in the terminal — the tab-bar dot already
     // shows connecting (yellow) / online (green) / offline (red).
-    setOutput('')
-
-    const flushOut = () => {
-      outTimerRef.current = undefined
-      const chunk = outBufRef.current
-      outBufRef.current = ''
-      if (chunk) setOutput((prev) => applyChunk(prev, chunk))
-    }
-    const queueChunk = (text: string) => {
-      if (!text) return
-      outBufRef.current += text
-      // Bound the batch so a runaway `cat` still renders progressively.
-      if (outBufRef.current.length > 60000) flushOut()
-      else if (outTimerRef.current === undefined) {
-        outTimerRef.current = window.setTimeout(flushOut, 30)
-      }
-    }
 
     ws.onopen = () => {
       setStatus('online')
@@ -268,48 +233,57 @@ function ShellSession({
       sendResize()
     }
     ws.onmessage = (e) => {
-      void messageToText(e.data).then((text) => {
-        if (!text) return
+      const d: unknown = e.data
+      if (typeof d === 'string') {
         // Exact sentinel only: shell output such as
         // `echo '{"type":"exit"}'` keeps the socket open, so it must NOT
         // flip the tab offline — only the backend close does that.
-        if (text.trim() === EXIT_SENTINEL) {
+        if (d.trim() === EXIT_SENTINEL) {
           gotExitRef.current = true
-          queueChunk('\n[shell exited]\n')
+          term.write('\r\n[shell exited]\r\n')
           return
         }
-        queueChunk(text)
-      })
+        term.write(d)
+        return
+      }
+      if (d instanceof ArrayBuffer) {
+        term.write(new Uint8Array(d))
+        return
+      }
+      if (typeof Blob !== 'undefined' && d instanceof Blob) {
+        void d
+          .arrayBuffer()
+          .then((b) => term.write(new Uint8Array(b)))
+          .catch(() => {})
+      }
     }
     ws.onerror = () => {
-      queueChunk('\nsocket error\n')
+      term.write('\r\nsocket error\r\n')
       setStatus('offline')
     }
     ws.onclose = () => {
       if (wsRef.current !== ws) return
       wsRef.current = null
-      if (outBufRef.current) flushOut()
       // Always go offline — a failed connect must not stick on amber.
       setStatus('offline')
-      setOutput((prev) => {
-        if (gotExitRef.current) return prev.endsWith('\n') ? prev : prev + '\n'
+      if (!gotExitRef.current) {
         const hint =
           window.location.pathname.startsWith('/v/') ||
           window.location.hash.includes('/view/')
-            ? 'disconnected (relay view has no local shell — open the local URL instead)\n'
-            : 'disconnected — Reconnect to restart the shell\n'
-        return prev.endsWith('\n') ? prev + hint : prev + '\n' + hint
-      })
+            ? 'disconnected (relay view has no local shell — open the local URL instead)'
+            : 'disconnected — Reconnect to restart the shell'
+        term.write(`\r\n${hint}\r\n`)
+      }
     }
 
     const onResize = () => scheduleResize()
     window.addEventListener('resize', onResize)
     // Watch the terminal box itself (split views, mobile bars, zoom).
     const ro =
-      typeof ResizeObserver !== 'undefined' && bodyRef.current
+      typeof ResizeObserver !== 'undefined' && containerRef.current
         ? new ResizeObserver(() => scheduleResize())
         : null
-    if (ro && bodyRef.current) ro.observe(bodyRef.current)
+    if (ro && containerRef.current) ro.observe(containerRef.current)
     if (active) focusKeys()
 
     return () => {
@@ -319,11 +293,6 @@ function ShellSession({
         window.clearTimeout(resizeTimerRef.current)
         resizeTimerRef.current = undefined
       }
-      if (outTimerRef.current !== undefined) {
-        window.clearTimeout(outTimerRef.current)
-        outTimerRef.current = undefined
-      }
-      outBufRef.current = ''
       if (wsRef.current === ws) wsRef.current = null
       try {
         ws.close()
@@ -334,31 +303,13 @@ function ShellSession({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [gen])
 
-  // Auto-scroll only while pinned to the bottom — never yank a user
-  // who scrolled up to read older output.
-  useEffect(() => {
-    const el = bodyRef.current
-    if (el && stickRef.current) el.scrollTop = el.scrollHeight
-  }, [output])
-
   useEffect(() => {
     onStatus(id, status)
   }, [id, status, onStatus])
 
-  const onScroll = () => {
-    const el = bodyRef.current
-    if (!el) return
-    const nearBottom =
-      el.scrollHeight - el.scrollTop - el.clientHeight < 48
-    stickRef.current = nearBottom
-    setStuck(nearBottom)
-  }
-
   const jumpToBottom = () => {
-    stickRef.current = true
+    termRef.current?.scrollToBottom()
     setStuck(true)
-    const el = bodyRef.current
-    if (el) el.scrollTop = el.scrollHeight
     focusKeys()
   }
 
@@ -370,7 +321,7 @@ function ShellSession({
     }
     wsRef.current = null
     gotExitRef.current = false
-    stickRef.current = true
+    sizeRef.current = null
     setStuck(true)
     setStatus('connecting')
     setGen((g) => g + 1)
@@ -378,112 +329,28 @@ function ShellSession({
   }
 
   const copyAll = () => {
-    copyText(output.slice(-20000) || output)
+    const term = termRef.current
+    if (term) {
+      try {
+        term.selectAll()
+        const sel = term.getSelection()
+        term.clearSelection()
+        if (sel) copyText(sel)
+      } catch {
+        // Selection unsupported — nothing to copy.
+      }
+    }
     focusKeys()
   }
 
-  const sendCtrl = (ch: string, e: React.KeyboardEvent<HTMLInputElement>) => {
-    // With selected text on Ctrl+C: let the browser copy AND interrupt.
-    if (ch === '\x03') {
-      const sel = window.getSelection()
-      const hasSel = !!sel && !sel.isCollapsed && sel.toString() !== ''
-      if (!hasSel) e.preventDefault()
-      send(ch)
-      return
-    }
-    e.preventDefault()
-    send(ch)
-  }
-
-  const onKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Enter') {
-      e.preventDefault()
-      send('\r')
-    } else if (e.key === 'Backspace') {
-      e.preventDefault()
-      send('\x7f')
-    } else if (e.key === 'Delete') {
-      e.preventDefault()
-      send('\x1b[3~')
-    } else if (e.key === 'Tab') {
-      e.preventDefault()
-      send('\t')
-    } else if (e.key === 'Escape') {
-      e.preventDefault()
-      send('\x1b')
-    } else if (e.key === 'ArrowUp') {
-      e.preventDefault()
-      send('\x1b[A')
-    } else if (e.key === 'ArrowDown') {
-      e.preventDefault()
-      send('\x1b[B')
-    } else if (e.key === 'ArrowRight') {
-      e.preventDefault()
-      send('\x1b[C')
-    } else if (e.key === 'ArrowLeft') {
-      e.preventDefault()
-      send('\x1b[D')
-    } else if (e.key === 'Home') {
-      e.preventDefault()
-      send('\x1b[H')
-    } else if (e.key === 'End') {
-      e.preventDefault()
-      send('\x1b[F')
-    } else if (e.key === 'PageUp') {
-      e.preventDefault()
-      send('\x1b[5~')
-    } else if (e.key === 'PageDown') {
-      e.preventDefault()
-      send('\x1b[6~')
-    } else if (e.ctrlKey && !e.metaKey && !e.altKey && (e.key === 'c' || e.key === 'C')) {
-      sendCtrl('\x03', e)
-    } else if (e.ctrlKey && !e.metaKey && !e.altKey && (e.key === 'd' || e.key === 'D')) {
-      e.preventDefault()
-      send('\x04')
-    } else if (e.ctrlKey && !e.metaKey && !e.altKey && (e.key === 'l' || e.key === 'L')) {
-      e.preventDefault()
-      send('\x0c')
-    } else if (e.ctrlKey && !e.metaKey && !e.altKey && (e.key === 'z' || e.key === 'Z')) {
-      e.preventDefault()
-      send('\x1a')
-    } else if (e.ctrlKey && !e.metaKey && !e.altKey && (e.key === 'a' || e.key === 'A')) {
-      e.preventDefault()
-      send('\x01')
-    } else if (e.ctrlKey && !e.metaKey && !e.altKey && (e.key === 'e' || e.key === 'E')) {
-      e.preventDefault()
-      send('\x05')
-    } else if (e.ctrlKey && !e.metaKey && !e.altKey && (e.key === 'u' || e.key === 'U')) {
-      e.preventDefault()
-      send('\x15')
-    } else if (e.ctrlKey && !e.metaKey && !e.altKey && (e.key === 'k' || e.key === 'K')) {
-      e.preventDefault()
-      send('\x0b')
-    } else if (e.ctrlKey && !e.metaKey && !e.altKey && (e.key === 'w' || e.key === 'W')) {
-      e.preventDefault()
-      send('\x17')
-    } else if (e.ctrlKey && !e.metaKey && !e.altKey && (e.key === 'r' || e.key === 'R')) {
-      e.preventDefault()
-      send('\x12')
-    } else if (e.key.length === 1 && !e.metaKey && (!e.ctrlKey || (e.ctrlKey && e.altKey))) {
-      // Printable path (AltGr = Ctrl+Alt produces length-1 keys on EU
-      // layouts and must still type). IME compositions bypass keydown and
-      // arrive via onChange below, so this stays single-send on desktop.
-      e.preventDefault()
-      send(e.key)
-    }
-  }
-
   return (
-    <div className="term-window" ref={winRef} onClick={focusKeys}>
-      <div
-        className="term-body"
-        ref={bodyRef}
-        aria-live="polite"
-        onScroll={onScroll}
-      >
-        {/* Cursor lives INSIDE the <pre> with no whitespace between — a
-            newline here would push it onto the next line. */}
-        <pre className="term-output">{output}<span className="term-cursor" aria-hidden="true">█</span></pre>
+    <div className="term-window" onClick={focusKeys}>
+      <div className="term-body">
+        <div
+          ref={containerRef}
+          className="term-xterm"
+          aria-label="Linux shell terminal — tap then type"
+        />
         {!stuck && (
           <button
             type="button"
@@ -524,43 +391,6 @@ function ShellSession({
           </div>
         )}
       </div>
-      <input
-        ref={keyRef}
-        className="term-keycapture"
-        type="text"
-        autoComplete="off"
-        autoCapitalize="off"
-        autoCorrect="off"
-        spellCheck={false}
-        enterKeyHint="enter"
-        aria-label="Shell input — tap terminal then type"
-        onKeyDown={onKeyDown}
-        onPaste={(e) => {
-          const t = e.clipboardData?.getData('text')
-          if (t) {
-            e.preventDefault()
-            send(t)
-          }
-        }}
-        onChange={() => {
-          const el = keyRef.current
-          if (el && el.value) {
-            // IME / mobile keyboards / autofill land here.
-            send(el.value)
-            el.value = ''
-          }
-        }}
-        onBlur={() => {
-          // Keep the keyboard alive while this tab is the visible one:
-          // a stray blur (scroll, pill tap) refocuses unless the user
-          // moved to another tab or an overlay button.
-          if (active && status === 'online') {
-            const ae = document.activeElement
-            if (ae instanceof HTMLElement && winRef.current?.contains(ae)) return
-            if (ae === document.body) focusKeys()
-          }
-        }}
-      />
     </div>
   )
 }
