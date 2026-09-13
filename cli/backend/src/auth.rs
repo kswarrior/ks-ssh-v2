@@ -601,7 +601,7 @@ pub struct LoginInfo {
     pub is_owner: bool,
 }
 
-#[derive(Clone, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct UserInfo {
     pub username: String,
     pub is_owner: bool,
@@ -780,7 +780,7 @@ pub async fn api_delete_user(
     let Some(auth) = state.auth else {
         return (StatusCode::NOT_FOUND, "auth disabled").into_response();
     };
-    let owner_pass = body.and_then(|b| b.owner_pass).unwrap_or_default();
+    let owner_pass = body.map(|Json(b)| b.owner_pass).unwrap_or(None).unwrap_or_default();
     match auth.delete_user(&target, &owner_pass) {
         Ok(()) => (
             StatusCode::OK,

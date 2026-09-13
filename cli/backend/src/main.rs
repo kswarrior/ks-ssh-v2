@@ -153,6 +153,34 @@ async fn main() {
     let cli = Cli::parse();
     println!("KS SSH — hello world");
 
+    // Optional login gate: --user + --pass together show a login page and
+    // enable the Settings → Users management. Omit both for open access.
+    let auth: Option<Arc<AuthState>> = match (cli.user, cli.pass) {
+        (Some(u), Some(p)) => {
+            let u = u.trim().to_string();
+            if u.is_empty() || p.is_empty() {
+                eprintln!("--user/--pass must both be non-empty");
+                std::process::exit(2);
+            }
+            let users_file = auth::default_users_file();
+            let state = AuthState::new_with_file(&u, &p, users_file.clone());
+            println!(
+                "Auth: ON (main user '{u}') — login required for the web UI ({} extra user(s), stored in {}).",
+                state.extra_user_count(),
+                users_file.display()
+            );
+            Some(Arc::new(state))
+        }
+        (None, None) => {
+            println!("Auth: OFF (open access — anyone who can reach the port can run commands).");
+            None
+        }
+        _ => {
+            eprintln!("--user and --pass must be used together (or omit both)");
+            std::process::exit(2);
+        }
+    };
+
     let token: Option<String> = cli.token.map(|t| {
         if t.is_empty() {
             relay::new_token()
@@ -206,12 +234,15 @@ async fn main() {
         }
         // Local UI plus relay agent alongside.
         (false, Some(t)) => {
+            if auth.is_some() {
+                eprintln!("note: --user/--pass protects the local UI only; the relay share link stays open to whoever holds it");
+            }
             let ws_base = relay_ws_base(&cli.relay);
             let push_ui = !cli.no_ui;
             tokio::spawn(async move { relay::run_agent(&ws_base, &t, push_ui, e2e_key).await });
-            serve(cli.host, cli.port).await;
+            serve(cli.host, cli.port, auth).await;
         }
         // Local UI only (previous behaviour).
-        (false, None) => serve(cli.host, cli.port).await,
+        (false, None) => serve(cli.host, cli.port, auth).await,
     }
 }
