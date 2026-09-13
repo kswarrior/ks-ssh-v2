@@ -1206,6 +1206,7 @@
 }
 
 .term-body {
+  position: relative;
   flex: 1;
   min-height: 60svh;
   max-height: 70svh;
@@ -1256,6 +1257,40 @@
 
 .term-caret {
   display: none;
+}
+
+.term-output {
+  margin: 0;
+  font: inherit;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.term-cursor {
+  color: #28c840;
+  animation: term-blink 1.1s steps(1) infinite;
+}
+
+@keyframes term-blink {
+  50% {
+    opacity: 0;
+  }
+}
+
+/* Invisible keystroke capture — keeps focus + mobile keyboard alive. */
+.term-keycapture {
+  position: absolute;
+  bottom: 8px;
+  left: 8px;
+  width: 32px;
+  height: 32px;
+  opacity: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: transparent;
+  caret-color: transparent;
+  font-size: 16px; /* stops iOS zoom-on-focus */
 }
 
 /* ---------- Files: host HOME browser ---------- */
