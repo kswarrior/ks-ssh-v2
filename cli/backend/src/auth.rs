@@ -133,6 +133,9 @@ pub struct AuthState {
     users_file: Option<PathBuf>,
 }
 
+// `new`/`verify`/`owner_username` are exercised by unit tests;
+// allow dead code in non-test builds.
+#[allow(dead_code)]
 impl AuthState {
     pub fn new(user: &str, pass: &str) -> Self {
         Self {
