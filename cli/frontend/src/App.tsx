@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState, type FormEvent } from 'react'
+import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
 
-type PageId = 'home' | 'ssh' | 'installation' | 'settings' | 'session'
+type PageId = 'home' | 'ssh' | 'installation' | 'settings'
 
 type NavItem = { id: PageId; label: string; hash: string }
 
@@ -56,7 +56,6 @@ function writeJSON(key: string, value: unknown) {
 /** Map a location hash to a page, or null when it is not a page route. */
 function hashToPage(hash: string): PageId | null {
   const clean = hash.replace(/^#\/?/, '')
-  if (clean === 'session') return 'session'
   const found = NAV.find((p) => p.hash.replace(/^#\/?/, '') === clean)
   return found ? found.id : null
 }
@@ -176,8 +175,142 @@ function StatusTag({
   )
 }
 
+function Icon({ children }: { children: ReactNode }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      {children}
+    </svg>
+  )
+}
+
+function FeatureTile({
+  icon,
+  title,
+  text,
+}: {
+  icon: ReactNode
+  title: string
+  text: string
+}) {
+  return (
+    <div className="card feature">
+      <span className="feature-icon" aria-hidden="true">
+        <Icon>{icon}</Icon>
+      </span>
+      <h3>{title}</h3>
+      <p>{text}</p>
+    </div>
+  )
+}
+
 function HomePage() {
-  return <section className="page" aria-label="Home" />
+  return (
+    <section className="page" aria-labelledby="page-title-home">
+      <div className="hero card">
+        <span className="eyebrow">KS SSH</span>
+        <h1 id="page-title-home">Shell access, minus the hassle.</h1>
+        <p className="lead">
+          Save your connections, see live status, and reconnect in one tap —
+          from your phone or desktop.
+        </p>
+        <div className="row-actions">
+          <a className="btn btn-primary" href="#/ssh">
+            Open SSH
+          </a>
+          <a className="btn" href="#/installation">
+            Install
+          </a>
+        </div>
+      </div>
+
+      <h2>Why us</h2>
+      <div className="grid">
+        <FeatureTile
+          icon={<polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />}
+          title="Fast"
+          text="Connect in one tap with your saved token. No typing addresses twice."
+        />
+        <FeatureTile
+          icon={<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />}
+          title="Private"
+          text="Tokens stay in your browser. Nothing is uploaded or tracked."
+        />
+        <FeatureTile
+          icon={
+            <>
+              <rect x="5" y="2" width="14" height="20" rx="2" />
+              <path d="M12 18h.01" />
+            </>
+          }
+          title="Everywhere"
+          text="The same interface on phone and desktop, with offline-first data."
+        />
+      </div>
+
+      <h2>Features</h2>
+      <div className="grid">
+        <FeatureTile
+          icon={
+            <>
+              <rect x="3" y="11" width="18" height="11" rx="2" />
+              <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+            </>
+          }
+          title="Token auth"
+          text="Paste your token once, connect anytime."
+        />
+        <FeatureTile
+          icon={<polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />}
+          title="Live status"
+          text="Green means go. See what is online at a glance."
+        />
+        <FeatureTile
+          icon={
+            <>
+              <path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z" />
+              <path d="M6 16h.01M10 16h.01" />
+            </>
+          }
+          title="Local-first"
+          text="Your list persists on this device. No account needed."
+        />
+        <FeatureTile
+          icon={
+            <>
+              <polyline points="23 4 23 10 17 10" />
+              <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
+            </>
+          }
+          title="One-tap reconnect"
+          text="Dropped? Reconnect straight from the card."
+        />
+      </div>
+
+      <h2>Screenshots</h2>
+      <div className="shot-grid">
+        {['Home', 'SSH list', 'Installation'].map((label) => (
+          <div key={label} className="shot">
+            <Icon>
+              <rect x="3" y="3" width="18" height="18" rx="2" />
+              <circle cx="8.5" cy="8.5" r="1.5" />
+              <polyline points="21 15 16 10 5 21" />
+            </Icon>
+            <span>
+              {label} — your screenshot here
+            </span>
+          </div>
+        ))}
+      </div>
+    </section>
+  )
 }
 
 type SshEntry = {
@@ -188,19 +321,13 @@ type SshEntry = {
   online: boolean
 }
 
-type RelaySession = { name: string; token: string }
-
-function readRelaySession(): RelaySession | null {
-  const saved = readJSON<unknown>('ks-ssh:relay', null)
-  if (!saved || typeof saved !== 'object') return null
-  const s = saved as { name?: unknown; token?: unknown }
-  if (typeof s.name !== 'string' || typeof s.token !== 'string') return null
-  if (!/^[A-Z0-9]{5}$/.test(s.token)) return null
-  return { name: s.name, token: s.token }
-}
-
-function SessionPage() {
-  const [session] = useState<RelaySession | null>(() => readRelaySession())
+function ActiveSession({
+  entry,
+  onBack,
+}: {
+  entry: SshEntry
+  onBack: () => void
+}) {
   const [lines, setLines] = useState<string[]>([])
   const [draft, setDraft] = useState('')
   const wsRef = useRef<WebSocket | null>(null)
@@ -209,9 +336,8 @@ function SessionPage() {
   const push = (line: string) =>
     setLines((prev) => [...prev.slice(-99), line])
 
-  const token = session?.token ?? null
+  const token = entry.token.trim().toUpperCase()
   useEffect(() => {
-    if (!token) return
     const scheme = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
     const ws = new WebSocket(
       `${scheme}//${window.location.host}/v1/client?token=${token}`,
@@ -279,50 +405,34 @@ function SessionPage() {
     setDraft('')
   }
 
-  if (!session) {
-    return (
-      <section className="page" aria-labelledby="page-title-session">
-        <h1 id="page-title-session">Session</h1>
-        <div className="card">
-          <p>No relay session. Connect from the SSH page first.</p>
-          <div className="row-actions">
-            <a className="btn btn-primary" href="#/ssh">
-              Back to SSH
-            </a>
-          </div>
-        </div>
-      </section>
-    )
-  }
-
   return (
-    <section className="page" aria-labelledby="page-title-session">
+    <div className="card">
       <div className="page-head">
-        <h1 id="page-title-session">{session.name}</h1>
-        <a className="btn btn-sm" href="#/ssh">
+        <h2>
+          {entry.name} <code>{token}</code>
+        </h2>
+        <button type="button" className="btn btn-sm" onClick={onBack}>
           Back
-        </a>
+        </button>
       </div>
-      <div className="card">
-        <div className="ws-log" ref={logRef} aria-live="polite">
-          {lines.map((l, i) => (
-            <div key={i}>{l}</div>
-          ))}
-        </div>
-        <form className="form" onSubmit={send}>
-          <label className="field">
-            Send
-            <input
-              type="text"
-              value={draft}
-              onChange={(e) => setDraft(e.target.value)}
-              placeholder="type + Enter"
-              autoComplete="off"
-            />
-          </label>
-        </form>
+      <div className="ws-log" ref={logRef} aria-live="polite">
+        {lines.map((l, i) => (
+          <div key={i}>{l}</div>
+        ))}
       </div>
-    </section>
+      <form className="form" onSubmit={send}>
+        <label className="field">
+          Send
+          <input
+            type="text"
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            placeholder="type + Enter"
+            autoComplete="off"
+          />
+        </label>
+      </form>
+    </div>
   )
 }
 
@@ -339,6 +449,7 @@ function SSHPage({
   const [token, setToken] = useState('')
   const [note, setNote] = useState('')
   const [connectingId, setConnectingId] = useState<string | null>(null)
+  const [visitingId, setVisitingId] = useState<string | null>(null)
   const [banner, setBanner] = useState<string | null>(null)
   const socketsRef = useRef(new Map<string, WebSocket>())
 
@@ -459,17 +570,14 @@ function SSHPage({
   const disconnectEntry = (id: string) => {
     closeSocket(id)
     setConnectingId((cur) => (cur === id ? null : cur))
+    setVisitingId((cur) => (cur === id ? null : cur))
     onChange((prev) =>
       prev.map((x) => (x.id === id ? { ...x, online: false } : x)),
     )
   }
 
   const visitEntry = (entry: SshEntry) => {
-    writeJSON('ks-ssh:relay', {
-      name: entry.name,
-      token: entry.token.trim().toUpperCase(),
-    })
-    window.location.hash = '#/session'
+    setVisitingId(entry.id)
   }
 
   const submit = (e: FormEvent) => {
@@ -508,8 +616,11 @@ function SSHPage({
   const removeEntry = (id: string) => {
     closeSocket(id)
     setConnectingId((cur) => (cur === id ? null : cur))
+    setVisitingId((cur) => (cur === id ? null : cur))
     onChange((prev) => prev.filter((x) => x.id !== id))
   }
+
+  const visiting = entries.find((x) => x.id === visitingId) ?? null
 
   const total = entries.length
   const online = entries.filter((x) => x.online).length
@@ -648,7 +759,9 @@ function SSHPage({
         </div>
       )}
 
-      {entries.length === 0 && !formOpen ? (
+      {visiting ? (
+        <ActiveSession entry={visiting} onBack={() => setVisitingId(null)} />
+      ) : entries.length === 0 && !formOpen ? (
         <div className="card">
           <h2>No connections yet</h2>
           <p>Press Connect to add your first one.</p>
@@ -858,8 +971,7 @@ export default function App() {
 
   // Browser tab title follows the active page.
   useEffect(() => {
-    const label =
-      page === 'session' ? 'Session' : NAV.find((p) => p.id === page)?.label
+    const label = NAV.find((p) => p.id === page)?.label
     document.title = label && label !== 'Home' ? `KS SSH — ${label}` : 'KS SSH'
   }, [page])
 
@@ -1066,7 +1178,6 @@ export default function App() {
           {page === 'home' && <HomePage />}
           {page === 'ssh' && <SSHPage entries={entries} onChange={setEntries} />}
           {page === 'installation' && <InstallationPage />}
-          {page === 'session' && <SessionPage />}
           {page === 'settings' && (
             <SettingsPage settings={settings} onChange={patchSettings} />
           )}

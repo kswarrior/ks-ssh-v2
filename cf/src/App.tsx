@@ -971,8 +971,7 @@ export default function App() {
 
   // Browser tab title follows the active page.
   useEffect(() => {
-    const label =
-      page === 'session' ? 'Session' : NAV.find((p) => p.id === page)?.label
+    const label = NAV.find((p) => p.id === page)?.label
     document.title = label && label !== 'Home' ? `KS SSH — ${label}` : 'KS SSH'
   }, [page])
 
@@ -1179,7 +1178,6 @@ export default function App() {
           {page === 'home' && <HomePage />}
           {page === 'ssh' && <SSHPage entries={entries} onChange={setEntries} />}
           {page === 'installation' && <InstallationPage />}
-          {page === 'session' && <SessionPage />}
           {page === 'settings' && (
             <SettingsPage settings={settings} onChange={patchSettings} />
           )}
