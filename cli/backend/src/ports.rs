@@ -92,9 +92,10 @@ fn inode_to_process() -> HashMap<u64, (u32, String)> {
         };
         // Process name: /proc/<pid>/comm, fallback to argv[0].
         let pname = std::fs::read_to_string(entry.path().join("comm"))
+            .ok()
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty())
-            .unwrap_or_else(|_| {
+            .unwrap_or_else(|| {
                 std::fs::read(entry.path().join("cmdline"))
                     .ok()
                     .and_then(|b| {

@@ -414,7 +414,7 @@ export default function FilesPage() {
         </div>
       </div>
 
-      <div className="card files-card">
+      <div className="files-body">
         <div className="files-pathrow">
           <code className="files-path" title={data?.path ?? 'HOME of host'}>
             {data?.path ?? '~'}
