@@ -106,15 +106,19 @@ export function extractKeyFromText(text: string): string | null {
 async function deriveAesKey(masterB64: string): Promise<CryptoKey> {
   const raw = b64urlDecode(masterB64)
   if (raw.length !== 32) throw new Error('bad e2e key length')
-  const hkdfKey = await crypto.subtle.importKey('raw', raw as BufferSource, 'HKDF', false, [
-    'deriveKey',
-  ])
+  const hkdfKey = await crypto.subtle.importKey(
+    'raw',
+    raw.buffer as ArrayBuffer,
+    'HKDF',
+    false,
+    ['deriveKey'],
+  )
   return crypto.subtle.deriveKey(
     {
       name: 'HKDF',
       hash: 'SHA-256',
-      salt: new Uint8Array(32),
-      info: utf8(HKDF_INFO),
+      salt: new Uint8Array(32).buffer as ArrayBuffer,
+      info: utf8(HKDF_INFO).buffer as ArrayBuffer,
     },
     hkdfKey,
     { name: 'AES-GCM', length: 256 },
@@ -156,9 +160,13 @@ export class E2eSession {
     const nonce = new Uint8Array(12)
     crypto.getRandomValues(nonce)
     const ctBuf = await crypto.subtle.encrypt(
-      { name: 'AES-GCM', iv: nonce as BufferSource, additionalData: utf8(this.token) as BufferSource },
+      {
+        name: 'AES-GCM',
+        iv: nonce.buffer as ArrayBuffer,
+        additionalData: utf8(this.token).buffer as ArrayBuffer,
+      },
       this.aes,
-      pt as BufferSource,
+      (typeof plaintext === 'string' ? pt.buffer : (pt as Uint8Array).buffer) as ArrayBuffer,
     )
     const env: EncEnvelope = {
       type: 'enc',
@@ -190,9 +198,13 @@ export class E2eSession {
     if (nonce.length !== 12) throw new Error('E2E decrypt failed')
     try {
       const ptBuf = await crypto.subtle.decrypt(
-        { name: 'AES-GCM', iv: nonce as BufferSource, additionalData: utf8(this.token) as BufferSource },
+        {
+          name: 'AES-GCM',
+          iv: nonce.buffer as ArrayBuffer,
+          additionalData: utf8(this.token).buffer as ArrayBuffer,
+        },
         this.aes,
-        ct as BufferSource,
+        ct.buffer as ArrayBuffer,
       )
       this.rxNext += 1
       return new Uint8Array(ptBuf)

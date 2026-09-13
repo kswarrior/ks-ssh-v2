@@ -3,7 +3,6 @@ import {
   E2E_ALG,
   E2eSession,
   extractKeyFromText,
-  isEncEnvelope,
   parseFragmentKey,
   type E2eStatus,
   type EncEnvelope,
@@ -474,6 +473,10 @@ function ActiveSession({
         e2e?: string
         role?: string
         token?: string
+        v?: number
+        seq?: number
+        nonce?: string
+        ct?: string
       } | null = null
       try {
         msg = JSON.parse(text) as typeof msg
@@ -482,7 +485,9 @@ function ActiveSession({
         return
       }
       // Sealed payloads: decrypt (seq-checked), then handle inner JSON.
-      if (msg && isEncEnvelope(msg)) {
+      // NOTE: check `type === 'enc'` manually (no type-guard narrowing) —
+      // `ct` bytes are never logged or stored.
+      if (msg?.type === 'enc') {
         const sess = e2eRef.current
         if (!sess) {
           push('got enc but no E2E key — paste the full link with #k=...')
@@ -490,7 +495,7 @@ function ActiveSession({
           return
         }
         try {
-          const pt = await sess.decryptNext(msg as EncEnvelope)
+          const pt = await sess.decryptNext(msg as unknown as EncEnvelope)
           const inner = JSON.parse(new TextDecoder().decode(pt)) as {
             type?: string
             data?: unknown

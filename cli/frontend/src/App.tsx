@@ -64,6 +64,8 @@ function hashToTab(hash: string): TabId | null {
 
 type PingTone = 'good' | 'mid' | 'bad' | 'off'
 
+type AuthStatus = { protected: boolean; authenticated: boolean; user?: string }
+
 function pingTone(ms: number | null): PingTone {
   if (ms == null) return 'off'
   if (ms < 150) return 'good'
@@ -125,6 +127,97 @@ export default function App() {
   })
   const [theme, setTheme] = useState<Theme>(initialTheme)
   const [pingMs, setPingMs] = useState<number | null>(null)
+  // Login gate: enabled only when the backend runs with --user/--pass.
+  // `null` = still checking; relay views (no /api/auth/*) fall back to open.
+  const [auth, setAuth] = useState<AuthStatus | null>(null)
+
+  // Ask the backend whether a login page is required.
+  useEffect(() => {
+    let alive = true
+    const load = async () => {
+      try {
+        const res = await fetch('/api/auth/status', {
+          cache: 'no-store',
+          credentials: 'same-origin',
+        })
+        if (!res.ok) {
+          // Relay view / old backend without auth endpoints — stay open.
+          if (alive) setAuth({ protected: false, authenticated: true })
+          return
+        }
+        const data = (await res.json()) as Partial<AuthStatus>
+        if (alive) {
+          setAuth({
+            protected: !!data.protected,
+            authenticated: data.protected ? !!data.authenticated : true,
+            user: typeof data.user === 'string' ? data.user : undefined,
+          })
+        }
+      } catch {
+        if (alive) setAuth({ protected: false, authenticated: true })
+      }
+    }
+    void load()
+    return () => {
+      alive = false
+    }
+  }, [])
+
+  // Re-validate every 30s while protected (cookie cleared elsewhere, expiry).
+  useEffect(() => {
+    if (!auth?.protected) return
+    const id = window.setInterval(async () => {
+      try {
+        const res = await fetch('/api/auth/status', {
+          cache: 'no-store',
+          credentials: 'same-origin',
+        })
+        if (!res.ok) return
+        const data = (await res.json()) as Partial<AuthStatus>
+        setAuth({ protected: true, authenticated: !!data.authenticated, user: data.user as string | undefined })
+      } catch {
+        // Keep the current session — the ping badge already reports reachability.
+      }
+    }, 30000)
+    return () => window.clearInterval(id)
+  }, [auth?.protected])
+
+  // Any 401 from /api/* or /v1/* (except the auth flow itself) means the
+  // session died — flip back to the login page without touching every page.
+  useEffect(() => {
+    const w = window as unknown as Record<string, unknown>
+    if (w.__ksAuthPatched) return
+    w.__ksAuthPatched = true
+    const orig = window.fetch.bind(window)
+    window.fetch = (async (...args: Parameters<typeof fetch>) => {
+      const res = await orig(...args)
+      try {
+        const first = args[0]
+        const url = typeof first === 'string' ? first : first instanceof Request ? first.url : ''
+        const isApi = url.includes('/api/') || url.includes('/v1/')
+        const isAuthFlow = url.includes('/api/auth/') || url.includes('/api/hello')
+        if (res.status === 401 && isApi && !isAuthFlow) {
+          orig('/api/auth/status', { cache: 'no-store', credentials: 'same-origin' } as RequestInit)
+            .then((r) => (r.ok ? r.json() : null))
+            .then((data) => {
+              if (data && (data as Partial<AuthStatus>).protected) {
+                window.dispatchEvent(new CustomEvent('ks-ssh:auth', { detail: data }))
+              }
+            })
+            .catch(() => {})
+        }
+      } catch {
+        // Never break the caller's fetch on watcher errors.
+      }
+      return res
+    }) as typeof fetch
+    const onAuth = (e: Event) => {
+      const data = (e as CustomEvent).detail as Partial<AuthStatus>
+      setAuth((prev) => (prev ? { ...prev, authenticated: !!data?.authenticated, user: data?.user as string | undefined } : prev))
+    }
+    window.addEventListener('ks-ssh:auth', onAuth)
+    return () => window.removeEventListener('ks-ssh:auth', onAuth)
+  }, [])
 
   // Ping the local backend (UI <-> server RTT). Green <150ms,
   // yellow <400ms, red above that or unreachable.
@@ -195,6 +288,31 @@ export default function App() {
     if (window.location.hash !== item.hash) {
       window.location.hash = item.hash
     }
+  }
+
+  const logout = async () => {
+    try {
+      await fetch('/api/auth/logout', { method: 'POST', credentials: 'same-origin' })
+    } catch {
+      // Cookie may already be gone — still drop back to the login page.
+    }
+    setAuth((prev) => (prev ? { ...prev, authenticated: false, user: undefined } : prev))
+  }
+
+  // Still checking /api/auth/status — don't flash the app or login yet.
+  if (auth === null) {
+    return (
+      <div className="app-shell">
+        <main className="content login-content" id="main">
+          <p className="lead">Loading…</p>
+        </main>
+      </div>
+    )
+  }
+
+  // Login gate: backend runs with --user/--pass and this browser has no session.
+  if (auth.protected && !auth.authenticated) {
+    return <LoginPage onLoggedIn={(user) => setAuth({ protected: true, authenticated: true, user })} />
   }
 
   return (
@@ -337,6 +455,29 @@ export default function App() {
               </svg>
             )}
           </button>
+          {auth.protected && (
+            <button
+              type="button"
+              className="icon-btn"
+              aria-label={auth.user ? `Log out (${auth.user})` : 'Log out'}
+              title={auth.user ? `Log out (${auth.user})` : 'Log out'}
+              onClick={() => void logout()}
+            >
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+                <path d="m16 17 5-5-5-5" />
+                <path d="M21 12H9" />
+              </svg>
+            </button>
+          )}
         </header>
 
         <main
