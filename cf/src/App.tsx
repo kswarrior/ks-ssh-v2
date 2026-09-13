@@ -90,7 +90,7 @@ export default function App() {
           <span aria-hidden="true" />
           <span aria-hidden="true" />
         </button>
-        <span className="brand">ks-ssh-v2</span>
+        <span className="brand">KS SSH</span>
         <span className="header-spacer" />
         <span
           className="status-dot"
