@@ -70,52 +70,6 @@ fn spawn_shell(
     Ok((pair.master, child))
 }
 
-/// Decode PTY bytes to text, holding an incomplete UTF-8 tail in `carry`
-/// for the next read. Invalid sequences become U+FFFD; only a truncated
-/// sequence at the very end is deferred.
-fn decode_with_carry(data: &[u8], carry: &mut Vec<u8>) -> String {
-    let mut out = String::with_capacity(data.len());
-    let mut start = 0;
-    loop {
-        match std::str::from_utf8(&data[start..]) {
-            Ok(s) => {
-                out.push_str(s);
-                carry.clear();
-                break;
-            }
-            Err(e) => {
-                let valid_up_to = e.valid_up_to();
-                if valid_up_to > 0 {
-                    // Valid prefix before the problem — emit it.
-                    // SAFETY: valid_up_to is a valid UTF-8 boundary by contract.
-                    let s =
-                        unsafe { std::str::from_utf8_unchecked(&data[start..start + valid_up_to]) };
-                    out.push_str(s);
-                    start += valid_up_to;
-                    continue;
-                }
-                match e.error_len() {
-                    Some(len) => {
-                        // Genuinely invalid bytes — replace, skip, continue.
-                        out.push('\u{FFFD}');
-                        start += len;
-                        if start >= data.len() {
-                            carry.clear();
-                            break;
-                        }
-                    }
-                    None => {
-                        // Truncated multi-byte rune at the end — defer.
-                        *carry = data[start..].to_vec();
-                        break;
-                    }
-                }
-            }
-        }
-    }
-    out
-}
-
 async fn handle_socket(socket: WebSocket) {
     let (mut ws_tx, mut ws_rx) = socket.split();
 
@@ -134,11 +88,12 @@ async fn handle_socket(socket: WebSocket) {
     // closed must never leave an orphaned bash behind.
     let child = std::sync::Arc::new(std::sync::Mutex::new(Some(child)));
 
-    // PTY reader runs on a blocking thread, pushes decoded text through a
+    // PTY reader runs on a blocking thread, pushes raw bytes through a
     // bounded channel. `blocking_send` applies backpressure into the PTY
     // so `cat` on a huge file slows the reader instead of OOMing us.
-    // Decoding happens here with a carry-over tail so a multi-byte UTF-8
-    // rune split across two 8KB reads is never replaced with U+FFFD.
+    // Bytes go over the socket untouched (Binary frames) — the xterm.js
+    // frontend decodes UTF-8/ANSI itself, so split multi-byte runes and
+    // escape sequences always survive chunk boundaries.
     let mut reader = match master.try_clone_reader() {
         Ok(r) => r,
         Err(e) => {
@@ -150,28 +105,19 @@ async fn handle_socket(socket: WebSocket) {
             return;
         }
     };
-    let (out_tx, mut out_rx) = tokio::sync::mpsc::channel::<String>(64);
+    let (out_tx, mut out_rx) = tokio::sync::mpsc::channel::<Vec<u8>>(64);
     std::thread::spawn(move || {
         let mut buf = [0u8; 8192];
-        let mut carry: Vec<u8> = Vec::new();
         loop {
             match reader.read(&mut buf) {
                 Ok(0) => break,
                 Ok(n) => {
-                    let mut data = std::mem::take(&mut carry);
-                    data.extend_from_slice(&buf[..n]);
-                    let text = decode_with_carry(&data, &mut carry);
-                    if !text.is_empty() && out_tx.blocking_send(text).is_err() {
+                    if out_tx.blocking_send(buf[..n].to_vec()).is_err() {
                         break;
                     }
                 }
                 Err(_) => break,
             }
-        }
-        // Flush any leftover tail as lossy (shell is gone; don't lose bytes).
-        if !carry.is_empty() {
-            let tail = String::from_utf8_lossy(&carry).into_owned();
-            let _ = out_tx.blocking_send(tail);
         }
     });
 
