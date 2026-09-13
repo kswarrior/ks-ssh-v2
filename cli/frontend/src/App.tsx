@@ -315,7 +315,7 @@ export default function App() {
         </header>
 
         <main
-          className={`content${tab === 'terminal' ? ' content-term' : tab === 'files' ? ' content-files' : ''}`}
+          className={`content${tab === 'terminal' ? ' content-term' : tab === 'files' ? ' content-files' : tab === 'host' ? ' content-host' : ''}`}
           id="main"
           tabIndex={-1}
         >

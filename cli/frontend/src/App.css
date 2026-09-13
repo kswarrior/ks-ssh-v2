@@ -2839,11 +2839,24 @@ a.file-link {
   }
 }
 
-/* ---------- Host: full machine overview ---------- */
+/* ---------- Host: full machine overview (flush top like Files) ---------- */
+
+.content-host {
+  padding-top: 8px;
+}
+
+.content-host .tab-panel {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
 
 .host-page {
   max-width: none;
   flex: 1;
+  padding-top: 0;
+  gap: 8px;
 }
 
 .host-live {
