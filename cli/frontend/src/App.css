@@ -1796,6 +1796,63 @@ a.file-link {
   padding-top: 0;
 }
 
+/* ---------- Create dialog ---------- */
+
+.create-window {
+  height: auto;
+  max-width: 480px;
+}
+
+.create-tabs {
+  display: flex;
+  gap: 6px;
+  padding: 4px;
+  border: 1px solid var(--glass-border);
+  border-radius: 8px;
+  background: var(--field-bg);
+}
+
+.create-tab {
+  flex: 1 1 auto;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  min-height: 44px;
+  padding: 8px 12px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+
+.create-tab:hover {
+  background: var(--hover-bg);
+  color: var(--text-h);
+}
+
+.create-tab.active {
+  background: var(--accent-soft);
+  border-color: rgba(139, 124, 255, 0.35);
+  color: var(--accent-strong);
+  font-weight: 700;
+}
+
+.create-field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-h);
+}
+
+.create-field .file-rename-input {
+  min-height: 48px;
+  font-size: 15px;
+}
+
 @media (max-width: 560px) {
   .files-actions {
     width: 100%;

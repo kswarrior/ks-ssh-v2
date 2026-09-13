@@ -70,6 +70,12 @@ export default function FilesPage() {
   const [editorSaving, setEditorSaving] = useState(false)
   const [confirmDiscard, setConfirmDiscard] = useState(false)
   const editorDirty = editorText !== editorSaved
+  // Create dialog state.
+  const [creating, setCreating] = useState<null | 'file' | 'folder'>(null)
+  const [createName, setCreateName] = useState('')
+  const [createBusy, setCreateBusy] = useState(false)
+  const [createError, setCreateError] = useState<string | null>(null)
+  const createInputRef = useRef<HTMLInputElement | null>(null)
 
   const load = useCallback(async (path?: string) => {
     setLoading(true)
@@ -139,6 +145,20 @@ export default function FilesPage() {
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
   })
+
+  // Focus the create input + Escape closes the create dialog.
+  useEffect(() => {
+    if (!creating) return
+    const t = setTimeout(() => createInputRef.current?.select(), 30)
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && !createBusy) setCreating(null)
+    }
+    document.addEventListener('keydown', onKey)
+    return () => {
+      clearTimeout(t)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [creating, createBusy])
 
   const visible = (data?.entries ?? []).filter(
     (e) => showHidden || !e.name.startsWith('.'),
@@ -281,11 +301,87 @@ export default function FilesPage() {
     }
   }
 
+  const openCreate = () => {
+    setCreateName('')
+    setCreateError(null)
+    setCreating('file')
+  }
+
+  const createNameValid = (() => {
+    const n = createName.trim()
+    if (!n || n === '.' || n === '..') return false
+    if (n.includes('/') || n.includes('\\')) return false
+    return true
+  })()
+
+  const submitCreate = async () => {
+    const name = createName.trim()
+    if (!creating || !data || !createNameValid) return
+    if (
+      (data.entries ?? []).some(
+        (x) => x.name.toLowerCase() === name.toLowerCase(),
+      )
+    ) {
+      setCreateError(`"${name}" already exists here.`)
+      return
+    }
+    const target = `${data.path}/${name}`
+    setCreateBusy(true)
+    setCreateError(null)
+    try {
+      if (creating === 'folder') {
+        const res = await fetch('/api/files/mkdir', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ path: target }),
+        })
+        if (!res.ok) {
+          const text = await res.text().catch(() => '')
+          throw new Error(text || `cannot create folder (${res.status})`)
+        }
+        setCreating(null)
+        await load(data.path)
+      } else {
+        const res = await fetch('/api/files/content', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ path: target, content: '' }),
+        })
+        if (!res.ok) {
+          const text = await res.text().catch(() => '')
+          throw new Error(text || `cannot create file (${res.status})`)
+        }
+        setCreating(null)
+        await load(data.path)
+        await openEditor({
+          name,
+          path: target,
+          is_dir: false,
+          size: 0,
+          modified: null,
+        })
+      }
+    } catch (err) {
+      setCreateError(err instanceof Error ? err.message : 'Create failed.')
+    } finally {
+      setCreateBusy(false)
+    }
+  }
+
   return (
     <section className="page files-page" aria-labelledby="page-title-files">
       <div className="page-head">
         <h1 id="page-title-files">Files</h1>
         <div className="row-actions files-actions">
+          <button
+            type="button"
+            className="btn btn-sm btn-primary"
+            onClick={openCreate}
+            disabled={loading || busy || !!error || !data}
+            title="Create a file or folder here"
+          >
+            Create
+          </button>
           <button
             type="button"
             className="btn btn-sm"
@@ -729,6 +825,116 @@ export default function FilesPage() {
                 </div>
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {creating && (
+        <div
+          className="editor-overlay"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Create file or folder"
+          onClick={() => {
+            if (!createBusy) setCreating(null)
+          }}
+        >
+          <div
+            className="editor-window create-window"
+            onClick={(ev) => ev.stopPropagation()}
+          >
+            <div className="editor-head">
+              <div className="editor-title">
+                <strong>Create in this folder</strong>
+                <code title={data?.path}>{data?.path}</code>
+              </div>
+              <button
+                type="button"
+                className="icon-btn editor-close"
+                aria-label="Close create dialog"
+                title="Close"
+                disabled={createBusy}
+                onClick={() => setCreating(null)}
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="create-tabs" role="tablist" aria-label="What to create">
+              {(['file', 'folder'] as const).map((t) => (
+                <button
+                  key={t}
+                  type="button"
+                  role="tab"
+                  aria-selected={creating === t}
+                  className={creating === t ? 'create-tab active' : 'create-tab'}
+                  disabled={createBusy}
+                  onClick={() => {
+                    setCreating(t)
+                    setCreateError(null)
+                    setTimeout(() => createInputRef.current?.select(), 30)
+                  }}
+                >
+                  {t === 'file' ? 'File' : 'Folder'}
+                </button>
+              ))}
+            </div>
+
+            <form
+              onSubmit={(ev) => {
+                ev.preventDefault()
+                void submitCreate()
+              }}
+            >
+              <label className="create-field">
+                {creating === 'file' ? 'File name' : 'Folder name'}
+                <input
+                  ref={createInputRef}
+                  className="file-rename-input"
+                  type="text"
+                  value={createName}
+                  onChange={(ev) => {
+                    setCreateName(ev.target.value)
+                    setCreateError(null)
+                  }}
+                  placeholder={creating === 'file' ? 'notes.txt' : 'new-folder'}
+                  maxLength={255}
+                  disabled={createBusy}
+                  autoComplete="off"
+                  autoCapitalize="off"
+                  spellCheck={false}
+                />
+              </label>
+            </form>
+
+            {createError && (
+              <div className="banner-error" role="alert">
+                <p>{createError}</p>
+              </div>
+            )}
+
+            <div className="row-actions editor-actions">
+              <button
+                type="button"
+                className="btn btn-sm"
+                disabled={createBusy}
+                onClick={() => setCreating(null)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn btn-sm btn-primary"
+                disabled={!createNameValid || createBusy}
+                onClick={() => void submitCreate()}
+              >
+                {createBusy
+                  ? 'Creating…'
+                  : creating === 'file'
+                    ? 'Create file'
+                    : 'Create folder'}
+              </button>
+            </div>
           </div>
         </div>
       )}
