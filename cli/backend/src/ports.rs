@@ -381,11 +381,7 @@ pub async fn api_kill_port(Json(req): Json<KillRequest>) -> Response {
             .into_response();
     }
     if req.pid == std::process::id() {
-        return (
-            StatusCode::FORBIDDEN,
-            "refusing to kill ks-ssh itself",
-        )
-            .into_response();
+        return (StatusCode::FORBIDDEN, "refusing to kill ks-ssh itself").into_response();
     }
     if !pid_alive(req.pid) {
         return (

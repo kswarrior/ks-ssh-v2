@@ -299,7 +299,19 @@ fn is_pseudo(fstype: &str, mount: &str) -> bool {
     }
     matches!(
         fstype,
-        "devpts" | "sysfs" | "proc" | "cgroup" | "cgroup2" | "securityfs" | "pstore" | "bpf" | "tracefs" | "debugfs" | "fusectl" | "configfs" | "efivarfs"
+        "devpts"
+            | "sysfs"
+            | "proc"
+            | "cgroup"
+            | "cgroup2"
+            | "securityfs"
+            | "pstore"
+            | "bpf"
+            | "tracefs"
+            | "debugfs"
+            | "fusectl"
+            | "configfs"
+            | "efivarfs"
     ) || mount.starts_with("/proc")
         || mount.starts_with("/sys")
         || mount.starts_with("/dev")

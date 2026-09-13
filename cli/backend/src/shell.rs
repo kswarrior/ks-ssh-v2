@@ -194,11 +194,7 @@ fn spawn_session(id: String) -> anyhow::Result<Arc<Session>> {
                     if let Ok(mut ring) = reader_session.ring.lock() {
                         push_ring(&mut ring, bytes);
                     }
-                    let tx = reader_session
-                        .sub
-                        .lock()
-                        .ok()
-                        .and_then(|g| g.clone());
+                    let tx = reader_session.sub.lock().ok().and_then(|g| g.clone());
                     if let Some(tx) = tx {
                         // Detached (or taken over) — ring keeps the bytes.
                         let _ = tx.blocking_send(Out::Data(bytes.to_vec()));
@@ -215,23 +211,25 @@ fn spawn_session(id: String) -> anyhow::Result<Arc<Session>> {
 
     // Watch child exit (polled backup for EOF, which usually wins).
     let watch_session = session.clone();
-    std::thread::spawn(move || loop {
-        let exited = watch_session
-            .child
-            .lock()
-            .map(|mut guard| match guard.as_mut() {
-                Some(c) => matches!(c.try_wait(), Ok(Some(_))),
-                None => true,
-            })
-            .unwrap_or(true);
-        if exited {
-            watch_session.dead.store(true, Ordering::SeqCst);
-            if let Some(tx) = watch_session.sub.lock().ok().and_then(|g| g.clone()) {
-                let _ = tx.try_send(Out::Eof);
+    std::thread::spawn(move || {
+        loop {
+            let exited = watch_session
+                .child
+                .lock()
+                .map(|mut guard| match guard.as_mut() {
+                    Some(c) => matches!(c.try_wait(), Ok(Some(_))),
+                    None => true,
+                })
+                .unwrap_or(true);
+            if exited {
+                watch_session.dead.store(true, Ordering::SeqCst);
+                if let Some(tx) = watch_session.sub.lock().ok().and_then(|g| g.clone()) {
+                    let _ = tx.try_send(Out::Eof);
+                }
+                break;
             }
-            break;
+            std::thread::sleep(Duration::from_millis(200));
         }
-        std::thread::sleep(Duration::from_millis(200));
     });
 
     Ok(session)
@@ -285,7 +283,12 @@ async fn get_or_create_session(want: Option<String>) -> Arc<Session> {
         let mut cands: Vec<(Instant, bool, Arc<Session>)> = map
             .values()
             .map(|s| {
-                let t = s.last_active.lock().ok().map(|t| *t).unwrap_or(Instant::now());
+                let t = s
+                    .last_active
+                    .lock()
+                    .ok()
+                    .map(|t| *t)
+                    .unwrap_or(Instant::now());
                 let detached = s.sub.lock().map(|g| g.is_none()).unwrap_or(true);
                 (t, detached, s.clone())
             })
@@ -334,8 +337,7 @@ pub fn spawn_reaper() {
                 let ids: Vec<String> = map
                     .iter()
                     .filter(|(_, s)| {
-                        let detached =
-                            s.sub.lock().map(|g| g.is_none()).unwrap_or(true);
+                        let detached = s.sub.lock().map(|g| g.is_none()).unwrap_or(true);
                         let idle = s
                             .last_active
                             .lock()
@@ -378,11 +380,7 @@ async fn handle_socket(socket: WebSocket, req_id: Option<String>) {
 
     // Tell the tab which session it holds (new tabs learn their id here).
     let ready = serde_json::json!({"type": "ready", "id": session.id}).to_string();
-    if ws_tx
-        .send(Message::Text(ready.into()))
-        .await
-        .is_err()
-    {
+    if ws_tx.send(Message::Text(ready.into())).await.is_err() {
         release(&session, my_epoch);
         return;
     }
@@ -392,12 +390,7 @@ async fn handle_socket(socket: WebSocket, req_id: Option<String>) {
         .lock()
         .map(|r| r.iter().copied().collect())
         .unwrap_or_default();
-    if !backlog.is_empty()
-        && ws_tx
-            .send(Message::Binary(backlog.into()))
-            .await
-            .is_err()
-    {
+    if !backlog.is_empty() && ws_tx.send(Message::Binary(backlog.into())).await.is_err() {
         release(&session, my_epoch);
         return;
     }
