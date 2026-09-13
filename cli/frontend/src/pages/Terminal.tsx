@@ -46,6 +46,13 @@ function emulateEdits(s: string): string {
   return s.replace(/\x07/g, '')
 }
 
+/** True when the raw chunk moves the cursor back to the current line start
+    (bash reprinting `user@host` after a resize, progress-bar tick, ...). */
+function isLineRedraw(raw: string): boolean {
+  // eslint-disable-next-line no-control-regex
+  return /\r(?!\n)/.test(raw) || raw.includes('\x1b[K') || raw.includes('\x1b[G')
+}
+
 /** Apply a PTY output chunk to the visible buffer. Handles clear-screen. */
 function applyChunk(prev: string, chunk: string): string {
   const clearSeqs = ['\x1b[2J', '\x1b[3J', '\x1bc', '\x1b[H\x1b[2J']
@@ -60,7 +67,15 @@ function applyChunk(prev: string, chunk: string): string {
     const after = chunk.slice(lastClear)
     return emulateEdits(stripAnsi(after)).slice(-20000)
   }
-  const out = prev + emulateEdits(stripAnsi(chunk))
+  let base = prev
+  if (base && !base.endsWith('\n') && isLineRedraw(chunk)) {
+    // We are sitting mid-line (usually on the `user@host` prompt) and the
+    // shell is redrawing that same line — replace it instead of appending
+    // a second copy. Without this every resize multiplies the prompt.
+    const nl = base.lastIndexOf('\n')
+    base = nl >= 0 ? base.slice(0, nl + 1) : ''
+  }
+  const out = base + emulateEdits(stripAnsi(chunk))
   if (out.length > 20000) return out.slice(-20000)
   return out
 }
@@ -150,6 +165,9 @@ function ShellSession({
   // True once the backend announced exit (JSON + close); distinguishes a
   // real exit from shell output that merely looks like the sentinel.
   const gotExitRef = useRef(false)
+  // Last size sent to the shell — resizes that change nothing are skipped.
+  const sizeRef = useRef<{ cols: number; rows: number } | null>(null)
+  const resizeTimerRef = useRef<number | undefined>(undefined)
 
   const focusKeys = () => {
     setTimeout(() => keyRef.current?.focus({ preventScroll: true }), 30)
@@ -187,6 +205,11 @@ function ShellSession({
     // than the visible box (hidden bottom lines otherwise).
     const cols = Math.max(20, Math.min(500, Math.floor((w - 28) / 8.4)))
     const rows = Math.max(5, Math.min(300, Math.floor((h - 28) / 21.7)))
+    // Skip when nothing changed — every resize is a SIGWINCH and bash
+    // reprints the prompt on each one, so redundant resizes only churn.
+    const last = sizeRef.current
+    if (last && last.cols === cols && last.rows === rows) return
+    sizeRef.current = { cols, rows }
     try {
       ws.send(JSON.stringify({ type: 'resize', cols, rows }))
     } catch {
@@ -194,8 +217,19 @@ function ShellSession({
     }
   }, [])
 
+  // Debounced resize for drag/zoom storms — the immediate send above is
+  // still used once on connect.
+  const scheduleResize = useCallback(() => {
+    if (resizeTimerRef.current !== undefined) return
+    resizeTimerRef.current = window.setTimeout(() => {
+      resizeTimerRef.current = undefined
+      sendResize()
+    }, 150)
+  }, [sendResize])
+
   useEffect(() => {
     gotExitRef.current = false
+    sizeRef.current = null
     const scheme = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
     const ws = new WebSocket(`${scheme}//${window.location.host}/v1/shell`)
     wsRef.current = ws
@@ -206,7 +240,9 @@ function ShellSession({
       // Older browsers — messageToText still handles ArrayBuffer.
     }
     setStatus('connecting')
-    setOutput((prev) => (gen === 0 ? 'connecting…\n' : prev + '\n[reconnecting…]\n'))
+    // No "connecting…" line in the terminal body — the tab-bar dot already
+    // shows connecting (yellow) / online (green) / offline (red).
+    setOutput('')
 
     const flushOut = () => {
       outTimerRef.current = undefined
@@ -266,12 +302,12 @@ function ShellSession({
       })
     }
 
-    const onResize = () => sendResize()
+    const onResize = () => scheduleResize()
     window.addEventListener('resize', onResize)
     // Watch the terminal box itself (split views, mobile bars, zoom).
     const ro =
       typeof ResizeObserver !== 'undefined' && bodyRef.current
-        ? new ResizeObserver(() => sendResize())
+        ? new ResizeObserver(() => scheduleResize())
         : null
     if (ro && bodyRef.current) ro.observe(bodyRef.current)
     if (active) focusKeys()
@@ -279,6 +315,10 @@ function ShellSession({
     return () => {
       window.removeEventListener('resize', onResize)
       ro?.disconnect()
+      if (resizeTimerRef.current !== undefined) {
+        window.clearTimeout(resizeTimerRef.current)
+        resizeTimerRef.current = undefined
+      }
       if (outTimerRef.current !== undefined) {
         window.clearTimeout(outTimerRef.current)
         outTimerRef.current = undefined

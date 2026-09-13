@@ -600,7 +600,7 @@ export default function FilesPage() {
         </div>
         <p className="files-sub">
           {loading
-            ? 'Loading HOME of host…'
+            ? 'Loading…'
             : error
               ? 'Could not list host files.'
               : `${dirCount} folders · ${fileCount} files`}
@@ -630,7 +630,7 @@ export default function FilesPage() {
               </button>
             </div>
           </div>
-        ) : loading && !data ? (
+        ) : loading ? (
           <ul
             className="file-grid"
             aria-label="Loading host files"
