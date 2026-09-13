@@ -289,11 +289,13 @@ fn build_entries() -> Vec<PortEntry> {
             } else {
                 (None, None)
             };
+            // UDP has no connection state in /proc (always 07) — show OPEN.
+            let state = if proto.starts_with("UDP") { "OPEN".to_string() } else { r.state };
             PortEntry {
                 proto,
                 addr: r.addr,
                 port: r.port,
-                state: r.state,
+                state,
                 pid,
                 process,
             }
