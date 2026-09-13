@@ -491,17 +491,17 @@ export default function FilesPage() {
   const [confirmDiscard, setConfirmDiscard] = useState(false)
   const editorDirty = editorText !== editorSaved
   const editLang = detectLang(editing?.name ?? '')
-  const _editCat: FileCat = fileCat(editing?.name ?? '', false)
-  const _highlighted = useMemo(
+  const editCat: FileCat = fileCat(editing?.name ?? '', false)
+  const highlighted = useMemo(
     () => highlightCode(editorText, editLang.id),
     [editorText, editLang.id],
   )
-  const _gutterText = useMemo(() => {
+  const gutterText = useMemo(() => {
     const n = editorText.split('\n').length
     return Array.from({ length: n }, (_, i) => String(i + 1)).join('\n')
   }, [editorText])
 
-  const _syncCodeScroll = () => {
+  const syncCodeScroll = () => {
     const ta = codeRef.current
     if (!ta) return
     if (hlRef.current) {
@@ -1196,7 +1196,7 @@ export default function FilesPage() {
               const isMenu = menuOpen === e.path
               const isRenaming = renaming === e.path
               const isConfirm = confirmDelete === e.path
-              const _cat: FileCat = e.is_dir ? 'dir' : fileCat(e.name, false)
+              const cat: FileCat = e.is_dir ? 'dir' : fileCat(e.name, false)
               return (
                 <li
                   key={e.path}
