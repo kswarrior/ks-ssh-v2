@@ -1,9 +1,69 @@
-export default function SettingsPage() {
+export default function SettingsPage({ authProtected }: { authProtected: boolean }) {
+  const openUsers = () => {
+    window.location.hash = '#/users'
+  }
+
   return (
     <section className="page settings-page" aria-labelledby="page-title-settings">
       <h1 id="page-title-settings" className="sr-only">
         Settings
       </h1>
+      {authProtected ? (
+        <div className="card">
+          <div className="ssh-head">
+            <span className="ssh-icon" aria-hidden="true">
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
+                <circle cx="9" cy="7" r="4" />
+                <path d="M22 21v-2a4 4 0 0 0-3-3.87" />
+                <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+              </svg>
+            </span>
+            <div className="ssh-name">Users</div>
+          </div>
+          <p className="lead">
+            Manage who can log in to this server. Create extra accounts;
+            editing or deleting needs the main password.
+          </p>
+          <div className="row-actions">
+            <button type="button" className="btn btn-primary" onClick={openUsers}>
+              Open users
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className="card">
+          <div className="ssh-head">
+            <span className="ssh-icon" aria-hidden="true">
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
+                <circle cx="9" cy="7" r="4" />
+                <path d="M22 21v-2a4 4 0 0 0-3-3.87" />
+                <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+              </svg>
+            </span>
+            <div className="ssh-name">Users</div>
+          </div>
+          <p className="lead">
+            User accounts need the login gate. Restart the server with{' '}
+            <code>--user</code> and <code>--pass</code> to manage users here.
+          </p>
+        </div>
+      )}
       <div className="card settings-soon" role="status">
         <span className="settings-soon-icon" aria-hidden="true">
           <svg
@@ -19,7 +79,7 @@ export default function SettingsPage() {
           </svg>
         </span>
         <h2>Settings</h2>
-        <p>Coming soon.</p>
+        <p>More options coming soon.</p>
       </div>
     </section>
   )

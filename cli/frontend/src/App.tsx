@@ -4,9 +4,10 @@ import FilesPage from './pages/Files'
 import PortsPage from './pages/Ports'
 import HostPage from './pages/Host'
 import SettingsPage from './pages/Settings'
+import UsersPage from './pages/Users'
 import LoginPage from './pages/Login'
 
-type TabId = 'terminal' | 'files' | 'ports' | 'host' | 'settings'
+type TabId = 'terminal' | 'files' | 'ports' | 'host' | 'settings' | 'users'
 
 type TabItem = { id: TabId; label: string; hash: string }
 
@@ -16,10 +17,11 @@ const TABS: TabItem[] = [
   { id: 'ports', label: 'Ports', hash: '#/ports' },
 ]
 
-// Host and Settings are not tabs — they open only from header icon buttons.
+// Host, Settings and Users are not tabs — they open from buttons/links.
 const HOST_ITEM: TabItem = { id: 'host', label: 'Host', hash: '#/host' }
 const SETTINGS_ITEM: TabItem = { id: 'settings', label: 'Settings', hash: '#/settings' }
-const EXTRA_ITEMS: TabItem[] = [HOST_ITEM, SETTINGS_ITEM]
+const USERS_ITEM: TabItem = { id: 'users', label: 'Users', hash: '#/users' }
+const EXTRA_ITEMS: TabItem[] = [HOST_ITEM, SETTINGS_ITEM, USERS_ITEM]
 
 type Theme = 'light' | 'dark'
 
@@ -64,7 +66,7 @@ function hashToTab(hash: string): TabId | null {
 
 type PingTone = 'good' | 'mid' | 'bad' | 'off'
 
-type AuthStatus = { protected: boolean; authenticated: boolean; user?: string }
+type AuthStatus = { protected: boolean; authenticated: boolean; user?: string; is_owner?: boolean }
 
 function pingTone(ms: number | null): PingTone {
   if (ms == null) return 'off'
@@ -151,6 +153,7 @@ export default function App() {
             protected: !!data.protected,
             authenticated: data.protected ? !!data.authenticated : true,
             user: typeof data.user === 'string' ? data.user : undefined,
+            is_owner: data.is_owner,
           })
         }
       } catch {
@@ -174,7 +177,7 @@ export default function App() {
         })
         if (!res.ok) return
         const data = (await res.json()) as Partial<AuthStatus>
-        setAuth({ protected: true, authenticated: !!data.authenticated, user: data.user as string | undefined })
+        setAuth({ protected: true, authenticated: !!data.authenticated, user: data.user as string | undefined, is_owner: data.is_owner })
       } catch {
         // Keep the current session — the ping badge already reports reachability.
       }
@@ -213,7 +216,7 @@ export default function App() {
     }) as typeof fetch
     const onAuth = (e: Event) => {
       const data = (e as CustomEvent).detail as Partial<AuthStatus>
-      setAuth((prev) => (prev ? { ...prev, authenticated: !!data?.authenticated, user: data?.user as string | undefined } : prev))
+      setAuth((prev) => (prev ? { ...prev, authenticated: !!data?.authenticated, user: data?.user as string | undefined, is_owner: data?.is_owner } : prev))
     }
     window.addEventListener('ks-ssh:auth', onAuth)
     return () => window.removeEventListener('ks-ssh:auth', onAuth)
@@ -299,6 +302,29 @@ export default function App() {
     setAuth((prev) => (prev ? { ...prev, authenticated: false, user: undefined } : prev))
   }
 
+  // After a login, re-read the full session (user + role) from the backend.
+  const refreshAfterLogin = async (user: string) => {
+    try {
+      const res = await fetch('/api/auth/status', {
+        cache: 'no-store',
+        credentials: 'same-origin',
+      })
+      if (res.ok) {
+        const data = (await res.json()) as Partial<AuthStatus>
+        setAuth({
+          protected: true,
+          authenticated: !!data.authenticated,
+          user: typeof data.user === 'string' ? data.user : user,
+          is_owner: data.is_owner,
+        })
+        return
+      }
+    } catch {
+      // Fall through to the optimistic state below.
+    }
+    setAuth({ protected: true, authenticated: true, user })
+  }
+
   // Still checking /api/auth/status — don't flash the app or login yet.
   if (auth === null) {
     return (
@@ -312,7 +338,7 @@ export default function App() {
 
   // Login gate: backend runs with --user/--pass and this browser has no session.
   if (auth.protected && !auth.authenticated) {
-    return <LoginPage onLoggedIn={(user) => setAuth({ protected: true, authenticated: true, user })} />
+    return <LoginPage onLoggedIn={(user) => void refreshAfterLogin(user)} />
   }
 
   return (
@@ -481,7 +507,7 @@ export default function App() {
         </header>
 
         <main
-          className={`content${tab === 'terminal' ? ' content-term' : tab === 'files' ? ' content-files' : tab === 'host' ? ' content-host' : tab === 'settings' ? ' content-settings' : ''}`}
+          className={`content${tab === 'terminal' ? ' content-term' : tab === 'files' ? ' content-files' : tab === 'host' ? ' content-host' : tab === 'settings' || tab === 'users' ? ' content-settings' : ''}`}
           id="main"
           tabIndex={-1}
         >
@@ -498,7 +524,10 @@ export default function App() {
             <HostPage />
           </div>
           <div hidden={tab !== 'settings'} className="tab-panel">
-            <SettingsPage />
+            <SettingsPage authProtected={auth.protected} />
+          </div>
+          <div hidden={tab !== 'users'} className="tab-panel">
+            <UsersPage />
           </div>
         </main>
 
