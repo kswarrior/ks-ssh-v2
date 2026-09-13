@@ -39,12 +39,12 @@ function loadTerms(): TermSession[] {
   }
 }
 
-function loadActiveId(fallback: string | null): string | null {
+function loadActiveId(): string | null {
   try {
     const raw = localStorage.getItem(TERMS_ACTIVE_KEY)
-    return typeof raw === 'string' && raw ? raw : fallback
+    return typeof raw === 'string' && raw ? raw : null
   } catch {
-    return fallback
+    return null
   }
 }
 
@@ -466,7 +466,7 @@ function ShellSession({
 let termCounter = 0
 function nextTerm(): TermSession {
   termCounter += 1
-  return { id: `term-${Date.now().toString(36)}-${termCounter}`, name: `terminal ${termCounter}` }
+  return { id: `term-${Date.now().toString(36)}-${termCounter}`, name: `terminal ${termCounter}`, sid: null }
 }
 
 export default function TerminalPage({
@@ -479,11 +479,30 @@ export default function TerminalPage({
   void _entries
   void _onChange
 
-  const [sessions, setSessions] = useState<TermSession[]>([])
-  const [activeId, setActiveId] = useState<string | null>(null)
+  const [sessions, setSessions] = useState<TermSession[]>(() => {
+    const stored = loadTerms()
+    // Keep the "terminal N" counter ahead of restored names.
+    for (const t of stored) {
+      const m = /^terminal (\d+)$/.exec(t.name)
+      if (m) termCounter = Math.max(termCounter, parseInt(m[1], 10))
+    }
+    return stored
+  })
+  const [activeId, setActiveId] = useState<string | null>(() => loadActiveId())
   const [statuses, setStatuses] = useState<Record<string, TermStatus>>({})
   // Pending close confirmation — the kill only happens after Confirm.
   const [confirmId, setConfirmId] = useState<string | null>(null)
+
+  // Persist tabs so a refresh or revisit reattaches to the same shells.
+  useEffect(() => {
+    try {
+      localStorage.setItem(TERMS_KEY, JSON.stringify(sessions))
+      if (activeId) localStorage.setItem(TERMS_ACTIVE_KEY, activeId)
+      else localStorage.removeItem(TERMS_ACTIVE_KEY)
+    } catch {
+      // Storage unavailable — tabs just won't survive a refresh.
+    }
+  }, [sessions, activeId])
 
   const addTerminal = () => {
     const t = nextTerm()
@@ -516,6 +535,13 @@ export default function TerminalPage({
   // Stable identity — child reports status without refiring every render.
   const handleStatus = useCallback((id: string, s: TermStatus) => {
     setStatuses((prev) => (prev[id] === s ? prev : { ...prev, [id]: s }))
+  }, [])
+
+  // Backend handed a tab its session id (or cleared it for a fresh shell).
+  const handleReady = useCallback((id: string, sid: string | null) => {
+    setSessions((prev) =>
+      prev.map((t) => (t.id === id && t.sid !== sid ? { ...t, sid } : t)),
+    )
   }, [])
 
   // First run: complete blank + centered button only.
@@ -656,7 +682,9 @@ export default function TerminalPage({
             <ShellSession
               id={t.id}
               active={t.id === active.id}
+              sid={t.sid}
               onStatus={handleStatus}
+              onReady={handleReady}
             />
           </div>
         ))}
