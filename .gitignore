@@ -2,9 +2,7 @@ node_modules/
 dist/
 target/
 data/
-ks-ssh
 *.db
 *.db-wal
 *.db-shm
 .env
-release/
