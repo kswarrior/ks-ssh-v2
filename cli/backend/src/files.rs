@@ -540,6 +540,14 @@ mod tests {
     }
 
     #[test]
+    fn save_stays_inside_home() {
+        assert!(resolve_inside_home(Some("/etc/hostname")).is_err());
+        let (home, p) =
+            resolve_inside_home(Some("ks-ssh-test-save.txt")).expect("relative joins home");
+        assert!(p.starts_with(&home));
+    }
+
+    #[test]
     fn rename_and_delete_roundtrip_inside_home() {
         let home = home_dir();
         let dir = home.join(format!(".ks-ssh-test-{}", std::process::id()));
