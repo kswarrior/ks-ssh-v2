@@ -1,12 +1,12 @@
 export default {
-  fetch(request) {
-    const url = new URL(request.url);
+  async fetch(request: Request): Promise<Response> {
+    const url = new URL(request.url)
 
-    if (url.pathname.startsWith("/api/")) {
-      return Response.json({
-        name: "Cloudflare",
-      });
+    if (url.pathname.startsWith('/api/')) {
+      return Response.json({ name: 'Cloudflare' })
     }
-		return new Response(null, { status: 404 });
+
+    // Non-API routes fall through to Static Assets (SPA fallback).
+    return new Response(null, { status: 404 })
   },
-} satisfies ExportedHandler<Env>;
+} satisfies ExportedHandler<Env>
