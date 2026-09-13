@@ -759,6 +759,7 @@ dependencies = [
  "clap",
  "fastrand",
  "futures-util",
+ "getrandom 0.4.3",
  "hkdf",
  "mime_guess",
  "portable-pty",
