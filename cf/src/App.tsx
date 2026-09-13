@@ -1149,6 +1149,33 @@ export default function App() {
               )
             })}
           </nav>
+          <div className="sidebar-spacer" aria-hidden="true" />
+          <div className="sidebar-status">
+            <div className="sidebar-status-row">
+              <span
+                className={`status-dot${backendOk === false ? ' off' : ''}`}
+                aria-hidden="true"
+              />
+              <span>
+                Backend{' '}
+                {backendOk === null
+                  ? '…'
+                  : backendOk
+                    ? 'online'
+                    : 'offline'}
+              </span>
+            </div>
+            <div className="sidebar-status-row">
+              <span className="sidebar-status-label">Connections</span>
+              <span className="sidebar-status-value">{entries.length}</span>
+            </div>
+            <div className="sidebar-status-row">
+              <span className="sidebar-status-label">Online</span>
+              <span className="sidebar-status-value">
+                {entries.filter((x) => x.online).length}
+              </span>
+            </div>
+          </div>
         </aside>
 
         <div className="app-main">

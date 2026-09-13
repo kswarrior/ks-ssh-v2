@@ -213,6 +213,43 @@
   gap: 6px;
 }
 
+.sidebar-spacer {
+  flex: 1;
+  min-height: 12px;
+}
+
+.sidebar-status {
+  border-top: 1px solid var(--glass-border);
+  padding: 12px 8px 2px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.sidebar-status-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text);
+}
+
+.sidebar-status-label {
+  flex: 1;
+}
+
+.sidebar-status-value {
+  font-weight: 700;
+  color: var(--text-h);
+}
+
+.status-dot.off {
+  background: var(--danger);
+  box-shadow:
+    0 0 12px rgba(255, 90, 120, 0.7),
+    0 0 4px rgba(255, 90, 120, 0.8);
+}
+
 .sidebar a {
   color: var(--text);
   text-decoration: none;
