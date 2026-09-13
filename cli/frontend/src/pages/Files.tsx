@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 type FileEntry = {
   name: string
@@ -58,6 +58,7 @@ function buildCrumbs(home: string, path: string): Crumb[] {
 
 type ContentKind = 'text' | 'binary' | 'too-large'
 
+type FileTypeFilter = 'all' | 'dirs' | 'files'
 type ContentResponse = {
   path: string
   name: string
