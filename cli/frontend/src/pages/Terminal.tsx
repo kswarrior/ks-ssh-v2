@@ -27,9 +27,18 @@ function applyChunk(prev: string, chunk: string): string {
   return out
 }
 
-function ShellSession({ name }: { name: string }) {
+type TermStatus = 'connecting' | 'online' | 'offline'
+
+function ShellSession({
+  name: _name,
+  onStatus,
+}: {
+  name: string
+  onStatus?: (s: TermStatus) => void
+}) {
+  void _name
   const [output, setOutput] = useState('')
-  const [status, setStatus] = useState<'connecting' | 'online' | 'offline'>('offline')
+  const [status, setStatus] = useState<TermStatus>('offline')
 
   const wsRef = useRef<WebSocket | null>(null)
   const bodyRef = useRef<HTMLDivElement | null>(null)
@@ -113,6 +122,10 @@ function ShellSession({ name }: { name: string }) {
     if (el) el.scrollTop = el.scrollHeight
   }, [output])
 
+  useEffect(() => {
+    onStatus?.(status)
+  }, [status, onStatus])
+
   const onKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter') {
       e.preventDefault()
@@ -155,21 +168,6 @@ function ShellSession({ name }: { name: string }) {
 
   return (
     <div className="term-window" onClick={focusKeys}>
-      <div className="term-titlebar">
-        <span className="term-dots" aria-hidden="true">
-          <i />
-          <i />
-          <i />
-        </span>
-        <span className="term-title">
-          {name} — {status}
-        </span>
-        <span
-          className={`term-status${status === 'online' ? ' on' : status === 'connecting' ? ' wait' : ''}`}
-          role="status"
-          title={status}
-        />
-      </div>
       <div className="term-body" ref={bodyRef} aria-live="polite">
         <pre className="term-output">{output}</pre>
         <span className="term-cursor" aria-hidden="true">
@@ -216,10 +214,12 @@ export default function TerminalPage({
 
   const [sessions, setSessions] = useState<TermSession[]>([])
   const [activeId, setActiveId] = useState<string | null>(null)
+  const [statuses, setStatuses] = useState<Record<string, TermStatus>>({})
 
   const addTerminal = () => {
     const t = nextTerm()
     setSessions((prev) => [...prev, t])
+    setStatuses((prev) => ({ ...prev, [t.id]: 'connecting' }))
     setActiveId(t.id)
   }
 
@@ -231,6 +231,15 @@ export default function TerminalPage({
       }
       return next
     })
+    setStatuses((prev) => {
+      const next = { ...prev }
+      delete next[id]
+      return next
+    })
+  }
+
+  const handleStatus = (id: string) => (s: TermStatus) => {
+    setStatuses((prev) => (prev[id] === s ? prev : { ...prev, [id]: s }))
   }
 
   // First run: complete blank + centered button only.
@@ -276,6 +285,7 @@ export default function TerminalPage({
       <div className="term-bar" role="tablist" aria-label="Terminals">
         {sessions.map((t) => {
           const isActive = t.id === active.id
+          const st = statuses[t.id] ?? 'connecting'
           return (
             <div
               key={t.id}
@@ -291,6 +301,10 @@ export default function TerminalPage({
                 }
               }}
             >
+              <span
+                className={`term-tab-dot${st === 'online' ? ' on' : st === 'connecting' ? ' wait' : ''}`}
+                aria-hidden="true"
+              />
               <span className="term-tab-name">{t.name}</span>
               <button
                 type="button"
@@ -320,7 +334,7 @@ export default function TerminalPage({
       <div className="term-opened">
         {sessions.map((t) => (
           <div key={t.id} hidden={t.id !== active.id}>
-            <ShellSession name={t.name} />
+            <ShellSession name={t.name} onStatus={handleStatus(t.id)} />
           </div>
         ))}
       </div>
