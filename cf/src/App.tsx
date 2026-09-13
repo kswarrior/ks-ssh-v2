@@ -13,13 +13,11 @@ const NAV: NavItem[] = [
 type Settings = {
   defaultUser: string
   defaultPort: number
-  confirmBeforeConnect: boolean
 }
 
 const DEFAULT_SETTINGS: Settings = {
   defaultUser: 'root',
   defaultPort: 22,
-  confirmBeforeConnect: true,
 }
 
 type Theme = 'light' | 'dark'
@@ -238,14 +236,6 @@ function SettingsPage({
               max={65535}
             />
           </label>
-          <label className="field checkbox-row">
-            <input
-              type="checkbox"
-              checked={settings.confirmBeforeConnect}
-              onChange={(e) => onChange({ confirmBeforeConnect: e.target.checked })}
-            />
-            Ask for confirmation before connecting
-          </label>
         </div>
       </div>
     </section>
@@ -351,50 +341,6 @@ export default function App() {
 
   const patchSettings = (patch: Partial<Settings>) =>
     setSettings((prev) => ({ ...prev, ...patch }))
-
-  const connect = (s: Server) => {
-    if (s.id === connectedId || s.id === connectingId) return
-    if (settings.confirmBeforeConnect) {
-      const current = servers.find((x) => x.id === connectedId)
-      const msg = current
-        ? `Disconnect from ${current.name} and connect to ${s.name} (${s.user}@${s.host})?`
-        : `Connect to ${s.name} (${s.user}@${s.host})?`
-      if (!window.confirm(msg)) return
-    }
-    if (connectTimer.current) clearTimeout(connectTimer.current)
-    setConnectingId(s.id)
-    connectTimer.current = setTimeout(() => {
-      setConnectedId(s.id)
-      setConnectingId(null)
-    }, 900)
-  }
-
-  const disconnect = () => {
-    if (connectTimer.current) clearTimeout(connectTimer.current)
-    setConnectingId(null)
-    setConnectedId(null)
-  }
-
-  const removeServer = (id: string) => {
-    if (id === connectedId || id === connectingId) {
-      if (connectTimer.current) clearTimeout(connectTimer.current)
-      setConnectedId((prev) => (prev === id ? null : prev))
-      setConnectingId((prev) => (prev === id ? null : prev))
-    }
-    setServers((prev) => prev.filter((s) => s.id !== id))
-  }
-
-  const addServer = (data: {
-    name: string
-    host: string
-    user: string
-    port: number
-  }) => {
-    const id = `srv-${Date.now().toString(36)}-${Math.floor(Math.random() * 10000)}`
-    setServers((prev) => [...prev, { id, ...data }])
-  }
-
-  const connectedServer = servers.find((s) => s.id === connectedId) ?? null
 
   return (
     <div className="app-shell">
@@ -528,10 +474,8 @@ export default function App() {
             <span
               className="status-dot"
               role="status"
-              aria-label={
-                connectedServer ? `Connected to ${connectedServer.name}` : 'Online'
-              }
-              title={connectedServer ? `Connected to ${connectedServer.name}` : 'Online'}
+              aria-label="Online"
+              title="Online"
             />
           </header>
 
@@ -542,28 +486,8 @@ export default function App() {
           id="main"
           tabIndex={-1}
         >
-          {page === 'home' && (
-            <HomePage
-              serverCount={servers.length}
-              connectedServer={connectedServer}
-              go={go}
-            />
-          )}
-          {page === 'servers' && (
-            <ServersPage
-              servers={servers}
-              connectedId={connectedId}
-              connectingId={connectingId}
-              busy={connectingId !== null}
-              defaultUser={settings.defaultUser}
-              defaultPort={settings.defaultPort}
-              onConnect={connect}
-              onDisconnect={disconnect}
-              onRemove={removeServer}
-              onAdd={addServer}
-            />
-          )}
-          {page === 'installation' && <InstallationPage go={go} />}
+          {page === 'home' && <HomePage go={go} />}
+          {page === 'installation' && <InstallationPage />}
           {page === 'settings' && (
             <SettingsPage settings={settings} onChange={patchSettings} />
           )}
