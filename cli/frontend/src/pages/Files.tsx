@@ -883,15 +883,13 @@ export default function FilesPage() {
 
       {editing && (
         <div
-          className="editor-overlay"
+          className="editor-overlay editor-full"
           role="dialog"
           aria-modal="true"
           aria-label={`Edit ${editing.name}`}
-          onClick={() => closeEditor()}
         >
           <div
-            className="editor-window"
-            onClick={(ev) => ev.stopPropagation()}
+            className="editor-window editor-page"
           >
             <div className="editor-head">
               <div className="editor-title">
