@@ -160,6 +160,8 @@ export default function App() {
             </span>
           </span>
 
+          <span className="header-spacer" />
+
           <nav className="header-tabs" aria-label="Primary">
             {TABS.map((item) => {
               const isActive = item.id === tab
@@ -180,7 +182,6 @@ export default function App() {
             })}
           </nav>
 
-          <span className="header-spacer" />
           <button
             type="button"
             className="icon-btn"
@@ -215,12 +216,6 @@ export default function App() {
               </svg>
             )}
           </button>
-          <span
-            className="status-dot"
-            role="status"
-            aria-label="Online"
-            title="Online"
-          />
         </header>
 
         <main

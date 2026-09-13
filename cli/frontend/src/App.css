@@ -80,18 +80,6 @@
   }
 }
 
-.status-dot {
-  width: 12px;
-  height: 12px;
-  flex-shrink: 0;
-  border-radius: 8px;
-  background: var(--success);
-  border: 1px solid rgba(255, 255, 255, 0.35);
-  box-shadow:
-    0 0 12px rgba(52, 211, 153, 0.8),
-    0 0 4px rgba(52, 211, 153, 0.9);
-}
-
 /* Round glass icon button (theme toggle) */
 .icon-btn {
   width: 42px;
@@ -127,13 +115,12 @@
   height: 20px;
 }
 
-/* ---------- Header tabs (desktop) ---------- */
+/* ---------- Header tabs (desktop, right side) ---------- */
 
 .header-tabs {
   display: flex;
   align-items: center;
   gap: 6px;
-  margin-left: 16px;
   padding: 4px;
   border: 1px solid var(--glass-border);
   border-radius: 8px;
