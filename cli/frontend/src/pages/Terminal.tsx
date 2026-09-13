@@ -187,10 +187,12 @@ function ShellSession({
       e.preventDefault()
       send('\x1b[D')
     } else if (e.ctrlKey && (e.key === 'c' || e.key === 'C')) {
-      // Let the browser copy when terminal text is selected.
+      // With selected text: native copy AND interrupt the process.
+      // Without selection: pure interrupt. (Only preventDefault when
+      // there is nothing to copy, so the browser copy is not blocked.)
       const sel = window.getSelection()
-      if (sel && !sel.isCollapsed && sel.toString() !== '') return
-      e.preventDefault()
+      const hasSel = !!sel && !sel.isCollapsed && sel.toString() !== ''
+      if (!hasSel) e.preventDefault()
       send('\x03')
     } else if (e.ctrlKey && (e.key === 'd' || e.key === 'D')) {
       e.preventDefault()
