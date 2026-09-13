@@ -688,6 +688,37 @@ export default function App() {
               <span aria-hidden="true" />
             </button>
             <span className="header-brand" aria-label="KS SSH">
+              <svg viewBox="0 0 32 32" aria-hidden="true">
+                <defs>
+                  <linearGradient id="ks-logo-g" x1="0" y1="0" x2="1" y2="1">
+                    <stop offset="0" style={{ stopColor: 'var(--accent-hi)' }} />
+                    <stop offset="0.6" style={{ stopColor: 'var(--accent-lo)' }} />
+                    <stop offset="1" style={{ stopColor: 'var(--accent-glow)' }} />
+                  </linearGradient>
+                </defs>
+                <rect
+                  x="1"
+                  y="1"
+                  width="30"
+                  height="30"
+                  rx="8"
+                  fill="url(#ks-logo-g)"
+                  stroke="rgba(255,255,255,0.25)"
+                />
+                <path
+                  d="M10 12l5 4-5 4M17 20h6"
+                  stroke="#fff"
+                  strokeWidth="2.2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  fill="none"
+                />
+              </svg>
+              <span className="header-brand-text" aria-hidden="true">
+                KS SSH
+              </span>
+            </span>
+            <span className="header-spacer" />
             <button
               type="button"
               className="icon-btn"
@@ -730,37 +761,6 @@ export default function App() {
               }
               title={connectedServer ? `Connected to ${connectedServer.name}` : 'Online'}
             />
-            <span className="header-brand" aria-label="KS SSH">
-              <svg viewBox="0 0 32 32" aria-hidden="true">
-                <defs>
-                  <linearGradient id="ks-logo-g" x1="0" y1="0" x2="1" y2="1">
-                    <stop offset="0" style={{ stopColor: 'var(--accent-hi)' }} />
-                    <stop offset="0.6" style={{ stopColor: 'var(--accent-lo)' }} />
-                    <stop offset="1" style={{ stopColor: 'var(--accent-glow)' }} />
-                  </linearGradient>
-                </defs>
-                <rect
-                  x="1"
-                  y="1"
-                  width="30"
-                  height="30"
-                  rx="8"
-                  fill="url(#ks-logo-g)"
-                  stroke="rgba(255,255,255,0.25)"
-                />
-                <path
-                  d="M10 12l5 4-5 4M17 20h6"
-                  stroke="#fff"
-                  strokeWidth="2.2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  fill="none"
-                />
-              </svg>
-              <span className="header-brand-text" aria-hidden="true">
-                KS SSH
-              </span>
-            </span>
           </header>
 
           <main
