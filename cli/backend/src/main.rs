@@ -1,3 +1,4 @@
+mod auth;
 mod e2e;
 mod files;
 mod host;
@@ -6,6 +7,9 @@ mod relay;
 mod shell;
 mod ui;
 
+use std::sync::Arc;
+
+use auth::{AppState, AuthState};
 use axum::{
     Router,
     http::{StatusCode, header},
@@ -25,6 +29,15 @@ struct Cli {
     /// Port to serve the web UI on.
     #[arg(long, default_value_t = 8080)]
     port: u16,
+    /// Username that must log in to use the web UI (shows a login page).
+    /// This is the main account — its password confirms user edits/deletes.
+    /// Must be used together with `--pass`. Omit both for open access.
+    #[arg(long, alias = "username")]
+    user: Option<String>,
+    /// Password that must log in to use the web UI (shows a login page).
+    /// Must be used together with `--user`. Omit both for open access.
+    #[arg(long, alias = "password")]
+    pass: Option<String>,
     /// Skip the local web UI (no open port at all).
     #[arg(long)]
     no_serve: bool,
@@ -74,9 +87,21 @@ fn relay_ws_base(relay: &str) -> String {
     }
 }
 
-async fn serve(host: String, port: u16) {
-    let app = Router::new()
+async fn serve(host: String, port: u16, auth: Option<Arc<AuthState>>) {
+    let state = AppState { auth: auth.clone() };
+
+    // Public: health ping + login flow (needed to show the login page).
+    let public = Router::new()
         .route("/api/hello", get(api_hello))
+        .route("/api/auth/status", get(auth::api_status))
+        .route("/api/auth/login", post(auth::api_login))
+        .route("/api/auth/logout", post(auth::api_logout))
+        .with_state(state.clone());
+
+    // Protected: everything that touches the host, plus user management.
+    // With auth enabled these require a login session; without auth they
+    // stay open (previous behaviour) and the user endpoints report 404.
+    let protected = Router::new()
         .route(
             "/api/files",
             get(files::api_list_files).delete(files::api_delete_file),
@@ -93,8 +118,24 @@ async fn serve(host: String, port: u16) {
             "/api/files/content",
             get(files::api_read_content).put(files::api_save_content),
         )
+        .route("/api/auth/users", get(auth::api_list_users).post(auth::api_create_user))
+        .route(
+            "/api/auth/users/:username",
+            axum::routing::put(auth::api_update_user).delete(auth::api_delete_user),
+        )
         .route("/v1/shell", get(shell::ws_handler))
-        .fallback(serve_ui);
+        .with_state(state);
+
+    let app = match auth {
+        Some(ref arc) => {
+            let guarded = protected.route_layer(axum::middleware::from_fn_with_state(
+                arc.clone(),
+                auth::require_auth,
+            ));
+            public.merge(guarded).fallback(serve_ui)
+        }
+        None => public.merge(protected).fallback(serve_ui),
+    };
 
     let addr = format!("{host}:{port}");
     let listener = tokio::net::TcpListener::bind(&addr)
