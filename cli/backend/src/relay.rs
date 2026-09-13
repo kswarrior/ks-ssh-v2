@@ -40,6 +40,8 @@ struct Ping<'a> {
 
 /// Hold the relay connection forever (reconnects with backoff).
 pub async fn run_agent(relay: &str, token: &str) {
+    // rustls ships without a crypto provider — install ring once.
+    let _ = rustls::crypto::ring::default_provider().install_default();
     let base = relay.trim_end_matches('/');
     let url = format!("{base}/v1/agent?token={token}");
     println!("Relay token: {token} — enter it in the SSH page to connect.");
