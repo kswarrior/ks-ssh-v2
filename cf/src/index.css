@@ -70,21 +70,13 @@ html {
 
 #root {
   width: 100%;
-  max-width: 1126px;
-  margin: 0 auto;
-  border-inline: 1px solid var(--border);
+  max-width: none;
+  margin: 0;
+  border: none;
   min-height: 100svh;
   display: flex;
   flex-direction: column;
   background: var(--bg);
-}
-
-/* Full-bleed app on phones: side borders waste space and can cause 1px overflow feel */
-@media (max-width: 1140px) {
-  #root {
-    border-inline: none;
-    max-width: 100%;
-  }
 }
 
 body {
