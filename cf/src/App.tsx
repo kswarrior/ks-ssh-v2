@@ -1,23 +1,14 @@
-import { useEffect, useRef, useState, type FormEvent } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
-type PageId = 'home' | 'servers' | 'installation' | 'settings'
+type PageId = 'home' | 'installation' | 'settings'
 
 type NavItem = { id: PageId; label: string; hash: string }
 
 const NAV: NavItem[] = [
   { id: 'home', label: 'Home', hash: '#/' },
-  { id: 'servers', label: 'Servers', hash: '#/servers' },
   { id: 'installation', label: 'Installation', hash: '#/installation' },
   { id: 'settings', label: 'Settings', hash: '#/settings' },
 ]
-
-type Server = {
-  id: string
-  name: string
-  host: string
-  user: string
-  port: number
-}
 
 type Settings = {
   defaultUser: string
@@ -30,11 +21,6 @@ const DEFAULT_SETTINGS: Settings = {
   defaultPort: 22,
   confirmBeforeConnect: true,
 }
-
-const SEED_SERVERS: Server[] = [
-  { id: 'seed-home-lab', name: 'Home Lab', host: '192.168.1.10', user: 'ks', port: 22 },
-  { id: 'seed-vps', name: 'VPS', host: '203.0.113.20', user: 'root', port: 22 },
-]
 
 type Theme = 'light' | 'dark'
 
@@ -145,55 +131,37 @@ function CodeBlock({ code }: { code: string }) {
   )
 }
 
-function HomePage({
-  serverCount,
-  connectedServer,
-  go,
-}: {
-  serverCount: number
-  connectedServer: Server | null
-  go: (id: PageId) => void
-}) {
+function HomePage({ go }: { go: (id: PageId) => void }) {
   return (
     <section className="page" aria-labelledby="page-title-home">
       <h1 id="page-title-home">Home</h1>
       <p className="lead">
-        Welcome to KS SSH — keep all your SSH servers in one place and connect
-        with one tap.
+        Welcome to KS SSH — your companion for fast, secure shell access.
       </p>
       <div className="grid">
         <div className="card">
-          <span className="stat">{serverCount}</span>
-          <span>{serverCount === 1 ? 'Server saved' : 'Servers saved'}</span>
-          <div className="row-actions">
-            <button type="button" className="btn btn-primary" onClick={() => go('servers')}>
-              View servers
-            </button>
-          </div>
-        </div>
-        <div className="card">
-          <h2>Status</h2>
-          <p>
-            {connectedServer
-              ? `Connected to ${connectedServer.name} (${connectedServer.user}@${connectedServer.host})`
-              : 'Not connected'}
-          </p>
-          <div className="row-actions">
-            <button type="button" className="btn" onClick={() => go('servers')}>
-              {connectedServer ? 'Manage connection' : 'Connect a server'}
-            </button>
-          </div>
-        </div>
-        <div className="card">
           <h2>New here?</h2>
-          <p>Install the backend, add your first server, and connect.</p>
+          <p>Install the backend, set up your key, and connect in minutes.</p>
+          <div className="row-actions">
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={() => go('installation')}
+            >
+              Get started
+            </button>
+          </div>
+        </div>
+        <div className="card">
+          <h2>Settings</h2>
+          <p>Tune the defaults KS SSH uses for your connections.</p>
           <div className="row-actions">
             <button
               type="button"
               className="btn"
-              onClick={() => go('installation')}
+              onClick={() => go('settings')}
             >
-              Get started
+              Open settings
             </button>
           </div>
         </div>
