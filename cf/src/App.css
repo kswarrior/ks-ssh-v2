@@ -55,6 +55,31 @@
   min-width: 8px;
 }
 
+.header-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  color: var(--text-h);
+  font-weight: 700;
+  font-size: 15px;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+}
+
+.header-brand svg {
+  width: 30px;
+  height: 30px;
+  display: block;
+  filter: drop-shadow(0 4px 10px var(--accent-shadow));
+}
+
+@media (max-width: 380px) {
+  .header-brand-text {
+    display: none;
+  }
+}
+
 .status-dot {
   width: 12px;
   height: 12px;
