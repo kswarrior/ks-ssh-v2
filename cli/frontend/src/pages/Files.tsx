@@ -1988,3 +1988,6 @@ export default function FilesPage() {
     </section>
   )
 }
+
+// TEMP-TEST-EXPORT
+export { highlightCode, detectLang, fileCat, paint }
