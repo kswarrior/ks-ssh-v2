@@ -481,10 +481,9 @@ function ShellSession({
         aria-live="polite"
         onScroll={onScroll}
       >
-        <pre className="term-output">{output}</pre>
-        <span className="term-cursor" aria-hidden="true">
-          █
-        </span>
+        {/* Cursor lives INSIDE the <pre> with no whitespace between — a
+            newline here would push it onto the next line. */}
+        <pre className="term-output">{output}<span className="term-cursor" aria-hidden="true">█</span></pre>
         {!stuck && (
           <button
             type="button"
