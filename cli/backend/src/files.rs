@@ -38,6 +38,11 @@ pub struct SaveBody {
     pub content: String,
 }
 
+#[derive(Deserialize)]
+pub struct MkdirBody {
+    pub path: String,
+}
+
 /// Max bytes returned by the content endpoint (editor is for small text files).
 pub const READ_MAX_BYTES: u64 = 1024 * 1024;
 /// Max bytes accepted by the save endpoint.
@@ -442,6 +447,42 @@ pub async fn api_save_content(Json(b): Json<SaveBody>) -> Response {
             .into_response(),
     }
 }
+/// POST /api/files/mkdir {"path": "..."} — create a folder inside HOME.
+pub async fn api_mkdir(Json(b): Json<MkdirBody>) -> Response {
+    let (_, dir) = match resolve_inside_home(Some(&b.path)) {
+        Ok(v) => v,
+        Err((code, msg)) => return (code, msg).into_response(),
+    };
+    if std::fs::symlink_metadata(&dir).is_ok() {
+        return (
+            StatusCode::CONFLICT,
+            format!("already exists: {}", dir.display()),
+        )
+            .into_response();
+    }
+    let Some(file_name) = dir.file_name().map(|n| n.to_string_lossy().to_string()) else {
+        return (StatusCode::BAD_REQUEST, "bad folder name".to_string()).into_response();
+    };
+    if !valid_file_name(&file_name) {
+        return (
+            StatusCode::BAD_REQUEST,
+            format!("invalid name: {file_name}"),
+        )
+            .into_response();
+    }
+    match std::fs::create_dir_all(&dir) {
+        Ok(()) => (
+            StatusCode::OK,
+            Json(serde_json::json!({ "ok": true, "path": dir.to_string_lossy() })),
+        )
+            .into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("cannot create {}: {e}", dir.display()),
+        )
+            .into_response(),
+    }
+}
 /// GET /api/files/download?path=<file> — download a single file inside HOME.
 pub async fn api_download_file(Query(q): Query<DownloadQuery>) -> Response {
     let (home, target) = match resolve_inside_home(Some(&q.path)) {
@@ -545,6 +586,25 @@ mod tests {
         let (home, p) =
             resolve_inside_home(Some("ks-ssh-test-save.txt")).expect("relative joins home");
         assert!(p.starts_with(&home));
+    }
+
+    #[test]
+    fn mkdir_roundtrip_inside_home() {
+        let home = home_dir();
+        let dir = home.join(format!(".ks-ssh-test-mkdir-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let (_, resolved) =
+            resolve_inside_home(Some(&dir.to_string_lossy())).expect("inside home");
+        assert!(valid_file_name(
+            &resolved
+                .file_name()
+                .expect("name")
+                .to_string_lossy()
+        ));
+        std::fs::create_dir_all(&resolved).expect("mkdir");
+        assert!(resolved.is_dir());
+        std::fs::remove_dir_all(&resolved).expect("cleanup");
+        assert!(resolve_inside_home(Some("/tmp/ks-ssh-evil")).is_err());
     }
 
     #[test]
