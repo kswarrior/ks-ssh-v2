@@ -360,13 +360,6 @@ function SSHPage() {
     setEntries((prev) => prev.filter((x) => x.id !== id))
   }
 
-  const disconnect = (id: string) => {
-    stopPending(id)
-    setEntries((prev) =>
-      prev.map((x) => (x.id === id ? { ...x, online: false } : x)),
-    )
-  }
-
   return (
     <section className="page" aria-labelledby="page-title-ssh">
       <div className="page-head">
@@ -497,50 +490,42 @@ function SSHPage() {
             const connecting = e.id === connectingId
             return (
               <li key={e.id} className="card ssh-card">
-                <span className="ssh-icon" aria-hidden="true">
-                  <svg
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="#fff"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  >
-                    <rect x="3" y="4" width="18" height="16" rx="2" />
-                    <path d="M7 9l3 3-3 3M12 15h5" />
-                  </svg>
-                </span>
-                <div className="ssh-main">
-                  <div className="ssh-top">
-                    <span className="ssh-name">{e.name}</span>
-                    {connecting ? (
-                      <span className="tag connecting">
-                        <span className="tag-dot" aria-hidden="true" />
-                        Connecting…
-                      </span>
-                    ) : e.online ? (
-                      <span className="tag online">
-                        <span className="tag-dot" aria-hidden="true" />
-                        Online
-                      </span>
-                    ) : (
-                      <span className="tag offline">
-                        <span className="tag-dot" aria-hidden="true" />
-                        Offline
-                      </span>
-                    )}
-                  </div>
+                <div className="ssh-head">
+                  <span className="ssh-icon" aria-hidden="true">
+                    <svg
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="#fff"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <rect x="3" y="4" width="18" height="16" rx="2" />
+                      <path d="M7 9l3 3-3 3M12 15h5" />
+                    </svg>
+                  </span>
+                  <span className="ssh-name">{e.name}</span>
+                  {connecting ? (
+                    <span className="tag connecting">
+                      <span className="tag-dot" aria-hidden="true" />
+                      Connecting…
+                    </span>
+                  ) : e.online ? (
+                    <span className="tag online">
+                      <span className="tag-dot" aria-hidden="true" />
+                      Online
+                    </span>
+                  ) : (
+                    <span className="tag offline">
+                      <span className="tag-dot" aria-hidden="true" />
+                      Offline
+                    </span>
+                  )}
+                </div>
+                <div className="ssh-foot">
                   {e.note ? <p className="ssh-note">{e.note}</p> : null}
                   <div className="row-actions">
-                    {e.online ? (
-                      <button
-                        type="button"
-                        className="btn btn-sm"
-                        onClick={() => disconnect(e.id)}
-                      >
-                        Disconnect
-                      </button>
-                    ) : (
+                    {!e.online && (
                       <button
                         type="button"
                         className="btn btn-sm btn-primary"
