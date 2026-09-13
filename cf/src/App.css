@@ -3,35 +3,64 @@
   display: flex;
   flex-direction: column;
   min-height: 100svh;
+  min-width: 0;
   text-align: left;
+}
+
+/* Skip link: hidden until keyboard focus */
+.skip-link {
+  position: absolute;
+  left: 12px;
+  top: -48px;
+  z-index: 100;
+  padding: 10px 14px;
+  border-radius: 8px;
+  background: var(--text-h);
+  color: var(--bg);
+  text-decoration: none;
+  font-size: 14px;
+  transition: top 0.15s ease;
+}
+
+.skip-link:focus-visible {
+  top: 8px;
+  outline-offset: 2px;
 }
 
 .app-header {
   position: sticky;
   top: 0;
   z-index: 30;
-  height: 56px;
+  min-height: 56px;
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 0 16px;
+  padding: 0 max(16px, env(safe-area-inset-right)) 0 max(16px, env(safe-area-inset-left));
+  padding-top: env(safe-area-inset-top);
   background: var(--bg);
   border-bottom: 1px solid var(--border);
+  min-width: 0;
 }
 
 .brand {
   font-weight: 600;
   color: var(--text-h);
   font-size: 17px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
 }
 
 .header-spacer {
   flex: 1;
+  min-width: 8px;
 }
 
 .status-dot {
   width: 10px;
   height: 10px;
+  flex-shrink: 0;
   border-radius: 50%;
   background: #22c55e;
 }
@@ -41,14 +70,18 @@
   display: none;
   flex-direction: column;
   justify-content: center;
+  align-items: stretch;
   gap: 5px;
   width: 40px;
   height: 40px;
+  flex-shrink: 0;
   padding: 8px;
   background: transparent;
   border: 1px solid var(--border);
   border-radius: 8px;
   cursor: pointer;
+  color: inherit;
+  -webkit-tap-highlight-color: transparent;
 }
 
 .hamburger span {
@@ -57,7 +90,7 @@
   width: 100%;
   background: var(--text-h);
   border-radius: 2px;
-  transition: transform 0.2s, opacity 0.2s;
+  transition: transform 0.2s ease, opacity 0.2s ease;
 }
 
 .hamburger.is-open span:nth-child(1) {
@@ -74,6 +107,7 @@
   flex: 1;
   display: flex;
   min-height: 0;
+  min-width: 0;
 }
 
 .sidebar {
@@ -81,6 +115,7 @@
   flex-shrink: 0;
   border-right: 1px solid var(--border);
   padding: 16px 12px;
+  padding-bottom: calc(16px + env(safe-area-inset-bottom));
   background: var(--bg);
 }
 
@@ -94,8 +129,10 @@
   color: var(--text);
   text-decoration: none;
   font-size: 15px;
+  line-height: 1.4;
   padding: 10px 12px;
   border-radius: 8px;
+  overflow-wrap: anywhere;
 }
 
 .sidebar a:hover {
@@ -114,12 +151,26 @@
 
 .content {
   flex: 1;
-  padding: 2rem;
+  width: 100%;
   min-width: 0;
+  max-width: 100%;
+  padding: clamp(1.25rem, 2vw + 0.75rem, 2rem);
+  padding-bottom: calc(clamp(1.25rem, 2vw + 0.75rem, 2rem) + env(safe-area-inset-bottom));
 }
 
 .content h1 {
   margin-top: 0;
+}
+
+.content p {
+  max-width: 70ch;
+}
+
+/* Narrow desktop / small laptop: give content more room */
+@media (max-width: 1024px) {
+  .sidebar {
+    width: 210px;
+  }
 }
 
 /* Phone: sidebar becomes drawer */
@@ -131,28 +182,74 @@
   .sidebar {
     position: fixed;
     top: 56px;
+    /* Notch-aware override: ignored by browsers without env(), falls back to 56px */
+    top: calc(56px + env(safe-area-inset-top, 0px));
     bottom: 0;
     left: 0;
-    width: 260px;
+    width: min(260px, 84vw);
     z-index: 20;
-    transform: translateX(-100%);
-    transition: transform 0.25s ease;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+    transform: translateX(-102%);
+    visibility: hidden;
+    transition: transform 0.25s ease, visibility 0.25s ease;
     border-right: 1px solid var(--border);
+    box-shadow: var(--shadow);
   }
 
   .sidebar.open {
     transform: translateX(0);
+    visibility: visible;
   }
 
   .overlay.show {
     display: block;
     position: fixed;
-    inset: 56px 0 0 0;
+    top: 56px;
+    right: 0;
+    bottom: 0;
+    left: 0;
     z-index: 10;
     background: rgba(0, 0, 0, 0.4);
   }
+}
 
-  .content {
-    padding: 1.25rem;
+/* Account for iOS notch in drawer offset */
+@supports (top: env(safe-area-inset-top)) {
+  @media (max-width: 768px) {
+    .sidebar,
+    .overlay.show {
+      top: calc(56px + env(safe-area-inset-top));
+    }
+  }
+}
+
+/* Desktop: sidebar sticks while content scrolls; drawer state is force-reset */
+@media (min-width: 769px) {
+  .sidebar {
+    position: sticky;
+    top: 56px;
+    height: calc(100svh - 56px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    transform: none;
+    visibility: visible;
+  }
+
+  .overlay {
+    display: none;
+  }
+
+  .hamburger {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hamburger span,
+  .sidebar,
+  .skip-link {
+    transition: none;
   }
 }
