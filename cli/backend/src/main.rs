@@ -1,3 +1,4 @@
+mod files;
 mod relay;
 mod ui;
 
@@ -68,6 +69,8 @@ fn relay_ws_base(relay: &str) -> String {
 async fn serve(host: String, port: u16) {
     let app = Router::new()
         .route("/api/hello", get(api_hello))
+        .route("/api/files", get(files::api_list_files))
+        .route("/api/files/download", get(files::api_download_file))
         .fallback(serve_ui);
 
     let addr = format!("{host}:{port}");
