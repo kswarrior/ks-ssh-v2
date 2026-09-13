@@ -7,7 +7,7 @@
 
 use axum::{
     Json,
-    body::Body,
+    body::{Body, Bytes},
     extract::Query,
     http::{StatusCode, header},
     response::{IntoResponse, Response},
@@ -43,10 +43,25 @@ pub struct MkdirBody {
     pub path: String,
 }
 
+#[derive(Deserialize)]
+pub struct UploadQuery {
+    pub dir: String,
+    pub name: String,
+}
+
+#[derive(Deserialize)]
+pub struct UploadUrlBody {
+    pub dir: String,
+    pub url: String,
+    pub name: Option<String>,
+}
+
 /// Max bytes returned by the content endpoint (editor is for small text files).
 pub const READ_MAX_BYTES: u64 = 1024 * 1024;
 /// Max bytes accepted by the save endpoint.
 pub const SAVE_MAX_BYTES: usize = 5 * 1024 * 1024;
+/// Max bytes accepted per upload (local + URL).
+pub const UPLOAD_MAX_BYTES: usize = 100 * 1024 * 1024;
 
 #[derive(Serialize)]
 pub struct FileEntry {
@@ -482,6 +497,202 @@ pub async fn api_mkdir(Json(b): Json<MkdirBody>) -> Response {
         )
             .into_response(),
     }
+}
+/// POST /api/files/upload?dir=<dir>&name=<file> — upload a local file.
+/// The request body is the raw file bytes (no multipart needed).
+pub async fn api_upload_file(Query(q): Query<UploadQuery>, body: Bytes) -> Response {
+    let (_, dir) = match resolve_inside_home(Some(&q.dir)) {
+        Ok(v) => v,
+        Err((code, msg)) => return (code, msg).into_response(),
+    };
+    if !dir.is_dir() {
+        return (
+            StatusCode::BAD_REQUEST,
+            format!("not a folder: {}", dir.display()),
+        )
+            .into_response();
+    }
+    let name = q.name.trim();
+    if !valid_file_name(name) {
+        return (
+            StatusCode::BAD_REQUEST,
+            format!("invalid name: {name}"),
+        )
+            .into_response();
+    }
+    if body.len() > UPLOAD_MAX_BYTES {
+        return (
+            StatusCode::PAYLOAD_TOO_LARGE,
+            format!("file too large (max {} MB)", UPLOAD_MAX_BYTES / 1024 / 1024),
+        )
+            .into_response();
+    }
+    let target = dir.join(name);
+    if std::fs::symlink_metadata(&target).is_ok() {
+        return (
+            StatusCode::CONFLICT,
+            format!("already exists: {}", target.display()),
+        )
+            .into_response();
+    }
+    match std::fs::write(&target, &body) {
+        Ok(()) => (
+            StatusCode::OK,
+            Json(
+                serde_json::json!({ "ok": true, "path": target.to_string_lossy(), "size": body.len() }),
+            ),
+        )
+            .into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("cannot save {}: {e}", target.display()),
+        )
+            .into_response(),
+    }
+}
+
+/// Derive a safe file name from a URL's last path segment.
+fn filename_from_url(url: &str) -> String {
+    let no_frag = url.split('#').next().unwrap_or(url);
+    let no_query = no_frag.split('?').next().unwrap_or(no_frag);
+    let last = no_query.rsplit('/').next().unwrap_or("").trim();
+    // Undo the most common encodings so `my%20file.zip` keeps a sane name.
+    let decoded = last.replace("%20", " ");
+    if decoded.is_empty() {
+        "download".to_string()
+    } else {
+        decoded
+    }
+}
+
+fn valid_upload_url(url: &str) -> bool {
+    let t = url.trim();
+    if t.is_empty() || t.len() > 2048 {
+        return false;
+    }
+    if t.chars().any(|c| c.is_control() || c.is_whitespace()) {
+        return false;
+    }
+    let lower = t.to_ascii_lowercase();
+    (lower.starts_with("http://") || lower.starts_with("https://"))
+        && t[8..].contains('.')
+}
+
+/// POST /api/files/upload-url {"dir","url","name"?} — fetch a URL into HOME.
+/// Uses `curl` (or `wget` as fallback) on the host, so no extra crates needed.
+pub async fn api_upload_url(Json(b): Json<UploadUrlBody>) -> Response {
+    let (_, dir) = match resolve_inside_home(Some(&b.dir)) {
+        Ok(v) => v,
+        Err((code, msg)) => return (code, msg).into_response(),
+    };
+    if !dir.is_dir() {
+        return (
+            StatusCode::BAD_REQUEST,
+            format!("not a folder: {}", dir.display()),
+        )
+            .into_response();
+    }
+    let url = b.url.trim().to_string();
+    if !valid_upload_url(&url) {
+        return (
+            StatusCode::BAD_REQUEST,
+            "only http(s) URLs can be fetched".to_string(),
+        )
+            .into_response();
+    }
+    let name = b
+        .name
+        .as_deref()
+        .map(str::trim)
+        .filter(|n| !n.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| filename_from_url(&url));
+    if !valid_file_name(&name) {
+        return (
+            StatusCode::BAD_REQUEST,
+            format!("invalid name: {name}"),
+        )
+            .into_response();
+    }
+    let target = dir.join(&name);
+    if std::fs::symlink_metadata(&target).is_ok() {
+        return (
+            StatusCode::CONFLICT,
+            format!("already exists: {}", target.display()),
+        )
+            .into_response();
+    }
+    let max_bytes = UPLOAD_MAX_BYTES.to_string();
+    // Try curl first, then wget. Args (never a shell) + `--` end option parsing.
+    let attempts: Vec<Vec<String>> = vec![
+        vec![
+            "curl".to_string(),
+            "-fsSL".to_string(),
+            "--max-time".to_string(),
+            "300".to_string(),
+            "--max-filesize".to_string(),
+            max_bytes.clone(),
+            "-o".to_string(),
+            target.to_string_lossy().to_string(),
+            "--".to_string(),
+            url.clone(),
+        ],
+        vec![
+            "wget".to_string(),
+            "-q".to_string(),
+            "--timeout=300".to_string(),
+            "--tries=1".to_string(),
+            "-O".to_string(),
+            target.to_string_lossy().to_string(),
+            "--".to_string(),
+            url.clone(),
+        ],
+    ];
+    let mut last_err = "curl/wget not found on host".to_string();
+    let mut ok = false;
+    for args in &attempts {
+        let mut cmd = tokio::process::Command::new(&args[0]);
+        cmd.args(&args[1..]);
+        match cmd.output().await {
+            Ok(out) if out.status.success() => {
+                ok = true;
+                break;
+            }
+            Ok(out) => {
+                let tail = String::from_utf8_lossy(&out.stderr);
+                let tail = tail.trim().lines().last().unwrap_or("fetch failed");
+                last_err = format!("{}: {}", args[0], tail.chars().take(200).collect::<String>());
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(e) => {
+                last_err = format!("{}: {e}", args[0]);
+            }
+        }
+    }
+    if !ok {
+        let _ = std::fs::remove_file(&target);
+        return (
+            StatusCode::BAD_GATEWAY,
+            format!("cannot fetch URL: {last_err}"),
+        )
+            .into_response();
+    }
+    let size = std::fs::metadata(&target).map(|m| m.len()).unwrap_or(0);
+    if size > UPLOAD_MAX_BYTES as u64 {
+        let _ = std::fs::remove_file(&target);
+        return (
+            StatusCode::PAYLOAD_TOO_LARGE,
+            format!("file too large (max {} MB)", UPLOAD_MAX_BYTES / 1024 / 1024),
+        )
+            .into_response();
+    }
+    (
+        StatusCode::OK,
+        Json(
+            serde_json::json!({ "ok": true, "path": target.to_string_lossy(), "size": size }),
+        ),
+    )
+        .into_response()
 }
 /// GET /api/files/download?path=<file> — download a single file inside HOME.
 pub async fn api_download_file(Query(q): Query<DownloadQuery>) -> Response {
