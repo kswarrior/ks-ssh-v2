@@ -687,7 +687,7 @@ export default function App() {
               <span aria-hidden="true" />
               <span aria-hidden="true" />
             </button>
-            <span className="header-spacer" />
+            <span className="header-brand" aria-label="KS SSH">
             <button
               type="button"
               className="icon-btn"
