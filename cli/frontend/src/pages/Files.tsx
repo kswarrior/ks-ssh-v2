@@ -166,13 +166,19 @@ export default function FilesPage() {
   }, [renaming])
 
   // Escape closes the editor (twice when there are unsaved changes).
+  // Body scroll is locked so the editor feels like a real full page.
   useEffect(() => {
     if (!editing) return
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') closeEditor()
     }
     document.addEventListener('keydown', onKey)
-    return () => document.removeEventListener('keydown', onKey)
+    const prev = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return () => {
+      document.removeEventListener('keydown', onKey)
+      document.body.style.overflow = prev
+    }
   })
 
   // Focus the create input + Escape closes the create dialog.
