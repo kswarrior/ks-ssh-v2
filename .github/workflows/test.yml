@@ -1,31 +1,455 @@
-name: KS SSH Testing
+name: KS Tunnel Testing
 
 on:
   workflow_dispatch:
 
+concurrency:
+  group: ks-tunnel-testing-main
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    timeout-minutes: 360
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: true
 
-     # Step 2: Install cloudflared
-      - name: Download and install cloudflared
-        run: |
-          echo "Downloading cloudflared..."
-          curl -L -o cloudflared https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64
-          chmod +x cloudflared
-          sudo mv cloudflared /usr/local/bin/
-          
-      # Step 3: Install cloudflared service with your token
-      - name: Install cloudflared service
-        run: |
-          sudo cloudflared service install eyJhIjoiZTJkZjY3MDI5ZWZlZTBmY2JhM2ExMjNjN2VmNTcxNTAiLCJ0IjoiMGQ2Yzk5YjQtMGUzZC00NzEyLWFmNDctNzM0MGU5YTEyOGE3IiwicyI6IlkyVTNOelV5WmpBdFl6SmpOeTAwTjJZMExUbGpNMk10T0dJelltRmtOREk1T1dOaCJ9
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          check-latest: true
 
-      - name: Setup and Launch kspanel
+      - name: Setup Go
+        uses: actions/setup-go@v7
+        with:
+          go-version: "1.26.7"
+          check-latest: true
+
+      - name: Verify environment
         run: |
-          curl -L -o ks-ssh "https://huggingface.co/buckets/kswarrior/opencode-storage/resolve/ks-ssh/release/ks-ssh?download=true"
-          chmod +x ks-ssh
-          ./ks-ssh --port 8080
+          set -e
+
+          node --version
+          npm --version
+          go version
+          git --version
+          gh --version
+
+      - name: Prepare Git
+        run: |
+          set -e
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git fetch origin main >/dev/null 2>&1 || true
+          git checkout -B main origin/main
+
+          printf "node_modules/\n**/node_modules/\n" >> .git/info/exclude
+
+          echo "Git workspace ready."
+
+      - name: Install OpenCode
+        run: |
+          set -e
+
+          npm install --global opencode-ai
+
+          echo "===== OpenCode ====="
+          opencode --version
+          echo "===================="
+
+      - name: Start OpenCode Web UI
+        run: |
+          set -e
+
+          rm -f /tmp/opencode.log
+          rm -f /tmp/opencode.pid
+
+          nohup opencode web \
+            --port 7070 \
+            --hostname 0.0.0.0 \
+            > /tmp/opencode.log 2>&1 &
+
+          OPENCODE_PID=$!
+
+          echo "$OPENCODE_PID" > /tmp/opencode.pid
+
+          READY=0
+
+          for i in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:7070/ >/dev/null 2>&1; then
+              READY=1
+              break
+            fi
+
+            if ! kill -0 "$OPENCODE_PID" 2>/dev/null; then
+              echo "OpenCode stopped unexpectedly."
+              cat /tmp/opencode.log
+              exit 1
+            fi
+
+            sleep 2
+          done
+
+          if [ "$READY" -ne 1 ]; then
+            echo "OpenCode Web UI did not become ready."
+            cat /tmp/opencode.log
+            exit 1
+          fi
+
+          echo "OpenCode Web UI is running on port 7070."
+
+      - name: Install Cloudflare Tunnel
+        run: |
+          set -e
+
+          curl -fL \
+            https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 \
+            -o /tmp/cloudflared
+
+          chmod +x /tmp/cloudflared
+
+          sudo install /tmp/cloudflared /usr/local/bin/cloudflared
+
+          cloudflared --version
+
+          nohup cloudflared tunnel run \
+            --token "eyJhIjoiZTJkZjY3MDI5ZWZlZTBmY2JhM2ExMjNjN2VmNTcxNTAiLCJ0IjoiNDdjOTdjYmItN2EwNC00MjIyLWJhY2UtZmM0MmU4ZmUxNDYyIiwicyI6Ik16RmpZVGM0WVRndE5HVTJZeTAwT0RZd0xUa3dOekl0TmpVMU4yUTBOekZoWkRnMCJ9" \
+            > /tmp/cloudflared.log 2>&1 &
+
+          CLOUDFLARED_PID=$!
+
+          echo "$CLOUDFLARED_PID" > /tmp/cloudflared.pid
+
+          sleep 5
+
+          if ! kill -0 "$CLOUDFLARED_PID" 2>/dev/null; then
+            echo "Cloudflare Tunnel failed to start."
+            cat /tmp/cloudflared.log
+            exit 1
+          fi
+
+          echo "Cloudflare Tunnel is running."
+
+      - name: Monitor repository
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ks-tunnel-release
+          RELEASE_TITLE: KS Tunnel Release
+        run: |
+          set -e
+
+          START_TIME=$(date +%s)
+          END_TIME=$((START_TIME + 21000))
+
+          publish_release() {
+            local assets=("$@")
+
+            if ! gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+
+              if [ "${#assets[@]}" -gt 0 ]; then
+                gh release create \
+                  "$RELEASE_TAG" \
+                  "${assets[@]}" \
+                  --target "$(git rev-parse HEAD)" \
+                  --title "$RELEASE_TITLE" \
+                  --generate-notes \
+                  >/dev/null 2>&1 || true
+              else
+                gh release create \
+                  "$RELEASE_TAG" \
+                  --target "$(git rev-parse HEAD)" \
+                  --title "$RELEASE_TITLE" \
+                  --generate-notes \
+                  >/dev/null 2>&1 || true
+              fi
+
+              return 0
+            fi
+
+            if [ "${#assets[@]}" -gt 0 ]; then
+              gh release upload \
+                "$RELEASE_TAG" \
+                "${assets[@]}" \
+                --clobber \
+                >/dev/null 2>&1 || true
+            fi
+
+            gh release edit \
+              "$RELEASE_TAG" \
+              --title "$RELEASE_TITLE" \
+              --target "$(git rev-parse HEAD)" \
+              >/dev/null 2>&1 || true
+          }
+
+          collect_release_assets() {
+            RELEASE_ASSETS=()
+
+            while IFS= read -r FILE; do
+              if [ -f "$FILE" ]; then
+                RELEASE_ASSETS+=("$FILE")
+              fi
+            done < <(
+              git diff \
+                --cached \
+                --name-only \
+                --diff-filter=ACMRT \
+                -- \
+                'release/kstunnel/**' \
+                'library/**' \
+                2>/dev/null
+            )
+          }
+
+          commit_local_changes() {
+            git add -A >/dev/null 2>&1 || true
+
+            git reset -- \
+              ':(glob)node_modules/**' \
+              ':(glob)**/node_modules/**' \
+              >/dev/null 2>&1 || true
+
+            if git diff --cached --quiet; then
+              return 0
+            fi
+
+            collect_release_assets
+
+            if git commit -m "Auto sync KS Tunnel changes" >/dev/null 2>&1; then
+              publish_release "${RELEASE_ASSETS[@]}"
+            fi
+
+            return 0
+          }
+
+          push_with_retry() {
+            for ATTEMPT in 1 2 3 4 5 6 7 8 9 10; do
+
+              if git push origin main:main >/dev/null 2>&1; then
+                return 0
+              fi
+
+              echo "Push attempt $ATTEMPT failed. Synchronizing with origin/main..."
+
+              git fetch origin main >/dev/null 2>&1 || true
+
+              if ! git rebase --autostash origin/main >/dev/null 2>&1; then
+                git rebase --abort >/dev/null 2>&1 || true
+              fi
+
+              sleep 2
+            done
+
+            return 1
+          }
+
+          while true; do
+
+            CURRENT_TIME=$(date +%s)
+
+            if [ "$CURRENT_TIME" -ge "$END_TIME" ]; then
+              break
+            fi
+
+            git fetch origin main >/dev/null 2>&1 || true
+
+            git status \
+              --porcelain \
+              --untracked-files=all \
+              > /tmp/monitor-status.txt 2>/dev/null || true
+
+            grep -vE '(^|/)(node_modules)(/|$)' \
+              /tmp/monitor-status.txt \
+              > /tmp/monitor-status-clean.txt 2>/dev/null || true
+
+            if [ -s /tmp/monitor-status-clean.txt ]; then
+              commit_local_changes
+            fi
+
+            git fetch origin main >/dev/null 2>&1 || true
+
+            LOCAL_COMMIT=$(git rev-parse HEAD 2>/dev/null || echo "")
+            REMOTE_COMMIT=$(git rev-parse origin/main 2>/dev/null || echo "")
+
+            if [ -n "$LOCAL_COMMIT" ] && [ -n "$REMOTE_COMMIT" ]; then
+
+              if [ "$LOCAL_COMMIT" = "$REMOTE_COMMIT" ]; then
+                :
+
+              elif git merge-base --is-ancestor origin/main HEAD >/dev/null 2>&1; then
+                push_with_retry || true
+
+              elif git merge-base --is-ancestor HEAD origin/main >/dev/null 2>&1; then
+                git reset --hard origin/main >/dev/null 2>&1 || true
+
+              else
+                if ! git rebase --autostash origin/main >/dev/null 2>&1; then
+                  git rebase --abort >/dev/null 2>&1 || true
+                else
+                  push_with_retry || true
+                fi
+              fi
+
+            fi
+
+            sleep 25
+          done
+
+      - name: Final repository check
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ks-tunnel-release
+          RELEASE_TITLE: KS Tunnel Release
+        continue-on-error: true
+        run: |
+          git fetch origin main >/dev/null 2>&1 || true
+
+          git status \
+            --porcelain \
+            --untracked-files=all \
+            > /tmp/final-status.txt 2>/dev/null || true
+
+          grep -vE '(^|/)(node_modules)(/|$)' \
+            /tmp/final-status.txt \
+            > /tmp/final-status-clean.txt 2>/dev/null || true
+
+          if [ -s /tmp/final-status-clean.txt ]; then
+
+            git add -A >/dev/null 2>&1 || true
+
+            git reset -- \
+              ':(glob)node_modules/**' \
+              ':(glob)**/node_modules/**' \
+              >/dev/null 2>&1 || true
+
+            if ! git diff --cached --quiet; then
+
+              RELEASE_ASSETS=()
+
+              while IFS= read -r FILE; do
+                if [ -f "$FILE" ]; then
+                  RELEASE_ASSETS+=("$FILE")
+                fi
+              done < <(
+                git diff \
+                  --cached \
+                  --name-only \
+                  --diff-filter=ACMRT \
+                  -- \
+                  'release/kstunnel/**' \
+                  'library/**' \
+                  2>/dev/null
+              )
+
+              git commit -m "Final sync KS Tunnel changes" \
+                >/dev/null 2>&1 || true
+
+              git fetch origin main >/dev/null 2>&1 || true
+
+              if ! git rebase --autostash origin/main >/dev/null 2>&1; then
+                git rebase --abort >/dev/null 2>&1 || true
+              fi
+
+              for ATTEMPT in 1 2 3 4 5 6 7 8 9 10; do
+
+                if git push origin main:main >/dev/null 2>&1; then
+                  break
+                fi
+
+                git fetch origin main >/dev/null 2>&1 || true
+
+                if ! git rebase --autostash origin/main >/dev/null 2>&1; then
+                  git rebase --abort >/dev/null 2>&1 || true
+                fi
+
+                sleep 2
+              done
+
+              if ! gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+
+                if [ "${#RELEASE_ASSETS[@]}" -gt 0 ]; then
+                  gh release create \
+                    "$RELEASE_TAG" \
+                    "${RELEASE_ASSETS[@]}" \
+                    --target "$(git rev-parse HEAD)" \
+                    --title "$RELEASE_TITLE" \
+                    --generate-notes \
+                    >/dev/null 2>&1 || true
+                else
+                  gh release create \
+                    "$RELEASE_TAG" \
+                    --target "$(git rev-parse HEAD)" \
+                    --title "$RELEASE_TITLE" \
+                    --generate-notes \
+                    >/dev/null 2>&1 || true
+                fi
+
+              else
+
+                if [ "${#RELEASE_ASSETS[@]}" -gt 0 ]; then
+                  gh release upload \
+                    "$RELEASE_TAG" \
+                    "${RELEASE_ASSETS[@]}" \
+                    --clobber \
+                    >/dev/null 2>&1 || true
+                fi
+
+                gh release edit \
+                  "$RELEASE_TAG" \
+                  --title "$RELEASE_TITLE" \
+                  --target "$(git rev-parse HEAD)" \
+                  >/dev/null 2>&1 || true
+
+              fi
+            fi
+
+          elif ! gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+
+            gh release create \
+              "$RELEASE_TAG" \
+              --target "$(git rev-parse HEAD)" \
+              --title "$RELEASE_TITLE" \
+              --generate-notes \
+              >/dev/null 2>&1 || true
+
+          fi
+
+      - name: Stop OpenCode
+        if: always()
+        run: |
+          if [ -f /tmp/opencode.pid ]; then
+            kill "$(cat /tmp/opencode.pid)" 2>/dev/null || true
+          fi
+
+          pkill -f "opencode web" 2>/dev/null || true
+
+      - name: Stop Cloudflare Tunnel
+        if: always()
+        run: |
+          if [ -f /tmp/cloudflared.pid ]; then
+            kill "$(cat /tmp/cloudflared.pid)" 2>/dev/null || true
+          fi
+
+          pkill -f "cloudflared tunnel run" 2>/dev/null || true
+
+      - name: Show service logs on failure
+        if: failure()
+        run: |
+          echo "===== OpenCode Log ====="
+          cat /tmp/opencode.log 2>/dev/null || true
+
+          echo "===== Cloudflare Log ====="
+          cat /tmp/cloudflared.log 2>/dev/null || true
