@@ -73,6 +73,8 @@ export default function FilesPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [showHidden, setShowHidden] = useState(true)
+  const [query, setQuery] = useState('')
+  const [typeFilter, setTypeFilter] = useState<FileTypeFilter>('all')
   const [menuOpen, setMenuOpen] = useState<string | null>(null)
   const [renaming, setRenaming] = useState<string | null>(null)
   const [newName, setNewName] = useState('')
@@ -206,11 +208,25 @@ export default function FilesPage() {
     return () => document.removeEventListener('keydown', onKey)
   }, [uploading, uploadBusy])
 
-  const visible = (data?.entries ?? []).filter(
-    (e) => showHidden || !e.name.startsWith('.'),
+  const base = useMemo(
+    () =>
+      (data?.entries ?? []).filter(
+        (e) => showHidden || !e.name.startsWith('.'),
+      ),
+    [data, showHidden],
   )
-  const dirCount = visible.filter((e) => e.is_dir).length
-  const fileCount = visible.length - dirCount
+  const visible = useMemo(() => {
+    const q = query.trim().toLowerCase()
+    return base.filter((e) => {
+      if (typeFilter === 'dirs' && !e.is_dir) return false
+      if (typeFilter === 'files' && e.is_dir) return false
+      if (!q) return true
+      return e.name.toLowerCase().includes(q)
+    })
+  }, [base, typeFilter, query])
+  const filtering = query.trim() !== '' || typeFilter !== 'all'
+  const dirCount = base.filter((e) => e.is_dir).length
+  const fileCount = base.length - dirCount
 
   const startRename = (e: FileEntry) => {
     setMenuOpen(null)
@@ -619,12 +635,47 @@ export default function FilesPage() {
             Hidden
           </label>
         </div>
+        <div className="files-tools">
+          <label className="ports-search">
+            <span className="sr-only">Search files in this folder</span>
+            <svg className="ports-search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <circle cx="11" cy="11" r="7" />
+              <path d="m21 21-4.3-4.3" />
+            </svg>
+            <input
+              type="text"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search files…"
+              autoComplete="off"
+              spellCheck={false}
+            />
+          </label>
+          <label className="ports-select-wrap">
+            <span className="sr-only">File type filter</span>
+            <select
+              className="ports-select"
+              value={typeFilter}
+              onChange={(e) => setTypeFilter(e.target.value as FileTypeFilter)}
+              aria-label="File type filter"
+            >
+              <option value="all">All</option>
+              <option value="dirs">Folders</option>
+              <option value="files">Files</option>
+            </select>
+            <svg className="ports-select-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="m6 9 6 6 6-6" />
+            </svg>
+          </label>
+        </div>
         <p className="files-sub">
           {loading
             ? 'Loading…'
             : error
               ? 'Could not list host files.'
-              : `${dirCount} folders · ${fileCount} files`}
+              : filtering
+                ? `${visible.length} of ${base.length} items`
+                : `${dirCount} folders · ${fileCount} files`}
         </p>
 
         {actionError && !error && (
@@ -682,7 +733,30 @@ export default function FilesPage() {
             </span>
           </ul>
         ) : visible.length === 0 ? (
-          <p>Empty folder.</p>
+          filtering ? (
+            <div className="ports-empty">
+              <h2>No matches</h2>
+              <p>Nothing in this folder matches the search or filter.</p>
+              <div className="row-actions">
+                <button
+                  type="button"
+                  className="btn btn-sm"
+                  onClick={() => {
+                    setQuery('')
+                    setTypeFilter('all')
+                  }}
+                  title="Clear search and filter"
+                >
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <path d="M18 6 6 18M6 6l12 12" />
+                  </svg>
+                  <span className="btn-label">Clear</span>
+                </button>
+              </div>
+            </div>
+          ) : (
+            <p>Empty folder.</p>
+          )
         ) : (
           <ul className="file-grid" aria-label={`Files in ${data?.path}`}>
             {visible.map((e) => {

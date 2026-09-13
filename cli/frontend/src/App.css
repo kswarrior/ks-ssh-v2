@@ -1628,6 +1628,14 @@
   margin: 0;
 }
 
+/* Search + type filter row (reuses the Ports search/select look). */
+.files-tools {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
 .files-body .file-grid {
   margin: 0;
 }
@@ -2554,6 +2562,19 @@ a.file-link {
 
   .ports-actions .btn {
     flex: 1 1 auto;
+  }
+
+  .files-tools .ports-search {
+    flex: 1 1 100%;
+    max-width: none;
+  }
+
+  .files-tools .ports-select-wrap {
+    flex: 1 1 auto;
+  }
+
+  .files-tools .ports-select {
+    width: 100%;
   }
 
   .ports-search {
