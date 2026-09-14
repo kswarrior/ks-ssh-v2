@@ -975,7 +975,7 @@ function SSHPage({
                               // Preserve #k=... so E2E survives the navigation.
                               const t = e.token.trim().toUpperCase()
                               const k = parseFragmentKey()
-                              return k ? `/v/${t}#k=${k}` : `/v/${t}`
+                              return k ? `${relayBase}/v/${t}#k=${k}` : `${relayBase}/v/${t}`
                             })()}
                             aria-label={`Visit ${e.name}`}
                             title="Visit — open the full CLI frontend (Terminal, Files, Ports, Host) for this machine"
@@ -1191,7 +1191,7 @@ function SessionPage({
           return
         }
         // HTTP has nothing yet — try live WSS (agent may be mid-upload).
-        await loadViaWss(activeToken, ctrl.signal, cancelled, {
+        await loadViaWss(activeToken, wsHost, ctrl.signal, cancelled, {
           setMeta,
           setSrcDoc,
           setError,
@@ -1208,7 +1208,7 @@ function SessionPage({
       cancelled = true
       ctrl.abort()
     }
-  }, [activeToken, cacheBust])
+  }, [activeToken, cacheBust, relayBase, wsHost])
 
   // Live reload: when the agent re-pushes, the room broadcasts ui-ready.
   useEffect(() => {
@@ -1264,7 +1264,7 @@ function SessionPage({
         // Already closed — ignore.
       }
     }
-  }, [activeToken, srcDoc])
+  }, [activeToken, srcDoc, wsHost])
 
   const openFullscreen = async () => {
     try {
@@ -1275,7 +1275,7 @@ function SessionPage({
         // Fallback: raw /v/ page in a new tab is already fullscreen-capable.
         // Preserve #k=... so E2E survives.
         const k = parseFragmentKey()
-        window.open(k ? `/v/${activeToken}#k=${k}` : `/v/${activeToken}`, '_blank', 'noopener')
+        window.open(k ? `${relayBase}/v/${activeToken}#k=${k}` : `${relayBase}/v/${activeToken}`, '_blank', 'noopener')
       }
     } catch {
       setError('Fullscreen blocked — use "Open raw" in a new tab instead.')
@@ -1289,11 +1289,11 @@ function SessionPage({
   const injectedSrcDoc = useMemo(() => {
     if (srcDoc === null || !activeToken) return null
     try {
-      return withRelayGlobals(srcDoc, activeToken, window.location.host)
+      return withRelayGlobals(srcDoc, activeToken, wsHost)
     } catch {
       return srcDoc
     }
-  }, [srcDoc, activeToken])
+  }, [srcDoc, activeToken, wsHost])
 
   if (!activeToken) {
     return (
@@ -1314,7 +1314,7 @@ function SessionPage({
 
   const frameSrc =
     meta?.hasUi && srcDoc === null
-      ? `/v/${activeToken}${cacheBust ? `?t=${cacheBust}` : ''}`
+      ? `${relayBase}/v/${activeToken}${cacheBust ? `?t=${cacheBust}` : ''}`
       : undefined
 
   return (
@@ -1335,7 +1335,9 @@ function SessionPage({
                 className="btn btn-sm"
                 href={(() => {
                   const k = parseFragmentKey()
-                  return k ? `/v/${activeToken}#k=${k}` : `/v/${activeToken}`
+                  return k
+                    ? `${relayBase}/v/${activeToken}#k=${k}`
+                    : `${relayBase}/v/${activeToken}`
                 })()}
                 target="_blank"
                 rel="noreferrer"
@@ -1476,6 +1478,7 @@ function SessionPage({
 
 async function loadViaWss(
   token: string,
+  wsHost: string,
   signal: AbortSignal,
   cancelled: boolean,
   hooks: {
@@ -1493,7 +1496,7 @@ async function loadViaWss(
     const scheme = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
     let ws: WebSocket
     try {
-      ws = new WebSocket(`${scheme}//${window.location.host}/v1/client?token=${token}`)
+      ws = new WebSocket(`${scheme}//${wsHost}/v1/client?token=${token}`)
     } catch {
       hooks.setError(`No UI for ${token} yet — is the CLI running with --token=${token}?`)
       hooks.setChecking(false)
