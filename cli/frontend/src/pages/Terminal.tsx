@@ -639,8 +639,19 @@ export default function TerminalPage({
     loadActiveId(loadTerms().length > 0 ? (loadTerms()[0]?.id ?? null) : null),
   )
   const [statuses, setStatuses] = useState<Record<string, TermStatus>>({})
+  // Running process per tab for the tab label (null = idle → "terminal").
+  const [procs, setProcs] = useState<Record<string, string | null>>({})
   // Pending close confirmation — the kill only happens after Confirm.
   const [confirmId, setConfirmId] = useState<string | null>(null)
+  // Open ⋮ tab menu + its screen anchor (fixed positioning avoids clipping
+  // inside the scrollable tab bar).
+  const [menuId, setMenuId] = useState<string | null>(null)
+  const [menuAnchor, setMenuAnchor] = useState<{
+    top: number
+    right: number
+  } | null>(null)
+  // Live session actions per tab, registered by each ShellSession.
+  const handlesRef = useRef(new Map<string, TermHandle>())
 
   // Persist tabs so a refresh or revisit reattaches to the same shells.
   useEffect(() => {
@@ -667,14 +678,25 @@ export default function TerminalPage({
       setActiveId(next.length > 0 ? next[next.length - 1].id : null)
     }
     if (confirmId === id) setConfirmId(null)
+    setMenuId((cur) => (cur === id ? null : cur))
+    handlesRef.current.delete(id)
     setStatuses((prev) => {
+      const next = { ...prev }
+      delete next[id]
+      return next
+    })
+    setProcs((prev) => {
+      if (!(id in prev)) return prev
       const next = { ...prev }
       delete next[id]
       return next
     })
   }
 
-  const requestClose = (id: string) => setConfirmId(id)
+  const requestClose = (id: string) => {
+    setMenuId(null)
+    setConfirmId(id)
+  }
 
   const confirmClose = () => {
     if (confirmId) closeTerminal(confirmId)
@@ -692,6 +714,30 @@ export default function TerminalPage({
       prev.map((t) => (t.id === id && t.sid !== sid ? { ...t, sid } : t)),
     )
   }, [])
+
+  // Child reports its running process so the tab shows it (null = idle).
+  const handleProc = useCallback((id: string, proc: string | null) => {
+    setProcs((prev) => (prev[id] === proc ? prev : { ...prev, [id]: proc }))
+  }, [])
+
+  // Child registers its live actions for the ⋮ tab menu.
+  const handleHandle = useCallback((id: string, h: TermHandle | null) => {
+    if (h) handlesRef.current.set(id, h)
+    else handlesRef.current.delete(id)
+  }, [])
+
+  // Escape closes the open ⋮ tab menu.
+  useEffect(() => {
+    if (!menuId) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setMenuId(null)
+        setMenuAnchor(null)
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [menuId])
 
   // First run: complete blank + centered button only.
   if (sessions.length === 0) {
@@ -730,6 +776,39 @@ export default function TerminalPage({
   const confirmTerm = confirmId
     ? sessions.find((t) => t.id === confirmId) ?? null
     : null
+  const menuTerm =
+    menuId && menuAnchor
+      ? sessions.find((t) => t.id === menuId) ?? null
+      : null
+
+  const openMenu = (t: TermSession, anchor: HTMLElement) => {
+    setActiveId(t.id)
+    if (menuId === t.id) {
+      setMenuId(null)
+      setMenuAnchor(null)
+      return
+    }
+    const r = anchor.getBoundingClientRect()
+    setMenuId(t.id)
+    setMenuAnchor({
+      top: Math.min(r.bottom + 6, window.innerHeight - 240),
+      right: Math.max(8, window.innerWidth - r.right),
+    })
+  }
+
+  const closeMenu = () => {
+    setMenuId(null)
+    setMenuAnchor(null)
+  }
+
+  const menuAction = (fn: (h: TermHandle) => void) => {
+    if (menuTerm) {
+      const h = handlesRef.current.get(menuTerm.id)
+      // Session actions refocus the terminal themselves.
+      if (h) fn(h)
+    }
+    closeMenu()
+  }
 
   return (
     <section className="page term-page" aria-labelledby="page-title-terminal">
@@ -740,6 +819,10 @@ export default function TerminalPage({
         {sessions.map((t, i) => {
           const isActive = t.id === active.id
           const st = statuses[t.id] ?? 'connecting'
+          // Label = running process, else "terminal" — max 8 chars + "...".
+          const proc = procs[t.id] ?? null
+          const label = tabLabel(proc)
+          const fullTitle = proc ? `${t.name} — ${proc}` : t.name
           return (
             <div
               key={t.id}
@@ -769,6 +852,9 @@ export default function TerminalPage({
                 } else if (e.key === 'Delete') {
                   e.preventDefault()
                   requestClose(t.id)
+                } else if (e.key === 'Escape') {
+                  setMenuId(null)
+                  setMenuAnchor(null)
                 }
               }}
             >
@@ -785,31 +871,34 @@ export default function TerminalPage({
                 <rect x="2" y="4" width="20" height="16" rx="2" />
                 <path d="m7 9 3 3-3 3M13 15h4" />
               </svg>
-              <span className="term-tab-name">{t.name}</span>
+              <span className="term-tab-name" title={fullTitle}>
+                {label}
+              </span>
               <span
                 className={`term-tab-dot${st === 'online' ? ' on' : st === 'connecting' ? ' wait' : ''}`}
+                title={st}
                 aria-hidden="true"
               />
               <button
                 type="button"
-                className="term-tab-close"
-                aria-label={`Close ${t.name}`}
-                title={`Close ${t.name}`}
+                className="term-tab-dots"
+                aria-label={`Actions for ${fullTitle}`}
+                title={`Actions for ${fullTitle}`}
+                aria-haspopup="menu"
+                aria-expanded={menuId === t.id}
                 onClick={(e) => {
                   e.stopPropagation()
-                  requestClose(t.id)
+                  openMenu(t, e.currentTarget)
                 }}
               >
                 <svg
                   viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2.4"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
+                  fill="currentColor"
                   aria-hidden="true"
                 >
-                  <path d="M18 6 6 18M6 6l12 12" />
+                  <circle cx="12" cy="5" r="1.8" />
+                  <circle cx="12" cy="12" r="1.8" />
+                  <circle cx="12" cy="19" r="1.8" />
                 </svg>
               </button>
             </div>
@@ -834,10 +923,84 @@ export default function TerminalPage({
               sid={t.sid}
               onStatus={handleStatus}
               onReady={handleReady}
+              onProc={handleProc}
+              onHandle={handleHandle}
             />
           </div>
         ))}
       </div>
+      {menuTerm && menuAnchor && (
+        <>
+          <div
+            className="term-menu-overlay"
+            onClick={closeMenu}
+            aria-hidden="true"
+          />
+          <div
+            className="term-tab-menu"
+            role="menu"
+            aria-label={`Actions for ${menuTerm.name}`}
+            style={{ top: menuAnchor.top, right: menuAnchor.right }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="term-tab-menu-head" title={menuTerm.name}>
+              {(procs[menuTerm.id] ?? null)
+                ? `Running: ${procs[menuTerm.id]}`
+                : menuTerm.name}
+            </div>
+            <button
+              type="button"
+              role="menuitem"
+              className="term-tab-menu-item"
+              disabled={
+                (statuses[menuTerm.id] ?? 'connecting') !== 'online' ||
+                !(procs[menuTerm.id] ?? null)
+              }
+              title="Send Ctrl+C to the foreground process"
+              onClick={() => menuAction((h) => h.stop())}
+            >
+              Stop process
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              className="term-tab-menu-item"
+              onClick={() => menuAction((h) => h.clear())}
+            >
+              Clear screen
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              className="term-tab-menu-item"
+              onClick={() => menuAction((h) => h.reconnect())}
+            >
+              Reconnect
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              className="term-tab-menu-item"
+              onClick={() => menuAction((h) => h.copy())}
+            >
+              Copy output
+            </button>
+            <div className="term-tab-menu-sep" aria-hidden="true" />
+            <button
+              type="button"
+              role="menuitem"
+              className="term-tab-menu-item danger"
+              onClick={() => {
+                const id = menuTerm.id
+                closeMenu()
+                requestClose(id)
+              }}
+            >
+              Delete terminal
+            </button>
+          </div>
+        </>
+      )}
       {confirmTerm && (
         <div
           className="term-confirm-overlay"

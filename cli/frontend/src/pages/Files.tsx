@@ -516,6 +516,22 @@ export default function FilesPage() {
   const [showHidden, setShowHidden] = useState(true)
   const [query, setQuery] = useState('')
   const [typeFilter, setTypeFilter] = useState<FileTypeFilter>('all')
+  const [sortKey, setSortKey] = useState<SortKey>('name')
+  const [sortDir, setSortDir] = useState<SortDir>('asc')
+  const [view, setView] = useState<ViewMode>('grid')
+  const [selected, setSelected] = useState<string[]>([])
+  const [previewing, setPreviewing] = useState<FileEntry | null>(null)
+  const [propsEntry, setPropsEntry] = useState<FileEntry | null>(null)
+  const [propsMode, setPropsMode] = useState('')
+  const [propsBusy, setPropsBusy] = useState(false)
+  const [propsError, setPropsError] = useState<string | null>(null)
+  const [transfer, setTransfer] = useState<{ entry: FileEntry; mode: TransferMode } | null>(null)
+  const [transferDir, setTransferDir] = useState('')
+  const [transferName, setTransferName] = useState('')
+  const [transferBusy, setTransferBusy] = useState(false)
+  const [transferError, setTransferError] = useState<string | null>(null)
+  const [dropActive, setDropActive] = useState(false)
+  const dragDepth = useRef(0)
   const [menuOpen, setMenuOpen] = useState<string | null>(null)
   const [renaming, setRenaming] = useState<string | null>(null)
   const [newName, setNewName] = useState('')
@@ -592,6 +608,7 @@ export default function FilesPage() {
       setRenaming(null)
       setConfirmDelete(null)
       setActionError(null)
+      setSelected([])
     } catch (e) {
       setError(
         e instanceof Error
@@ -713,13 +730,28 @@ export default function FilesPage() {
   )
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase()
-    return base.filter((e) => {
+    const out = base.filter((e) => {
       if (typeFilter === 'dirs' && !e.is_dir) return false
       if (typeFilter === 'files' && e.is_dir) return false
       if (!q) return true
       return e.name.toLowerCase().includes(q)
     })
-  }, [base, typeFilter, query])
+    // Folders stay grouped first (backend parity), then the chosen sort.
+    const dir = sortDir === 'asc' ? 1 : -1
+    out.sort((a, b) => {
+      if (a.is_dir !== b.is_dir) return a.is_dir ? -1 : 1
+      switch (sortKey) {
+        case 'size':
+          return (a.size - b.size) * dir
+        case 'modified':
+          return ((a.modified ?? -1) - (b.modified ?? -1)) * dir
+        case 'name':
+        default:
+          return a.name.toLowerCase().localeCompare(b.name.toLowerCase()) * dir
+      }
+    })
+    return out
+  }, [base, typeFilter, query, sortKey, sortDir])
   const filtering = query.trim() !== '' || typeFilter !== 'all'
   const dirCount = base.filter((e) => e.is_dir).length
   const fileCount = base.length - dirCount

@@ -1298,6 +1298,117 @@
   opacity: 1;
 }
 
+.term-tab-name {
+  display: inline-block;
+  max-width: 96px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: bottom;
+}
+
+/* ---------- Terminal tab ⋮ menu ---------- */
+
+.term-tab-dots {
+  border: none;
+  background: transparent;
+  color: inherit;
+  width: 26px;
+  height: 24px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  cursor: pointer;
+  opacity: 0.7;
+  flex-shrink: 0;
+}
+
+.term-tab-dots svg {
+  width: 14px;
+  height: 14px;
+  display: block;
+}
+
+.term-tab-dots:hover {
+  background: rgba(255, 255, 255, 0.1);
+  opacity: 1;
+}
+
+.term-menu-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  background: transparent;
+}
+
+.term-tab-menu {
+  position: fixed;
+  z-index: 71;
+  min-width: 196px;
+  max-width: min(260px, calc(100vw - 16px));
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  border: 1px solid var(--glass-border);
+  border-radius: 10px;
+  background: var(--panel-bg);
+  -webkit-backdrop-filter: blur(24px) saturate(150%);
+  backdrop-filter: blur(24px) saturate(150%);
+  box-shadow: var(--shadow-lg);
+}
+
+.term-tab-menu-head {
+  padding: 6px 10px 8px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  opacity: 0.6;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.term-tab-menu-item {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  text-align: left;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+  padding: 8px 10px;
+  border-radius: 7px;
+  cursor: pointer;
+}
+
+.term-tab-menu-item:hover:not(:disabled) {
+  background: var(--hover-bg);
+}
+
+.term-tab-menu-item:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.term-tab-menu-item.danger {
+  color: #ff7b72;
+}
+
+.term-tab-menu-item.danger:hover {
+  background: rgba(255, 95, 87, 0.12);
+}
+
+.term-tab-menu-sep {
+  height: 1px;
+  margin: 4px 6px;
+  background: var(--glass-border);
+}
+
 /* ---------- Terminal close confirmation ---------- */
 
 .term-confirm-overlay {
