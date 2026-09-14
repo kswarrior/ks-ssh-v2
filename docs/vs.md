@@ -19,8 +19,8 @@ sshx.io · **tmate** · **upterm** · **ttyd** · **wetty** = wetty/GoTTY ·
 | Terminal | Real PTY, multi-tab + vertical split, v2 seq/ack gap-free resume + ping RTT, predictive echo, CJK/IME + search + export, touch bar, bell/unread/latency (`shell.rs`, `Terminal.tsx`) | Reference PTY + `tmux`/`mosh` | Canvas panes, cursors, predictive echo, ephemeral | tmux preserved | Plain shared session | Solid PTY, CJK/IME | Login/SSH wrapper | Web SSH | Gateway SSH | Joint sessions | Plain SSH over net | Full terminal + editor |
 | Files / ports / host | HOME-jailed files/editor (1/5/100MB caps) + `/proc` ports + kill + host metrics (`files.rs`, `ports.rs`, `host.rs`) | `scp`/`sftp` only | None | None | None | ZMODEM only | None | SFTP browser | SFTP browser | `scp`/SFTP, no health dash | SFTP/SCP | Full editor + port-fwd, no host dash |
 | Auth / audit | Argon2id + RBAC (admin/operator/viewer) + TOTP/SSO + audit log + recording + opt relay PIN (`auth.rs`, `db.rs`, `shell.rs`, Audit/Recordings pages) | Keys/certs, no SSO/rec | Bearer link only | Bearer ro/rw links | SSH keys | Basic auth, `-R`, `-o` once | Login flags | Per-host SSH creds | LDAP/OIDC + recording | SSO/RBAC/MFA + recording (best) | IdP ACLs + recorder | MS/GitHub IdP + Live Share |
-| Frontend | Embedded single-file bundle + CF SPA (Home/SSH/View/Install/Settings, `App.tsx`) | Terminal client | Web canvas + chat | Basic web + SSH | None (SSH client) | Web xterm | Web login | Web client | HTML5 RDP/VNC/SSH | Web + `tsh` | Admin console + Serve | `vscode.dev` |
-| Routes / API | `/api/files\|ports\|host\|auth/*`, `/v1/shell`, `/v1/agent\|client`, `/v/TOKEN`, `/api/ui/*` | `ssh`/`scp`/`sftp` CLI | `sshx` → link; `… \| sh -s run` in CI | `tmate` → 4 endpoints | `upterm host -- bash` | `ttyd -p 7681 bash` | `wetty --ssh-host` / `gotty -w` | Host/user/key form | Connection mgmt API | Cluster API | Tailnet / Access policy | `code tunnel` |
+| Frontend | Embedded single-file bundle + CF SPA (Home/SSH/Session/Install/Settings, `App.tsx`); SSH `Visit` opens raw full-page CLI at `/v/TOKEN#k=…` (no CF chrome, `#k` preserved) | Terminal client | Web canvas + chat | Basic web + SSH | None (SSH client) | Web xterm | Web login | Web client | HTML5 RDP/VNC/SSH | Web + `tsh` | Admin console + Serve | `vscode.dev` |
+| Routes / API | `/api/files\|ports\|host\|auth/*`, `/v1/shell`, `/v1/agent\|client`, `/v/TOKEN`, `/api/ui/*`, live relay status `/api/ssh/status?token=` + `/api/relay/<TOKEN>/status` (`?ui=status` → `agentOnline/hasUi/gated`), `/api/health` (now with `now`); `/api/ssh/*` stub removed (404 points to status API) | `ssh`/`scp`/`sftp` CLI | `sshx` → link; `… \| sh -s run` in CI | `tmate` → 4 endpoints | `upterm host -- bash` | `ttyd -p 7681 bash` | `wetty --ssh-host` / `gotty -w` | Host/user/key form | Connection mgmt API | Cluster API | Tailnet / Access policy | `code tunnel` |
 | Build / install | One static binary (`cli/release/ks-ssh`) + `wrangler` Worker; `curl …/ks-ssh -o ks-ssh && ./ks-ssh` | OS preinstall | `curl -sSf https://sshx.io/get \| sh` (self-host discouraged) | Package install; `tmate-server` self-host | Binary / `go install` | Single C binary | npm / binary / Docker | Docker / demo site | Servlet + DB + proxy | Cluster ops / Cloud | Account + enrol nodes | MS account, not self-host |
 
 ## What KS SSH actually is (this repo, latest)
@@ -38,16 +38,29 @@ sshx.io · **tmate** · **upterm** · **ttyd** · **wetty** = wetty/GoTTY ·
   Enforced on the shared router, so login/RBAC/audit apply over the relay
   too (agent proxies to a loopback server with the same middleware,
   forwarding the viewer's cookie, `main.rs:293`, `relay.rs:560,719`).
-- **Relay:** `--no-serve --token=` → outbound WSS + UI bundle push → `/v/TOKEN`,
-  `#/view/TOKEN`; `--e2e-key=` reuses `k`, `--no-ui` skips push, `--no-e2e` =
+- **Relay:** `--no-serve --token=` → outbound WSS + UI bundle push → `/v/TOKEN`
+  (raw full-page CLI, no CF chrome) and the lobby `#/session/TOKEN` (CF chrome
+  + iframe/`srcDoc`); SSH-list `Visit` links straight to `/v/TOKEN#k=…`
+  preserving `#k` (`App.tsx`), with `Open raw`/fullscreen fallbacks doing the
+  same. `--e2e-key=` reuses `k`, `--no-ui` skips push, `--no-e2e` =
   legacy plaintext (explicit escape hatch only: loud warning + `relay-downgrade`
-  audit). Fresh tokens are 9-char (5-char legacy still routes,
-  `relay.rs:49,78`); token scans hit per-IP + per-scan 429 budgets
+  audit). Tokens: backend accepts exactly 5-or-9 alphanumerics
+  (`relay.rs:78-81`, CLI error text says "5-9"); worker/CF route any 5–9
+  (`worker/limit.ts` `TOKEN_RE`, `App.tsx` `TOKEN_EXACT_RE` is 5-or-9); 6–8
+  chars therefore fail at the CLI (`bad token`) — use 5 or 9. Token scans hit per-IP + per-scan 429 budgets
   (`worker/limit.ts:15-27`, `worker/index.ts:47,72`). The pushed bundle is
   full-function: HTTP `/api/*` rides `rpc-*` and PTY rides
   `shell-open`/`shell-send` to a loopback server with
   the same router/auth/DB (`relay.rs:14,889,991`, `main.rs:293`), audited as
   `relay-rpc`/`relay-shell-open`/`relay-shell-close` (token only).
+  Live status (no fake stubs): `GET /api/ssh/status?token=` and
+  `GET /api/relay/<TOKEN>/status` report `agentOnline/hasUi/gated`
+  (`worker/index.ts`, `room.ts` `?ui=status`), consumed by the SSH list, home
+  dashboard, and installation health check (`App.tsx` `fetchRelayStatus`,
+  configurable relay host/timeout in Settings); `relay-check.mjs` pins this +
+  bans demo/fake/example stubs. Chunk uploads are 0-index safe
+  (`room.ts` explicit `i` parse — `Number(0) || -1` used to drop chunk 0 and
+  break every push as `incomplete`).
 - **Panel:** Files + Ports + Host are served by `/api/*` — locally and, via
   the `rpc-*` bridge, over relay with the same login/RBAC.
 - **Audit + recording:** append-only SQLite audit (`db.rs:335`, `GET /api/audit`,
@@ -106,6 +119,15 @@ per-core/df-filtered host (`host.rs`), `enc` HKDF/AAD/seq + `?k=` reject
 `sshx` re-checked Sep 2026 (unchanged: canvas + E2E + Fly mesh, self-host
 discouraged). Panel split (cases 5–7) favours single-box managers by design —
 that is why KS leads; flip the weight to collab/audit and sshx/Teleport win.
+
+Latest fixes 2026-09-14 (relay UX + honesty, no score change): `room.ts`
+chunk-0 parse fix (every UI push failed as `incomplete` before);
+SSH `Visit` → raw full-page `/v/TOKEN#k=…` (same UI as `--port`, no CF
+chrome, `#k` preserved; `Open raw`/fullscreen same); live relay status
+(`agentOnline/hasUi/gated`) drives SSH list/home/installation health;
+`/api/ssh/*` fake stub removed; `relay-check.mjs` bans demo/fake/example
+stubs and pins the status API. Token lengths clarified above (CLI: exactly
+5-or-9).
 
 Case 9 re-scored 2026-09-14: KS 40 → **100** (Teleport parity at homelab
 scale). Evidence per rubric item:
