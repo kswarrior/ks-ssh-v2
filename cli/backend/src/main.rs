@@ -107,6 +107,8 @@ async fn serve(host: String, port: u16, auth: Option<Arc<AuthState>>) {
             get(files::api_list_files).delete(files::api_delete_file),
         )
         .route("/api/files/rename", post(files::api_rename_file))
+        .route("/api/files/copy", post(files::api_copy_file))
+        .route("/api/files/chmod", post(files::api_chmod))
         .route("/api/files/mkdir", post(files::api_mkdir))
         .route("/api/files/upload", post(files::api_upload_file))
         .route("/api/files/upload-url", post(files::api_upload_url))
