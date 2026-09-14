@@ -4,6 +4,7 @@ import {
   RATE_IP_WINDOW_MS,
   RATE_MISS_LIMIT,
   RATE_MISS_WINDOW_MS,
+  TOKEN_RE,
   checkLimit,
   clientIp,
   rateLimited,
@@ -12,8 +13,6 @@ import {
 } from './limit.js'
 
 export { TunnelRoom }
-
-const TOKEN_RE = /^(?:[A-Z0-9]{5}|[A-Z0-9]{9})$/
 
 // Per-isolate fixed windows: IP-wide + per-IP token-miss (scan) budgets.
 // (DO rooms additionally enforce per-socket message rates in room.ts.)
