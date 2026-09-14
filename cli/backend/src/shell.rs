@@ -36,13 +36,15 @@
 //! processes cannot survive a restart (the OS child dies with us).
 
 use axum::{
+    Extension,
     extract::{
-        Query,
+        Path, Query,
         ws::{CloseFrame, Message, WebSocket, WebSocketUpgrade},
     },
+    http::{HeaderMap, StatusCode},
     response::IntoResponse,
 };
-use crate::db;
+use crate::{auth, db};
 use futures_util::{SinkExt, StreamExt};
 use portable_pty::{CommandBuilder, NativePtySystem, PtySize, PtySystem};
 use serde::Deserialize;
@@ -64,6 +66,30 @@ const SESSION_TTL: Duration = Duration::from_secs(30 * 60);
 const MAX_SESSIONS: usize = 64;
 /// Close code telling a socket it lost a takeover fight.
 const CLOSE_SUPERSEDED: u16 = 4000;
+
+/// Session recording (case 9): timestamped input+output frames for replay.
+/// Enabled by default when auth is on (`--record` default on when auth on);
+/// `--no-record` disables. Consent banner in the Terminal page reflects
+/// `GET /api/record/status`. Frames live in memory (capped) and in SQLite
+/// (`rec_frames`, `--record-max-mb` per session) when `--db` is on.
+static RECORD_ENABLED: AtomicBool = AtomicBool::new(true);
+
+pub fn set_recording_enabled(on: bool) {
+    RECORD_ENABLED.store(on, Ordering::SeqCst);
+}
+
+pub fn is_recording_enabled() -> bool {
+    RECORD_ENABLED.load(Ordering::SeqCst)
+}
+
+/// In-memory recording frame (mirrored to SQLite via `crate::db`).
+#[derive(Clone, Debug)]
+struct RecMem {
+    seq: u64,
+    ts_ms: i64,
+    kind: &'static str, // "in" | "out"
+    data: Vec<u8>,
+}
 
 /// Negotiated protocol version. v1 = legacy shapes (default).
 const PROTO_V2: u8 = 2;
@@ -116,6 +142,8 @@ fn encode_frame(base: u64, bytes: &[u8]) -> Vec<u8> {
 
 /// Split a v2 binary frame back into `(stream offset, PTY bytes)`.
 /// Returns `None` when the frame is too short to hold an offset.
+/// (Decoded by the web client; kept here for the wire-format unit test.)
+#[allow(dead_code)]
 fn decode_frame(frame: &[u8]) -> Option<(u64, &[u8])> {
     if frame.len() < 8 {
         return None;
@@ -123,6 +151,55 @@ fn decode_frame(frame: &[u8]) -> Option<(u64, &[u8])> {
     let mut b = [0u8; 8];
     b.copy_from_slice(&frame[..8]);
     Some((u64::from_le_bytes(b), &frame[8..]))
+}
+
+/// Append one recording frame (in-memory cap + SQLite mirror).
+/// No-op when recording is disabled or `data` is empty.
+fn record_frame(session: &Session, kind: &'static str, data: &[u8]) {
+    if !is_recording_enabled() || data.is_empty() {
+        return;
+    }
+    let seq = session.rec_seq.fetch_add(1, Ordering::SeqCst);
+    let ts_ms = db::now_ms();
+    // In-memory ring (capped at --record-max-mb).
+    {
+        let cap = db::record_max_bytes();
+        if let Ok(mut rec) = session.rec.lock() {
+            rec.push(RecMem {
+                seq,
+                ts_ms,
+                kind,
+                data: data.to_vec(),
+            });
+            session.rec_bytes.fetch_add(data.len() as u64, Ordering::SeqCst);
+            // Drop oldest until under cap (bounded).
+            for _ in 0..1024 {
+                let total = session.rec_bytes.load(Ordering::SeqCst);
+                if total <= cap || rec.is_empty() {
+                    break;
+                }
+                if let Some(old) = rec.first().map(|f| f.data.len() as u64) {
+                    rec.remove(0);
+                    session.rec_bytes.fetch_sub(old, Ordering::SeqCst);
+                } else {
+                    break;
+                }
+            }
+        }
+    }
+    // SQLite mirror (cap enforced inside `db::rec_append`).
+    db::rec_append(&session.id, ts_ms, kind, data);
+}
+
+/// Test helper: trim a `RecMem` vec to `cap` bytes (drops oldest first).
+#[cfg(test)]
+fn trim_rec_mem(rec: &mut Vec<RecMem>, cap: u64) -> u64 {
+    let mut total: u64 = rec.iter().map(|f| f.data.len() as u64).sum();
+    while total > cap && !rec.is_empty() {
+        total = total.saturating_sub(rec[0].data.len() as u64);
+        rec.remove(0);
+    }
+    total
 }
 
 /// Exact-shape v2 control: `{"type":"ping","t":ms}` -> the echoed `t`.
@@ -170,6 +247,10 @@ struct Session {
     created_at: u64,
     /// Ring changed since the last SQLite flush (set by the PTY reader).
     dirty: AtomicBool,
+    /// Session recording frames (in-memory, capped; mirrored to SQLite).
+    rec: StdMutex<Vec<RecMem>>,
+    rec_seq: AtomicU64,
+    rec_bytes: AtomicU64,
 }
 
 static SESSIONS: LazyLock<tokio::sync::Mutex<HashMap<String, Arc<Session>>>> =
@@ -249,6 +330,9 @@ fn spawn_session(id: String) -> anyhow::Result<Arc<Session>> {
         last_active: StdMutex::new(Instant::now()),
         created_at: db::now_secs(),
         dirty: AtomicBool::new(false),
+        rec: StdMutex::new(Vec::new()),
+        rec_seq: AtomicU64::new(0),
+        rec_bytes: AtomicU64::new(0),
     });
 
     // PTY writer lives on its own blocking thread so big pastes never
@@ -284,6 +368,8 @@ fn spawn_session(id: String) -> anyhow::Result<Arc<Session>> {
                         }
                     }
                     reader_session.dirty.store(true, Ordering::SeqCst);
+                    // Session recording (output frame).
+                    record_frame(&reader_session, "out", bytes);
                     let tx = reader_session.sub.lock().ok().and_then(|g| g.clone());
                     if let Some(tx) = tx {
                         // Detached (or taken over) — ring keeps the bytes.
@@ -372,6 +458,9 @@ async fn get_or_create_session(want: Option<String>) -> Arc<Session> {
                 last_active: StdMutex::new(Instant::now()),
                 created_at: db::now_secs(),
                 dirty: AtomicBool::new(false),
+                rec: StdMutex::new(Vec::new()),
+                rec_seq: AtomicU64::new(0),
+                rec_bytes: AtomicU64::new(0),
             });
             // Don't even store it — nothing to reattach to.
             return s;
