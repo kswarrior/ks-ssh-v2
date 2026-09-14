@@ -48,7 +48,6 @@ const TOKEN_ALPHABET: &[u8] = b"ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 /// 5-char legacy tokens still route for compat.
 pub const TOKEN_LEN_NEW: usize = 9;
 
-const TOKEN_ALPHABET: &[u8] = b"ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 /// Raw bytes per ui-chunk (~64KB base64 per WS message, well under limits).
 const UI_CHUNK_RAW: usize = 48 * 1024;
 /// Raw bytes per rpc-chunk (same 48KB budget as the UI upload).
@@ -267,6 +266,8 @@ async fn agent_session(
     e2e_key: Option<E2eKey>,
     relay_pin: Option<std::sync::Arc<crate::auth::RelayPinState>>,
     local_base: String,
+    sess: String,
+    epoch: u64,
 ) -> anyhow::Result<()> {
     let (ws, _) = connect_async(url)
         .await
@@ -275,14 +276,30 @@ async fn agent_session(
     println!("relay connected (token {token})");
     let (mut tx, mut rx) = ws.split();
 
-    let mut e2e: Option<E2e> = e2e_key.map(|k| E2e::new(k, token));
-    let mut peer_e2e = false;
+    let local_fp: Option<String> = e2e_key.as_ref().map(|k| k.fingerprint());
+    let shared: SharedE2e = Arc::new(Mutex::new(e2e_key.clone().map(|k| {
+        if sess.is_empty() {
+            E2e::new(k, token)
+        } else {
+            E2e::new_session(k, token, &sess, epoch, true)
+        }
+    })));
+    let e2e_on = e2e_key.is_some();
+    let peer: SharedPeer = Arc::new(AtomicBool::new(false));
 
     let hello = serde_json::to_string(&Hello {
         kind: "hello",
         role: "agent",
         token,
-        e2e: if e2e.is_some() { Some(E2E_ALG) } else { None },
+        e2e: if e2e_on { Some(E2E_ALG) } else { None },
+        sess: if e2e_on && !sess.is_empty() {
+            Some(sess.as_str())
+        } else {
+            None
+        },
+        epoch: if e2e_on { Some(epoch) } else { None },
+        fp: local_fp.as_deref(),
+        relay_auth: if relay_pin.is_some() { Some(true) } else { None },
     })?;
     tx.send(Message::Text(hello.into())).await?;
 
@@ -313,6 +330,9 @@ async fn agent_session(
     let mut keepalive = tokio::time::interval(std::time::Duration::from_secs(20));
     // `--relay-auth`: track whether the paired viewer presented the PIN.
     // Plain `bool` per connection (single viewer per agent session in v1).
+    // The PIN arrives inside `enc` (`{"type":"auth","pin":"..."}`) when both
+    // sides do E2E; legacy plaintext `hello.pin` is accepted only from
+    // non-E2E peers for compat (and ignored once E2E is negotiated).
     let mut viewer_ok = relay_pin.is_none();
     let res: anyhow::Result<()> = loop {
         tokio::select! {
@@ -334,8 +354,10 @@ async fn agent_session(
                             &text,
                             push_ui,
                             token,
-                            &mut e2e,
-                            &mut peer_e2e,
+                            shared.clone(),
+                            peer.clone(),
+                            e2e_on,
+                            local_fp.clone(),
                             &relay_pin,
                             &mut viewer_ok,
                         )
@@ -400,10 +422,16 @@ async fn push_ui_bundle(tx: &mut WsTx, token: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Send a JSON value sealed inside `enc` (E2E on). No-op error when E2E off.
-async fn send_enc_via(out_tx: &OutTx, e2e: &mut E2e, value: &serde_json::Value) -> anyhow::Result<()> {
-    let pt = serde_json::to_vec(value)?;
-    let env = e2e.encrypt_next(&pt)?;
+/// Send a JSON value sealed inside `enc` via shared state (E2E on).
+async fn send_enc_shared(out_tx: &OutTx, shared: &SharedE2e, value: &serde_json::Value) -> anyhow::Result<()> {
+    let mut padded = value.clone();
+    crate::e2e::add_padding(&mut padded);
+    let pt = serde_json::to_vec(&padded)?;
+    let mut g = shared.lock().await;
+    let Some(state) = g.as_mut() else {
+        anyhow::bail!("e2e off");
+    };
+    let env = state.encrypt_next(&pt)?;
     let text = crate::e2e::envelope_to_text(&env)?;
     let _ = out_tx.send(text);
     Ok(())
@@ -412,6 +440,48 @@ async fn send_enc_via(out_tx: &OutTx, e2e: &mut E2e, value: &serde_json::Value) 
 fn send_out(out_tx: &OutTx, value: &serde_json::Value) {
     if let Ok(text) = serde_json::to_string(value) {
         let _ = out_tx.send(text);
+    }
+}
+
+/// Strict router for agent→client responses: when E2E is on and the peer
+/// negotiated E2E, seal via `enc`; when E2E is on but the peer did not,
+/// refuse (caller audits deny) instead of leaking plaintext; when E2E is
+/// off (`--no-e2e`), send plaintext (explicit escape hatch).
+async fn send_strict(
+    out_tx: &OutTx,
+    shared: &SharedE2e,
+    peer: &SharedPeer,
+    e2e_on: bool,
+    value: &serde_json::Value,
+) -> bool {
+    if e2e_on {
+        if !peer.load(Ordering::SeqCst) {
+            return false;
+        }
+        return send_enc_shared(out_tx, shared, value).await.is_ok();
+    }
+    send_out(out_tx, value);
+    true
+}
+
+fn peer_e2e_now(peer: &SharedPeer) -> bool {
+    peer.load(Ordering::SeqCst)
+}
+
+async fn rpc_error_shared(
+    out_tx: &OutTx,
+    shared: &SharedE2e,
+    peer: &SharedPeer,
+    e2e_on: bool,
+    token: &str,
+    id: &str,
+    status: u16,
+    message: &str,
+) {
+    let v = serde_json::json!({"type":"rpc-error","id":id,"status":status,"message":message});
+    if !send_strict(out_tx, shared, peer, e2e_on, &v).await {
+        eprintln!("{E2E_ERROR_MSG} (rpc-error {status})");
+        crate::db::audit("-", "local", "relay-downgrade", token, "deny");
     }
 }
 
