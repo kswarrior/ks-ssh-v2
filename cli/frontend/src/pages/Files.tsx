@@ -39,6 +39,74 @@ function downloadUrl(path: string): string {
   return `/api/files/download?path=${encodeURIComponent(path)}`
 }
 
+function previewUrl(path: string): string {
+  return `/api/files/download?path=${encodeURIComponent(path)}&inline=1`
+}
+
+function zipUrl(path: string): string {
+  return `/api/files/download-zip?path=${encodeURIComponent(path)}`
+}
+
+function isZipName(name: string): boolean {
+  return extOf(name) === 'zip'
+}
+
+type PreviewKind = 'image' | 'video' | 'audio' | 'pdf'
+
+function previewKind(name: string): PreviewKind | null {
+  const ext = extOf(name)
+  if (ext === 'pdf') return 'pdf'
+  if (IMAGE_EXT.has(ext)) return 'image'
+  if (VIDEO_EXT.has(ext)) return 'video'
+  if (AUDIO_EXT.has(ext)) return 'audio'
+  return null
+}
+
+/** `photo.png` → `photo copy.png`, `photo copy.png` → `photo copy 2.png`. */
+function duplicateName(name: string): string {
+  const dot = name.lastIndexOf('.')
+  const stem = dot > 0 ? name.slice(0, dot) : name
+  const ext = dot > 0 ? name.slice(dot) : ''
+  const m = /^(.*) copy(?: (\d+))?$/.exec(stem)
+  if (m) {
+    const n = m[2] ? parseInt(m[2], 10) + 1 : 2
+    return `${m[1]} copy ${n}${ext}`
+  }
+  return `${stem} copy${ext}`
+}
+
+type SortKey = 'name' | 'size' | 'modified'
+type SortDir = 'asc' | 'desc'
+
+type StatResponse = {
+  path: string
+  name: string
+  is_dir: boolean
+  size: number
+  modified: number | null
+  uid?: number
+  gid?: number
+  mode: number
+  mode_octal: string
+  readonly: boolean
+}
+
+type SearchHit = {
+  name: string
+  path: string
+  is_dir: boolean
+  size: number
+  modified: number | null
+}
+
+type SearchResponse = {
+  root: string
+  query: string
+  truncated: boolean
+  count: number
+  entries: SearchHit[]
+}
+
 type Crumb = { name: string; path: string }
 
 function buildCrumbs(home: string, path: string): Crumb[] {

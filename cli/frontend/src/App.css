@@ -1774,8 +1774,226 @@
   align-items: center;
 }
 
-.files-body .file-grid {
+.files-body .file-grid,
+.files-body .file-list {
   margin: 0;
+}
+
+/* ---------- Files power tools: sort/view bar, selection, bulk, list view ---------- */
+
+.files-path-tools {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.files-select-checkbox {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.file-card.selected {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  box-shadow:
+    var(--glow-line),
+    var(--shadow-md),
+    0 0 0 3px var(--accent-soft);
+}
+
+.bulk-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 10px 12px;
+  border: 1px solid rgba(139, 124, 255, 0.35);
+  border-radius: 8px;
+  background: var(--accent-soft);
+}
+
+.bulk-count {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-h);
+  white-space: nowrap;
+}
+
+.bulk-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-left: auto;
+}
+
+.file-list {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.file-list .file-card {
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  cursor: pointer;
+}
+
+.file-list .file-card-top {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.file-list .file-meta {
+  padding-left: 0;
+  flex-shrink: 0;
+  max-width: 40%;
+}
+
+.file-list .file-inline-actions,
+.file-list .file-confirm {
+  flex-basis: 100%;
+}
+
+/* ---------- Preview + properties dialogs ---------- */
+
+.preview-window {
+  width: min(920px, 100%);
+  max-height: min(88svh, 820px);
+  overflow-y: auto;
+}
+
+.preview-body {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 120px;
+  border: 1px solid var(--glass-border);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.32);
+  padding: 12px;
+}
+
+:root[data-theme='light'] .preview-body {
+  background: rgba(255, 255, 255, 0.8);
+}
+
+.preview-media {
+  max-width: 100%;
+  max-height: 52svh;
+  border-radius: 8px;
+  display: block;
+}
+
+.preview-audio {
+  width: 100%;
+}
+
+.preview-frame {
+  width: 100%;
+  height: 52svh;
+  border: none;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.props-table {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.props-table > div {
+  display: flex;
+  gap: 12px;
+  align-items: baseline;
+  font-size: 14px;
+}
+
+.props-table dt {
+  flex: 0 0 110px;
+  color: var(--text);
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.props-table dd {
+  margin: 0;
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--text-h);
+  overflow-wrap: anywhere;
+}
+
+.perm-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.perm-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.perm-who {
+  flex: 0 0 56px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.perm-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-h);
+  cursor: pointer;
+}
+
+.perm-check input {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+/* ---------- Drag & drop upload ---------- */
+
+.files-drop-active {
+  outline: 2px dashed var(--accent);
+  outline-offset: 4px;
+  border-radius: 8px;
+}
+
+.files-drop-hint {
+  border: 2px dashed var(--accent);
+  border-radius: 8px;
+  background: var(--accent-soft);
+  padding: 22px 16px;
+  text-align: center;
+}
+
+.files-drop-hint p {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--accent-strong);
 }
 
 .file-grid {
