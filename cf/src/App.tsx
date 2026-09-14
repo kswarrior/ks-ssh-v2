@@ -1264,6 +1264,12 @@ function SessionPage({
         }
         // `enc` is opaque sealed traffic — ignore here (UI is plaintext).
         if (msg?.type === 'enc') return
+        // Agent presence: surface offline errors instead of hanging.
+        if (msg?.type === 'agent' && msg.online === false) {
+          setError('Agent went offline — is the CLI still running?')
+          try { ws?.close() } catch { /* already closed */ }
+          return
+        }
         // `--relay-auth`: the room/agent advertises gating so the lobby can
         // prompt for the PIN (enforcement is agent-side, PIN inside `enc`).
         if (msg?.gated === true || msg?.relay_auth === true) setGated(true)

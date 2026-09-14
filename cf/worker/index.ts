@@ -13,7 +13,7 @@ import {
 
 export { TunnelRoom }
 
-const TOKEN_RE = /^[A-Z0-9]{5,9}$/
+const TOKEN_RE = /^(?:[A-Z0-9]{5}|[A-Z0-9]{9})$/
 
 // Per-isolate fixed windows: IP-wide + per-IP token-miss (scan) budgets.
 // (DO rooms additionally enforce per-socket message rates in room.ts.)

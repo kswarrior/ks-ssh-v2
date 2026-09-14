@@ -8,8 +8,8 @@
  * relay never sees. Rate limits make token scans expensive.
  */
 
-/** 5-char legacy tokens still route; fresh runs mint 9 chars. */
-export const TOKEN_RE = /^[A-Z0-9]{5,9}$/
+/** 5-char legacy tokens still route; fresh runs mint 9 chars. Exactly 5 or 9 — no in-between. */
+export const TOKEN_RE = /^(?:[A-Z0-9]{5}|[A-Z0-9]{9})$/
 
 /** Fixed-window limits (per isolate; DO rooms add per-socket limits). */
 export const RATE_IP_LIMIT = 120
