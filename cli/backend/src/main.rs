@@ -67,27 +67,10 @@ async fn api_hello() -> &'static str {
 async fn serve_ui(uri: axum::http::Uri) -> Response {
     let path = uri.path().trim_start_matches('/');
     let file = if path.is_empty() { "index.html" } else { path };
-    // Hashed Vite output under assets/ is immutable; everything else
-    // (index.html, SPA fallback, icons) must never be cached — otherwise a
-    // refresh can keep serving a stale bundle whose old asset hashes fall
-    // back to HTML and the app sticks on a loading screen forever.
-    let immutable = file.starts_with("assets/");
     match Ui::get(file).or_else(|| Ui::get("index.html")) {
         Some(content) => {
             let mime = mime_guess::from_path(file).first_or_octet_stream();
-            let cache = if immutable {
-                "public, max-age=31536000, immutable"
-            } else {
-                "no-store"
-            };
-            (
-                [
-                    (header::CONTENT_TYPE, mime.as_ref()),
-                    (header::CACHE_CONTROL, cache),
-                ],
-                content.data,
-            )
-                .into_response()
+            ([(header::CONTENT_TYPE, mime.as_ref())], content.data).into_response()
         }
         None => (StatusCode::NOT_FOUND, "not found").into_response(),
     }
@@ -124,13 +107,6 @@ async fn serve(host: String, port: u16, auth: Option<Arc<AuthState>>) {
             get(files::api_list_files).delete(files::api_delete_file),
         )
         .route("/api/files/rename", post(files::api_rename_file))
-        .route("/api/files/copy", post(files::api_copy_file))
-        .route("/api/files/stat", get(files::api_stat_file))
-        .route("/api/files/chmod", post(files::api_chmod))
-        .route("/api/files/search", get(files::api_search_files))
-        .route("/api/files/download-zip", get(files::api_download_zip))
-        .route("/api/files/zip-many", post(files::api_zip_many))
-        .route("/api/files/unzip", post(files::api_unzip_file))
         .route("/api/files/mkdir", post(files::api_mkdir))
         .route("/api/files/upload", post(files::api_upload_file))
         .route("/api/files/upload-url", post(files::api_upload_url))
