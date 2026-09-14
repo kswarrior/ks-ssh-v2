@@ -410,7 +410,10 @@ pub async fn api_rename_file(opt_ctx: Option<Extension<auth::AuthContext>>, head
         )
             .into_response();
     }
-    match std::fs::rename(&from, &to) {
+    let _audit_target = format!("{} -> {}", b.from, b.to);
+    let _audit_res = std::fs::rename(&from, &to);
+    audit_file(&opt_ctx, &headers, "file-rename", &_audit_target, _audit_res.is_ok());
+    match _audit_res {
         Ok(()) => (
             StatusCode::OK,
             Json(
@@ -518,7 +521,10 @@ pub async fn api_copy_file(opt_ctx: Option<Extension<auth::AuthContext>>, header
         )
             .into_response();
     }
-    match copy_recursive(&from, &to) {
+    let _audit_target = format!("{} -> {}", b.from, b.to);
+    let _audit_res = copy_recursive(&from, &to);
+    audit_file(&opt_ctx, &headers, "file-copy", &_audit_target, _audit_res.is_ok());
+    match _audit_res {
         Ok(()) => (
             StatusCode::OK,
             Json(
@@ -557,7 +563,9 @@ pub async fn api_chmod(opt_ctx: Option<Extension<auth::AuthContext>>, headers: H
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        match std::fs::set_permissions(&target, std::fs::Permissions::from_mode(b.mode)) {
+        let _audit_res = std::fs::set_permissions(&target, std::fs::Permissions::from_mode(b.mode));
+        audit_file(&opt_ctx, &headers, "file-chmod", &b.path, _audit_res.is_ok());
+        match _audit_res {
             Ok(()) => (
                 StatusCode::OK,
                 Json(
@@ -678,7 +686,9 @@ pub async fn api_save_content(opt_ctx: Option<Extension<auth::AuthContext>>, hea
         )
             .into_response();
     }
-    match std::fs::write(&target, b.content.as_bytes()) {
+    let _audit_res = std::fs::write(&target, b.content.as_bytes());
+    audit_file(&opt_ctx, &headers, "file-write", &b.path, _audit_res.is_ok());
+    match _audit_res {
         Ok(()) => (
             StatusCode::OK,
             Json(
@@ -716,7 +726,9 @@ pub async fn api_mkdir(opt_ctx: Option<Extension<auth::AuthContext>>, headers: H
         )
             .into_response();
     }
-    match std::fs::create_dir_all(&dir) {
+    let _audit_res = std::fs::create_dir_all(&dir);
+    audit_file(&opt_ctx, &headers, "file-mkdir", &b.path, _audit_res.is_ok());
+    match _audit_res {
         Ok(()) => (
             StatusCode::OK,
             Json(serde_json::json!({ "ok": true, "path": dir.to_string_lossy() })),
@@ -762,7 +774,10 @@ pub async fn api_upload_file(opt_ctx: Option<Extension<auth::AuthContext>>, head
         )
             .into_response();
     }
-    match std::fs::write(&target, &body) {
+    let _audit_target = format!("{}/{}", q.dir, q.name);
+    let _audit_res = std::fs::write(&target, &body);
+    audit_file(&opt_ctx, &headers, "file-upload", &_audit_target, _audit_res.is_ok());
+    match _audit_res {
         Ok(()) => (
             StatusCode::OK,
             Json(

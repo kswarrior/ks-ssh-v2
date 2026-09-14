@@ -2,6 +2,10 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Terminal } from 'xterm'
 import { FitAddon } from '@xterm/addon-fit'
+import { SearchAddon } from '@xterm/addon-search'
+import { WebLinksAddon } from '@xterm/addon-web-links'
+import { Unicode11Addon } from '@xterm/addon-unicode11'
+import { SerializeAddon } from '@xterm/addon-serialize'
 import 'xterm/css/xterm.css'
 
 export type SshEntry = {
@@ -12,12 +16,69 @@ export type SshEntry = {
   online: boolean
 }
 
-type TermSession = { id: string; name: string; sid: string | null }
+type TermSession = { id: string; name: string; sid: string | null; off: number }
 
 type TermStatus = 'connecting' | 'online' | 'offline'
 
 const TERMS_KEY = 'ks-ssh:terms'
 const TERMS_ACTIVE_KEY = 'ks-ssh:terms:active'
+const FONT_KEY = 'ks-ssh:term-font'
+const PREDICT_KEY = 'ks-ssh:term-predict'
+
+/** v2 wire protocol: Binary frames are u64-LE offset + raw PTY bytes. */
+const FRAME_OFF_LEN = 8
+
+function decodeFrame(frame: Uint8Array): { base: number; bytes: Uint8Array } | null {
+  if (frame.length < FRAME_OFF_LEN) return null
+  const view = new DataView(frame.buffer, frame.byteOffset, frame.byteLength)
+  // Offsets stay far below 2^53 for any real session.
+  const base = Number(view.getBigUint64(0, true))
+  return { base, bytes: frame.subarray(FRAME_OFF_LEN) }
+}
+
+/** Auto-reconnect backoff: 500ms doubling to a 5s cap. */
+function backoffMs(attempt: number): number {
+  return Math.min(500 * 2 ** Math.max(0, attempt), 5000)
+}
+const MAX_RETRIES = 10
+/** Client ping every 5s doubles as keepalive + RTT probe (v2 only). */
+const PING_MS = 5000
+/** No traffic this long → assume the path died, recycle the socket. */
+const STALE_MS = 12000
+/** Predictive echo only engages above this smoothed RTT. */
+const PREDICT_RTT_MS = 50
+/** Server silence required before new predictions (conflict avoidance). */
+const PREDICT_IDLE_MS = 300
+const PREDICT_MAX = 64
+
+function loadFontSize(): number {
+  try {
+    const n = parseInt(localStorage.getItem(FONT_KEY) ?? '', 10)
+    if (Number.isFinite(n)) return Math.max(10, Math.min(24, n))
+  } catch {
+    // Storage unavailable — fall through to default.
+  }
+  return 14
+}
+
+/** Save a blob download (scrollback export). */
+function downloadText(filename: string, text: string): void {
+  try {
+    const blob = new Blob([text], { type: 'text/plain;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = filename
+    document.body.appendChild(a)
+    a.click()
+    window.setTimeout(() => {
+      URL.revokeObjectURL(url)
+      a.remove()
+    }, 500)
+  } catch {
+    // Download unavailable — nothing else we can do.
+  }
+}
 
 /** Tabs persisted across refresh so their shells can be reattached. */
 function loadTerms(): TermSession[] {
@@ -32,9 +93,15 @@ function loadTerms(): TermSession[] {
           t &&
           typeof t.id === 'string' &&
           typeof t.name === 'string' &&
-          (t.sid === null || typeof t.sid === 'string'),
+          (t.sid === null || typeof t.sid === 'string') &&
+          (t.off === undefined || typeof t.off === 'number'),
       )
-      .map((t) => ({ id: t.id as string, name: t.name as string, sid: (t.sid as string | null) ?? null }))
+      .map((t) => ({
+        id: t.id as string,
+        name: t.name as string,
+        sid: (t.sid as string | null) ?? null,
+        off: typeof t.off === 'number' && t.off >= 0 ? Math.floor(t.off) : 0,
+      }))
   } catch {
     return []
   }
@@ -91,6 +158,8 @@ type TermHandle = {
   stop: () => void
   reconnect: () => void
   copy: () => void
+  search: () => void
+  exportLog: () => void
 }
 
 /**
@@ -726,7 +795,7 @@ function ShellSession({
 let termCounter = 0
 function nextTerm(): TermSession {
   termCounter += 1
-  return { id: `term-${Date.now().toString(36)}-${termCounter}`, name: `terminal ${termCounter}`, sid: null }
+  return { id: `term-${Date.now().toString(36)}-${termCounter}`, name: `terminal ${termCounter}`, sid: null, off: 0 }
 }
 
 export default function TerminalPage({

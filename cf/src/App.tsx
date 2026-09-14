@@ -1,12 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
-import {
-  E2E_ALG,
-  E2eSession,
-  extractKeyFromText,
-  parseFragmentKey,
-  type E2eStatus,
-  type EncEnvelope,
-} from './e2e'
+import { E2E_ALG, parseFragmentKey, type E2eStatus } from './e2e'
 
 type PageId = 'home' | 'ssh' | 'session' | 'installation' | 'settings'
 
@@ -368,303 +361,6 @@ function E2eBadge({ status }: { status: E2eStatus }) {
   )
 }
 
-function ActiveSession({
-  entry,
-  onBack,
-}: {
-  entry: SshEntry
-  onBack: () => void
-}) {
-  const [lines, setLines] = useState<string[]>([])
-  const [draft, setDraft] = useState('')
-  const [agentOnline, setAgentOnline] = useState(false)
-  // E2E: `k` lives in memory only — never localStorage, never query/fetch.
-  const [e2eKey, setE2eKey] = useState<string | null>(() => parseFragmentKey())
-  const [e2eStatus, setE2eStatus] = useState<E2eStatus>(() =>
-    parseFragmentKey() ? 'on' : 'off',
-  )
-  const [peerE2e, setPeerE2e] = useState<boolean | null>(null)
-  const [keyInput, setKeyInput] = useState('')
-  const [keyError, setKeyError] = useState<string | null>(null)
-  const wsRef = useRef<WebSocket | null>(null)
-  const e2eRef = useRef<E2eSession | null>(null)
-  const logRef = useRef<HTMLDivElement | null>(null)
-
-  const push = (line: string) =>
-    setLines((prev) => [...prev.slice(-99), line])
-
-  const token = entry.token.trim().toUpperCase()
-  useEffect(() => {
-    let cancelled = false
-    let ws: WebSocket | null = null
-    e2eRef.current = null
-    const scheme = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    // NOTE: token in query only (routing). `k` never leaves the fragment/memory.
-    const open = async () => {
-      if (e2eKey) {
-        try {
-          e2eRef.current = await E2eSession.create(e2eKey, token)
-          if (cancelled) return
-          setE2eStatus('on')
-        } catch {
-          if (cancelled) return
-          e2eRef.current = null
-          setE2eStatus('error')
-          push('E2E setup failed — check the pasted link')
-          return
-        }
-      } else {
-        setE2eStatus('off')
-      }
-      try {
-        ws = new WebSocket(
-          `${scheme}//${window.location.host}/v1/client?token=${token}`,
-        )
-      } catch {
-        push('socket error')
-        return
-      }
-      wsRef.current = ws
-      push(e2eKey ? `joining ${token} … (🔒 E2E)` : `joining ${token} … (⚠️ no E2E key)`)
-      ws.onopen = () => {
-        // hello carries token+role only (no k); e2e advertises capability.
-        ws?.send(
-          JSON.stringify(
-            e2eRef.current
-              ? { type: 'hello', role: 'client', token, e2e: E2E_ALG }
-              : { type: 'hello', role: 'client', token },
-          ),
-        )
-      }
-      ws.onmessage = (e) => {
-        void handleRelayMessage(String(e.data))
-      }
-      ws.onerror = () => {
-        push('socket error')
-        setAgentOnline(false)
-      }
-      ws.onclose = () => {
-        push('socket closed')
-        setAgentOnline(false)
-      }
-    }
-
-    const handleInner = (inner: { type?: string; data?: unknown }) => {
-      if (inner?.type === 'ack') {
-        push('agent ack')
-        return
-      }
-      if (typeof inner?.data === 'string') {
-        push(inner.data)
-        return
-      }
-    }
-
-    const handleRelayMessage = async (text: string) => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      let msg: any = null
-      try {
-        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
-        msg = JSON.parse(text)
-      } catch {
-        push(text)
-        return
-      }
-      // Sealed payloads: decrypt (seq-checked), then handle inner JSON.
-      // NOTE: check `type === 'enc'` manually (no type-guard narrowing) —
-      // `ct` bytes are never logged or stored.
-      if (msg?.type === 'enc') {
-        const sess = e2eRef.current
-        if (!sess) {
-          push('got enc but no E2E key — paste the full link with #k=...')
-          setE2eStatus('off')
-          return
-        }
-        try {
-          const pt = await sess.decryptNext(msg as unknown as EncEnvelope)
-          const inner = JSON.parse(new TextDecoder().decode(pt)) as {
-            type?: string
-            data?: unknown
-          }
-          handleInner(inner)
-        } catch {
-          // Wrong key / tampered tag — generic message, no details.
-          push('E2E decrypt failed')
-          setE2eStatus('error')
-        }
-        return
-      }
-      if (!msg) {
-        push(text)
-        return
-      }
-      // Peer capability (agent hello forwarded by the room).
-      if (msg?.type === 'hello') {
-        if (msg.e2e === E2E_ALG) {
-          setPeerE2e(true)
-          push('peer supports E2E')
-        } else {
-          setPeerE2e(false)
-          if (e2eRef.current) push('peer is legacy (no E2E) — relay-visible for its messages')
-        }
-        return
-      }
-      if (msg?.type === 'paired' || msg?.type === 'registered') {
-        push(msg.agent ? 'paired — agent online' : 'paired — waiting for agent …')
-        setAgentOnline(msg.agent === true)
-        return
-      }
-      if (msg?.type === 'agent') {
-        push(msg.online ? 'agent online' : 'agent offline')
-        setAgentOnline(msg.online === true)
-        return
-      }
-      if (msg?.type === 'pong') return
-      if (msg?.type === 'ack') {
-        push('agent ack')
-        return
-      }
-      if (typeof msg?.data === 'string') {
-        // Plaintext data while E2E is on = legacy peer, relay-visible.
-        if (e2eRef.current) push('(plaintext, relay-visible)')
-        push(msg.data)
-        return
-      }
-      push(text)
-    }
-
-    void open()
-    return () => {
-      cancelled = true
-      wsRef.current = null
-      try {
-        ws?.close()
-      } catch {
-        // Already closed — ignore.
-      }
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token, e2eKey])
-
-  useEffect(() => {
-    const el = logRef.current
-    if (el) el.scrollTop = el.scrollHeight
-  }, [lines])
-
-  const send = (e: FormEvent) => {
-    e.preventDefault()
-    const text = draft.trim()
-    if (!text || !wsRef.current) return
-    const ws = wsRef.current
-    const sess = e2eRef.current
-    if (sess) {
-      // Wrap sensitive payloads in enc; ack comes back inside enc.
-      void sess
-        .encryptNext(JSON.stringify({ type: 'data', data: text }))
-        .then((env) => {
-          if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(env))
-          push(`> ${text}`)
-          setDraft('')
-        })
-        .catch(() => {
-          push('E2E encrypt failed')
-          setE2eStatus('error')
-        })
-    } else {
-      ws.send(JSON.stringify({ type: 'data', data: text }))
-      push(`> ${text}`)
-      setDraft('')
-    }
-  }
-
-  const unlock = (e: FormEvent) => {
-    e.preventDefault()
-    const k = extractKeyFromText(keyInput.trim())
-    if (!k) {
-      setKeyError('Paste the full link with #k=... (43 chars, fragment only).')
-      return
-    }
-    setKeyError(null)
-    // In-memory only — never persisted.
-    setKeyInput('')
-    setE2eKey(k)
-    push('E2E key set (memory only) — reconnecting …')
-  }
-
-  return (
-    <div className="card">
-      <div className="page-head">
-        <h2>
-          {entry.name} <code>{token}</code>
-        </h2>
-        <div className="row-actions">
-          <StatusTag online={agentOnline} />
-          <E2eBadge status={e2eKey ? e2eStatus : 'off'} />
-          <button type="button" className="btn btn-sm" onClick={onBack}>
-            Back
-          </button>
-        </div>
-      </div>
-      {!e2eKey && (
-        <div className="banner-error" role="alert">
-          <p>
-            ⚠️ Relay-visible (legacy): no E2E key. Paste the full link with{' '}
-            <code>#k=...</code> to enable 🔒 E2E. The key stays in memory only —
-            never fetched over HTTP, never stored.
-          </p>
-          <form className="form" onSubmit={unlock}>
-            <label className="field">
-              Full link (with #k=...)
-              <input
-                type="text"
-                value={keyInput}
-                onChange={(e) => setKeyInput(e.target.value)}
-                placeholder="https://…#k=…"
-                autoComplete="off"
-                spellCheck={false}
-              />
-            </label>
-            {keyError && <p>{keyError}</p>}
-            <div className="row-actions">
-              <button type="submit" className="btn btn-sm btn-primary">
-                Enable E2E
-              </button>
-            </div>
-          </form>
-        </div>
-      )}
-      {e2eKey && peerE2e === false && (
-        <div className="banner-error" role="alert">
-          <p>⚠️ Relay is NOT end-to-end encrypted for this peer (legacy agent without E2E).</p>
-        </div>
-      )}
-      {!agentOnline && (
-        <>
-          <p>Waiting for the agent. On the machine, run:</p>
-          <CodeBlock code={`ks-ssh --no-serve --token=${token}`} />
-        </>
-      )}
-      <div className="ws-log" ref={logRef} aria-live="polite">
-        {lines.map((l, i) => (
-          <div key={i}>{l}</div>
-        ))}
-      </div>
-      <form className="form" onSubmit={send}>
-        <label className="field">
-          Send
-          <input
-            type="text"
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            placeholder="type + Enter"
-            autoComplete="off"
-          />
-        </label>
-      </form>
-    </div>
-  )
-}
-
 function SSHPage({
   entries,
   onChange,
@@ -678,7 +374,6 @@ function SSHPage({
   const [token, setToken] = useState('')
   const [note, setNote] = useState('')
   const [connectingId, setConnectingId] = useState<string | null>(null)
-  const [visitingId, setVisitingId] = useState<string | null>(null)
   const [banner, setBanner] = useState<string | null>(null)
   const socketsRef = useRef(new Map<string, WebSocket>())
 
@@ -811,14 +506,9 @@ function SSHPage({
   const disconnectEntry = (id: string) => {
     closeSocket(id)
     setConnectingId((cur) => (cur === id ? null : cur))
-    setVisitingId((cur) => (cur === id ? null : cur))
     onChange((prev) =>
       prev.map((x) => (x.id === id ? { ...x, online: false } : x)),
     )
-  }
-
-  const visitEntry = (entry: SshEntry) => {
-    setVisitingId(entry.id)
   }
 
   const submit = (e: FormEvent) => {
@@ -857,11 +547,8 @@ function SSHPage({
   const removeEntry = (id: string) => {
     closeSocket(id)
     setConnectingId((cur) => (cur === id ? null : cur))
-    setVisitingId((cur) => (cur === id ? null : cur))
     onChange((prev) => prev.filter((x) => x.id !== id))
   }
-
-  const visiting = entries.find((x) => x.id === visitingId) ?? null
 
   const total = entries.length
   const online = entries.filter((x) => x.online).length
@@ -1000,9 +687,7 @@ function SSHPage({
         </div>
       )}
 
-      {visiting ? (
-        <ActiveSession entry={visiting} onBack={() => setVisitingId(null)} />
-      ) : entries.length === 0 && !formOpen ? (
+      {entries.length === 0 && !formOpen ? (
         <div className="card">
           <h2>No connections yet</h2>
           <p>Press Connect to add your first one.</p>
@@ -1033,15 +718,14 @@ function SSHPage({
                         {connecting ? 'Connecting…' : 'Connect'}
                       </button>
                     )}
-                    {e.online && (
-                      <>
-                        <button
-                          type="button"
-                          className="btn btn-sm btn-primary"
-                          onClick={() => visitEntry(e)}
-                          aria-label={`Visit ${e.name}`}
-                          title="Visit"
-                        >
+                      {e.online && (
+                        <>
+                          <a
+                            className="btn btn-sm btn-primary"
+                            href={`#/session/${e.token.trim().toUpperCase()}`}
+                            aria-label={`Visit ${e.name}`}
+                            title="Visit"
+                          >
                           <svg
                             viewBox="0 0 24 24"
                             fill="none"
@@ -1055,7 +739,7 @@ function SSHPage({
                             <polyline points="15 3 21 3 21 9" />
                             <line x1="10" y1="14" x2="21" y2="3" />
                           </svg>
-                        </button>
+                        </a>
                         <button
                           type="button"
                           className="btn btn-sm"
