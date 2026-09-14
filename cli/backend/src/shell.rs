@@ -845,12 +845,15 @@ mod tests {
 
     #[test]
     fn frame_roundtrip() {
-        let (base, bytes) = decode_frame(&encode_frame(12345, b"hi")).unwrap();
+        let frame = encode_frame(12345, b"hi");
+        let (base, bytes) = decode_frame(&frame).unwrap();
         assert_eq!(base, 12345);
         assert_eq!(bytes, b"hi");
         // Empty payload still carries its offset.
-        let (base, bytes) = decode_frame(&encode_frame(0, b"")).unwrap();
-        assert_eq!((base, bytes), (0, b"".as_slice()));
+        let frame = encode_frame(0, b"");
+        let (base, bytes) = decode_frame(&frame).unwrap();
+        assert_eq!(base, 0);
+        assert!(bytes.is_empty());
         // Short frames are rejected, never misread as PTY bytes.
         assert!(decode_frame(b"").is_none());
         assert!(decode_frame(b"1234567").is_none());

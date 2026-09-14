@@ -4,7 +4,7 @@
  * Split routing from secrecy:
  * - `token` (5-char): room ID only, in URL query + `hello`. Guessable.
  * - `k` (256-bit, base64url no-pad ~43 chars): E2E secret. Lives ONLY in the
- *   URL fragment (`#/view/ABCDE#k=...`, `/v/ABCDE#k=...`) and memory.
+ *   URL fragment (`#/ssh#k=...`, `#k=...`) and memory.
  *   NEVER in query string, NEVER in fetch() URL, NEVER sent to the Worker,
  *   NEVER logged, NEVER stored in DO / localStorage.
  *
@@ -18,9 +18,8 @@
  *   replays/duplicates. Wrong key / tampered tag -> throw generic
  *   "E2E decrypt failed" (no details).
  *
- * UI bundle exception: ui-begin/ui-chunk/ui-end + /v/TOKEN HTML stay
- * PLAINTEXT (public build output, needed for fullscreen caching in room.ts).
- * Never tunnel secrets inside UI messages.
+ * Sealed `enc` envelopes stay opaque to the relay — never logged, stored,
+ * or inspected beyond the outer `type` for routing.
  */
 
 export const E2E_ALG = 'aes-gcm-v1'
@@ -62,7 +61,7 @@ export function b64urlDecode(s: string): Uint8Array {
 
 /**
  * Extract `k` from the URL fragment ONLY (never query/fetch).
- * Supports `#/view/ABCDE#k=...`, `#/view/ABCDE&k=...`, `#k=...`, `/v/ABCDE#k=...`
+ * Supports `#/ssh#k=...`, `#/ssh&k=...`, `#k=...`
  * (where location.hash is `#k=...`). Returns null when absent/invalid.
  * The caller must never persist or transmit this value except inside
  * AES-GCM ciphertext.
