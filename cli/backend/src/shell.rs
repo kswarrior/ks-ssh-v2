@@ -13,6 +13,11 @@
 //!   PTY bytes (Binary frames) for xterm.js, plus the exact Text
 //!   `{"type":"exit"}` once when the shell exits (followed by Close).
 //!   A superseded socket gets Close code 4000 ("attached elsewhere").
+//!
+//! Persistence (`--db`, see `crate::db`): sessions are mirrored into SQLite
+//! — any visitor can list (`GET /api/terms`) and reattach to them, and the
+//! scrollback survives a backend restart as replayable history. Live PTY
+//! processes cannot survive a restart (the OS child dies with us).
 
 use axum::{
     extract::{
@@ -21,6 +26,7 @@ use axum::{
     },
     response::IntoResponse,
 };
+use crate::db;
 use futures_util::{SinkExt, StreamExt};
 use portable_pty::{CommandBuilder, NativePtySystem, PtySize, PtySystem};
 use serde::Deserialize;
@@ -91,6 +97,9 @@ struct Session {
     /// Bumped on every attach; lets stale sockets notice a takeover.
     epoch: AtomicU64,
     last_active: StdMutex<Instant>,
+    created_at: u64,
+    /// Ring changed since the last SQLite flush (set by the PTY reader).
+    dirty: AtomicBool,
 }
 
 static SESSIONS: LazyLock<tokio::sync::Mutex<HashMap<String, Arc<Session>>>> =

@@ -1,5 +1,4 @@
 mod auth;
-mod db;
 mod e2e;
 mod files;
 mod host;
@@ -42,10 +41,6 @@ struct Cli {
     /// Skip the local web UI (no open port at all).
     #[arg(long)]
     no_serve: bool,
-    /// SQLite file for terminal session history (`./ks-ssh.db` by default).
-    /// Any visitor can reattach to these shells — they are shared on purpose.
-    #[arg(long, default_value = "./ks-ssh.db")]
-    db: String,
     /// Relay via the Worker instead of opening a port.
     /// Give a token to reuse it, or pass `--token=` for a random one.
     #[arg(long, num_args(0..=1), require_equals(true), default_missing_value = "")]
@@ -72,10 +67,27 @@ async fn api_hello() -> &'static str {
 async fn serve_ui(uri: axum::http::Uri) -> Response {
     let path = uri.path().trim_start_matches('/');
     let file = if path.is_empty() { "index.html" } else { path };
+    // Hashed Vite output under assets/ is immutable; everything else
+    // (index.html, SPA fallback, icons) must never be cached — otherwise a
+    // refresh can keep serving a stale bundle whose old asset hashes fall
+    // back to HTML and the app sticks on a loading screen forever.
+    let immutable = file.starts_with("assets/");
     match Ui::get(file).or_else(|| Ui::get("index.html")) {
         Some(content) => {
             let mime = mime_guess::from_path(file).first_or_octet_stream();
-            ([(header::CONTENT_TYPE, mime.as_ref())], content.data).into_response()
+            let cache = if immutable {
+                "public, max-age=31536000, immutable"
+            } else {
+                "no-store"
+            };
+            (
+                [
+                    (header::CONTENT_TYPE, mime.as_ref()),
+                    (header::CACHE_CONTROL, cache),
+                ],
+                content.data,
+            )
+                .into_response()
         }
         None => (StatusCode::NOT_FOUND, "not found").into_response(),
     }
@@ -112,6 +124,13 @@ async fn serve(host: String, port: u16, auth: Option<Arc<AuthState>>) {
             get(files::api_list_files).delete(files::api_delete_file),
         )
         .route("/api/files/rename", post(files::api_rename_file))
+        .route("/api/files/copy", post(files::api_copy_file))
+        .route("/api/files/stat", get(files::api_stat_file))
+        .route("/api/files/chmod", post(files::api_chmod))
+        .route("/api/files/search", get(files::api_search_files))
+        .route("/api/files/download-zip", get(files::api_download_zip))
+        .route("/api/files/zip-many", post(files::api_zip_many))
+        .route("/api/files/unzip", post(files::api_unzip_file))
         .route("/api/files/mkdir", post(files::api_mkdir))
         .route("/api/files/upload", post(files::api_upload_file))
         .route("/api/files/upload-url", post(files::api_upload_url))
@@ -129,7 +148,6 @@ async fn serve(host: String, port: u16, auth: Option<Arc<AuthState>>) {
             axum::routing::put(auth::api_update_user).delete(auth::api_delete_user),
         )
         .route("/v1/shell", get(shell::ws_handler))
-        .route("/api/terms", get(shell::api_list_terms))
         .with_state(state);
 
     let app = match auth {
@@ -228,27 +246,6 @@ async fn main() {
     } else {
         None
     };
-
-    // Terminal history DB — shells are shared on purpose, so any visitor
-    // can reattach to them (same gate as the UI: login when --user/--pass).
-    // Pure `--no-serve` agents serve nothing locally, so they skip it.
-    if !cli.no_serve {
-        let raw = cli.db.trim();
-        if raw.is_empty() {
-            println!("Terminal history: OFF (--db empty)");
-        } else {
-            let path = std::path::PathBuf::from(raw);
-            let loaded = db::init(Some(&path));
-            if db::enabled() {
-                println!(
-                    "Terminal history: {} session(s) in {} (--db to move it)",
-                    loaded,
-                    path.display()
-                );
-                shell::load_persisted();
-            }
-        }
-    }
 
     match (cli.no_serve, token) {
         // Pure agent: no open port, only outbound WSS.
