@@ -471,10 +471,199 @@ async fn proxy_rpc(
         rpc_error(out_tx, &id, 413, "response too large for relay (32MB cap)");
         return;
     }
-    let..........................................................................................
+    let chunks: Vec<String> = bytes
+        .chunks(RPC_CHUNK_RAW)
+        .map(|c| b64_encode(c))
+        .collect();
+    let n = chunks.len();
+    send_out(
+        out_tx,
+        &serde_json::json!({
+            "type": "rpc-begin",
+            "id": id,
+            "status": status,
+            "headers": out_headers,
+            "body_len": bytes.len(),
+            "chunks": n,
+        }),
+    );
+    for (i, data) in chunks.iter().enumerate() {
+        send_out(
+            out_tx,
+            &serde_json::json!({"type":"rpc-chunk","id":id,"i":i,"data":data}),
+        );
+    }
+    send_out(
+        out_tx,
+        &serde_json::json!({"type":"rpc-end","id":id,"chunks":n}),
+    );
+    crate::db::audit("-", "local", "relay-rpc", token, "ok");
+}
+
+/// Short `METHOD /api/xxx` label for logs (no query — may hold filenames).
+fn short_path(path: &str) -> String {
+    let root = path.split('?').next().unwrap_or(path);
+    if root.len() > 64 {
+        format!("{}…", &root[..64])
+    } else {
+        root.to_string()
+    }
+}
+
+/// Spawn the transparent `/v1/shell` bridge for one relay channel.
+/// Owns the loopback WS; `in_rx` carries relay->local input from the main
+/// loop. PTY bytes (text + binary, v1/v2 frames, resize/ping/ack) pass
+/// through untouched as base64 `shell-recv` / `shell-send`.
+async fn spawn_shell_bridge(
+    out_tx: OutTx,
+    shells: Arc<Mutex<HashMap<String, ShellBridge>>>,
+    local_base: String,
+    token: String,
+    id: String,
+    sid: Option<String>,
+    v: u8,
+    from: u64,
+    cookie: Option<String>,
+) {
+    let (in_tx, mut in_rx): (
+        mpsc::UnboundedSender<ShellLocalIn>,
+        mpsc::UnboundedReceiver<ShellLocalIn>,
+    ) = mpsc::unbounded_channel();
+    shells.lock().await.insert(id.clone(), ShellBridge { to_local: in_tx });
+
+    let out_tx_fail = out_tx.clone();
+    let id_fail = id.clone();
+    let shells_fail = shells.clone();
+    let run = async move {
+        // Build the loopback WS URL (same query shapes as the local UI).
+        let mut url = format!("{}/v1/shell?v={v}&from={from}", ws_base(&local_base));
+        if let Some(s) = sid.as_deref().filter(|s| !s.is_empty()) {
+            url.push_str(&format!("&id={}", urlencoding_lite(s)));
+        }
+        // Connect with the viewer's session cookie (login over relay works:
+        // the shim forwards `ks_ssh_auth` from its rpc cookie jar).
+        let req = {
+            use tokio_tungstenite::tungstenite::http::Request as HttpRequest;
+            let mut builder = HttpRequest::builder().uri(url.as_str());
+            if let Some(c) = cookie.as_deref().filter(|c| !c.is_empty()) {
+                builder = builder.header("Cookie", c);
+            }
+            builder
+                .header("Host", "127.0.0.1")
+                .body(())
+                .map_err(|e| anyhow::anyhow!("{e}"))?
+        };
+        let (local_ws, _) = connect_async(req)
+            .await
+            .map_err(|e| anyhow::anyhow!("loopback shell dial failed: {e}"))?;
+        let (mut local_tx, mut local_rx) = local_ws.split();
+        crate::db::audit("-", "local", "relay-shell-open", &token, "ok");
+        loop {
+            tokio::select! {
+                msg = in_rx.recv() => {
+                    let Some(msg) = msg else { break };
+                    match msg {
+                        ShellLocalIn::Send { is_text, data } => {
+                            let res = if is_text {
+                                match String::from_utf8(data) {
+                                    Ok(s) => local_tx.send(Message::Text(s.into())).await,
+                                    Err(_) => continue,
+                                }
+                            } else {
+                                local_tx.send(Message::Binary(data.into())).await
+                            };
+                            if res.is_err() {
+                                break;
+                            }
+                        }
+                        ShellLocalIn::Close => {
+                            let _ = local_tx.send(Message::Close(None)).await;
+                            break;
+                        }
+                    }
+                }
+                msg = local_rx.next() => {
+                    let Some(msg) = msg else { break };
+                    match msg {
+                        Ok(Message::Text(s)) => {
+                            send_out(&out_tx, &serde_json::json!({
+                                "type": "shell-recv",
+                                "id": id,
+                                "is_text": true,
+                                "data": b64_encode(s.as_bytes()),
+                            }));
+                        }
+                        Ok(Message::Binary(b)) => {
+                            send_out(&out_tx, &serde_json::json!({
+                                "type": "shell-recv",
+                                "id": id,
+                                "is_text": false,
+                                "data": b64_encode(&b),
+                            }));
+                        }
+                        Ok(Message::Close(frame)) => {
+                            let (code, reason) = frame
+                                .map(|f| (f.code.into(), f.reason.to_string()))
+                                .unwrap_or((1005u16, String::new()));
+                            send_out(&out_tx, &serde_json::json!({
+                                "type": "shell-closed",
+                                "id": id,
+                                "code": code,
+                                "reason": reason,
+                            }));
+                            break;
+                        }
+                        Ok(_) => {}
+                        Err(_) => break,
+                    }
+                }
+            }
+        }
+        crate::db::audit("-", "local", "relay-shell-close", &token, "ok");
+        anyhow::Ok(())
+    };
+    if let Err(e) = run.await {
+        eprintln!("relay shell bridge {id_fail} failed: {e:#}");
+        send_out(
+            &out_tx_fail,
+            &serde_json::json!({"type":"shell-closed","id":id_fail,"code":1011,"reason":"loopback unreachable"}),
+        );
+    }
+    shells_fail.lock().await.remove(&id_fail);
+}
+
+/// Minimal percent-encoding for the `id` query value (alnum + `-_` only).
+fn urlencoding_lite(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for b in s.bytes() {
+        if b.is_ascii_alphanumeric() || b == b'-' || b == b'_' {
+            out.push(b as char);
+        } else {
+            out.push_str(&format!("%{b:02X}"));
+        }
+    }
+    out
+}
+
+#[derive(Debug, Deserialize)]
+struct RpcBeginMsg {
+    id: String,
+    method: String,
+    path: String,
+    #[serde(default)]
+    headers: HashMap<String, String>,
+    #[serde(default)]
+    body_len: usize,
+    #[serde(default)]
+    chunks: usize,
+}
 
 async fn on_text(
-    tx: &mut WsTx,
+    out_tx: &OutTx,
+    http_client: &reqwest::Client,
+    local_base: &str,
+    pending_rpc: &mut HashMap<String, PendingRpc>,
+    shells: Arc<Mutex<HashMap<String, ShellBridge>>>,
     text: &str,
     push_ui: bool,
     token: &str,
@@ -502,10 +691,9 @@ async fn on_text(
                     };
                     match inner.get("type").and_then(|t| t.as_str()) {
                         Some("data") => {
-                            // v1: acknowledge bridged payloads (PTY bridging
-                            // comes next — same enc path). Ack INSIDE enc.
+                            // v1 legacy ack path (kept for old peers).
                             crate::db::audit("-", "local", "relay-data", token, "ok");
-                            send_enc(tx, state, &serde_json::json!({"type":"ack"})).await?;
+                            send_enc_via(out_tx, state, &serde_json::json!({"type":"ack"})).await?;
                         }
                         _ => {}
                     }
@@ -564,16 +752,21 @@ async fn on_text(
         }
         Some("paired") => println!("web client connected via relay"),
         Some("ping") => {
-            tx.send(Message::Text(r#"{"type":"pong"}"#.to_string().into()))
-                .await?;
+            send_out(out_tx, &serde_json::json!({"type":"pong"}));
         }
         Some("ui-request") => {
             // CF has no cached UI for this token (e.g. DO restarted) — resend.
+            // ui push needs the raw WS sink; signal via out channel is not
+            // possible here (chunked binary) — the next agent_session hello
+            // re-pushes. Tell the client to wait for ui-ready.
             if push_ui {
-                println!("ui re-requested — repushing bundle");
-                if let Err(e) = push_ui_bundle(tx, token).await {
-                    eprintln!("ui repush failed: {e:#}");
-                }
+                println!("ui re-requested — client waits for cached replay or reconnect repush");
+                send_out(out_tx, &serde_json::json!({"type":"ui-pending"}));
+            } else {
+                send_out(
+                    out_tx,
+                    &serde_json::json!({"type":"ui-missing"}),
+                );
             }
         }
         Some("data") => {
@@ -585,13 +778,153 @@ async fn on_text(
                 return Ok(());
             }
             // Plaintext data: legacy peer, or peer that chose plaintext.
-            // v1: acknowledge (PTY bridging comes next).
             if e2e.is_some() {
                 eprintln!("legacy plaintext data (relay-visible) — peer without E2E");
             }
             crate::db::audit("-", "local", "relay-data", token, "ok");
-            tx.send(Message::Text(r#"{"type":"ack"}"#.to_string().into()))
-                .await?;
+            send_out(out_tx, &serde_json::json!({"type":"ack"}));
+        }
+        // ---- Full-function relay: HTTP `/api/*` over WSS ----
+        Some("rpc-begin") => {
+            if relay_pin.is_some() && !*viewer_ok {
+                let id = msg.get("id").and_then(|v| v.as_str()).unwrap_or("");
+                eprintln!("relay viewer PIN required before rpc bridge");
+                crate::db::audit("-", "local", "relay-rpc", token, "deny");
+                rpc_error(out_tx, id, 403, "viewer PIN required");
+                return Ok(());
+            }
+            let parsed: Result<RpcBeginMsg, _> = serde_json::from_value(msg.clone());
+            let req = match parsed {
+                Ok(r) => r,
+                Err(_) => return Ok(()),
+            };
+            if req.id.is_empty() || req.id.len() > 64 || !valid_rpc_path(&req.path) {
+                rpc_error(out_tx, &req.id, 400, "bad rpc request");
+                return Ok(());
+            }
+            if req.chunks > MAX_RPC_CHUNKS || req.body_len > MAX_RPC_BYTES {
+                rpc_error(out_tx, &req.id, 413, "request too large for relay (32MB cap)");
+                return Ok(());
+            }
+            if e2e.is_some() && !*peer_e2e {
+                eprintln!("relay rpc plaintext (relay-visible) — peer without E2E");
+            }
+            if req.chunks == 0 {
+                // No body — proxy immediately.
+                let out = out_tx.clone();
+                let client = http_client.clone();
+                let base = local_base.to_string();
+                let tok = token.to_string();
+                tokio::spawn(async move {
+                    proxy_rpc(&out, &client, &base, &tok, req.id, req.method, req.path, req.headers, Vec::new()).await;
+                });
+            } else {
+                // Chunked body — reassemble, then proxy on rpc-end.
+                if pending_rpc.contains_key(&req.id) {
+                    rpc_error(out_tx, &req.id, 400, "duplicate rpc id");
+                    return Ok(());
+                }
+                let mut parts = Vec::new();
+                parts.resize_with(req.chunks.min(MAX_RPC_CHUNKS), || None);
+                pending_rpc.insert(
+                    req.id.clone(),
+                    PendingRpc {
+                        method: req.method,
+                        path: req.path,
+                        headers: req.headers,
+                        body_len: req.body_len,
+                        chunks: req.chunks.min(MAX_RPC_CHUNKS),
+                        parts,
+                    },
+                );
+            }
+        }
+        Some("rpc-chunk") => {
+            let id = msg.get("id").and_then(|v| v.as_str()).unwrap_or("");
+            let i = msg.get("i").and_then(|v| v.as_u64()).unwrap_or(u64::MAX) as usize;
+            let data = msg.get("data").and_then(|v| v.as_str()).unwrap_or("");
+            if let Some(pending) = pending_rpc.get_mut(id) {
+                if i < pending.parts.len() && data.len() <= 128 * 1024 && !data.is_empty() {
+                    pending.parts[i] = Some(data.to_string());
+                }
+            }
+        }
+        Some("rpc-end") => {
+            let id = msg.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            if let Some(pending) = pending_rpc.remove(&id) {
+                if pending.parts.iter().any(|p| p.is_none()) {
+                    rpc_error(out_tx, &id, 400, "incomplete rpc upload");
+                    return Ok(());
+                }
+                let mut raw = Vec::with_capacity(pending.body_len.min(MAX_RPC_BYTES));
+                for part in pending.parts.iter().flatten() {
+                    match b64_decode(part) {
+                        Some(bytes) => raw.extend_from_slice(&bytes),
+                        None => {
+                            rpc_error(out_tx, &id, 400, "bad rpc chunk encoding");
+                            return Ok(());
+                        }
+                    }
+                    if raw.len() > MAX_RPC_BYTES {
+                        rpc_error(out_tx, &id, 413, "request too large for relay (32MB cap)");
+                        return Ok(());
+                    }
+                }
+                let out = out_tx.clone();
+                let client = http_client.clone();
+                let base = local_base.to_string();
+                let tok = token.to_string();
+                tokio::spawn(async move {
+                    proxy_rpc(&out, &client, &base, &tok, id, pending.method, pending.path, pending.headers, raw).await;
+                });
+            }
+        }
+        // ---- Full-function relay: `/v1/shell` PTY over WSS ----
+        Some("shell-open") => {
+            if relay_pin.is_some() && !*viewer_ok {
+                let id = msg.get("id").and_then(|v| v.as_str()).unwrap_or("");
+                eprintln!("relay viewer PIN required before shell bridge");
+                crate::db::audit("-", "local", "relay-shell", token, "deny");
+                send_out(out_tx, &serde_json::json!({"type":"shell-closed","id":id,"code":4403,"reason":"viewer PIN required"}));
+                return Ok(());
+            }
+            let id = msg.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            if id.is_empty() || id.len() > 64 {
+                return Ok(());
+            }
+            if shells.lock().await.contains_key(&id) {
+                return Ok(());
+            }
+            let sid = msg.get("sid").and_then(|v| v.as_str()).map(|s| s.to_string());
+            let v = msg.get("v").and_then(|v| v.as_u64()).unwrap_or(2).min(2) as u8;
+            let from = msg.get("from").and_then(|v| v.as_u64()).unwrap_or(0);
+            let cookie = msg.get("cookie").and_then(|v| v.as_str()).map(|s| s.to_string());
+            if e2e.is_some() && !*peer_e2e {
+                eprintln!("relay shell plaintext (relay-visible) — peer without E2E");
+            }
+            let out = out_tx.clone();
+            let shells_clone = shells.clone();
+            let base = local_base.to_string();
+            let tok = token.to_string();
+            tokio::spawn(async move {
+                spawn_shell_bridge(out, shells_clone, base, tok, id, sid, v, from, cookie).await;
+            });
+        }
+        Some("shell-send") => {
+            let id = msg.get("id").and_then(|v| v.as_str()).unwrap_or("");
+            let is_text = msg.get("is_text").and_then(|v| v.as_bool()).unwrap_or(true);
+            let data = msg.get("data").and_then(|v| v.as_str()).unwrap_or("");
+            if let Some(bridge) = shells.lock().await.get(id) {
+                if let Some(bytes) = b64_decode(data) {
+                    let _ = bridge.to_local.send(ShellLocalIn::Send { is_text, data: bytes });
+                }
+            }
+        }
+        Some("shell-close") => {
+            let id = msg.get("id").and_then(|v| v.as_str()).unwrap_or("");
+            if let Some(bridge) = shells.lock().await.get(id) {
+                let _ = bridge.to_local.send(ShellLocalIn::Close);
+            }
         }
         _ => {}
     }
