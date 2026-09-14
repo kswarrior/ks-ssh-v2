@@ -468,11 +468,15 @@ async fn main() {
 
     // Terminal history DB — shells are shared on purpose, so any visitor
     // can reattach to them (same gate as the UI: login when --user/--pass).
-    // Pure `--no-serve` agents serve nothing locally, so they skip it.
-    if !cli.no_serve {
+    // Pure `--no-serve` relay agents also need it: Visit-over-WSS proxies to
+    // a loopback-only server in this same process, so history/terms work
+    // without any open port.
+    {
         let raw = cli.db.trim().to_string();
         if raw.is_empty() {
             println!("Terminal history: OFF (--db empty)");
+        } else if cli.no_serve && token.is_none() {
+            // --no-serve without --token exits below; skip DB init.
         } else {
             let path = std::path::PathBuf::from(&raw);
             let loaded = db::init(Some(&path));
@@ -494,14 +498,20 @@ async fn main() {
     // bridge when `--relay-auth` is set (see `relay::run_agent`).
     let relay_pin_for_agent = relay_pin.clone();
     match (cli.no_serve, token) {
-        // Pure agent: no open port, only outbound WSS.
+        // Pure agent: no open port, only outbound WSS. A loopback-only
+        // server (127.0.0.1, ephemeral port) serves the full API locally;
+        // the agent proxies `rpc-*` / `shell-*` relay messages to it, so
+        // CF Visit gets the exact same UI + functionality as `--port`
+        // with nothing exposed.
         (true, Some(t)) => {
+            let loopback = serve_loopback(auth, oidc, relay_pin).await;
             relay::run_agent(
                 &relay_ws_base(&cli.relay),
                 &t,
                 !cli.no_ui,
                 e2e_key,
                 relay_pin_for_agent,
+                loopback,
             )
             .await
         }
@@ -516,8 +526,16 @@ async fn main() {
             }
             let ws_base = relay_ws_base(&cli.relay);
             let push_ui = !cli.no_ui;
+            // Proxy target: the public server we are about to serve.
+            // `0.0.0.0` binds all interfaces — loop back via 127.0.0.1.
+            let proxy_host = if cli.host.trim() == "0.0.0.0" {
+                "127.0.0.1".to_string()
+            } else {
+                cli.host.clone()
+            };
+            let loopback = format!("http://{}:{}", proxy_host, cli.port);
             tokio::spawn(async move {
-                relay::run_agent(&ws_base, &t, push_ui, e2e_key, relay_pin_for_agent).await
+                relay::run_agent(&ws_base, &t, push_ui, e2e_key, relay_pin_for_agent, loopback).await
             });
             serve(cli.host, cli.port, auth, oidc, relay_pin).await;
         }
