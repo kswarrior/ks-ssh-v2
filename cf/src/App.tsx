@@ -319,7 +319,42 @@ function FeatureTile({
   )
 }
 
-function HomePage() {
+type SshEntry = {
+  id: string
+  name: string
+  token: string
+  note: string
+  online: boolean
+}
+
+function HomePage({ entries }: { entries: SshEntry[] }) {
+  const [health, setHealth] = useState<'checking' | 'online' | 'offline'>('checking')
+  const [latencyMs, setLatencyMs] = useState<number | null>(null)
+
+  useEffect(() => {
+    let alive = true
+    const ctrl = new AbortController()
+    const t0 = performance.now()
+    fetch('/api/health', { signal: ctrl.signal })
+      .then((r) => r.json())
+      .then((d: { ok?: boolean }) => {
+        if (!alive) return
+        setHealth(d?.ok === true ? 'online' : 'offline')
+        setLatencyMs(Math.round(performance.now() - t0))
+      })
+      .catch(() => {
+        if (alive) setHealth('offline')
+      })
+    return () => {
+      alive = false
+      ctrl.abort()
+    }
+  }, [])
+
+  const total = entries.length
+  const online = entries.filter((x) => x.online).length
+  const recent = entries.slice(-3).reverse()
+
   return (
     <section className="page" aria-labelledby="page-title-home">
       <div className="hero card">
@@ -339,6 +374,102 @@ function HomePage() {
         </div>
       </div>
 
+      <div className="grid">
+        <div className="card">
+          <h2>Relay status</h2>
+          <p>
+            {health === 'checking'
+              ? 'Checking live relay…'
+              : health === 'online'
+                ? `Relay online${latencyMs !== null ? ` · ${latencyMs}ms` : ''} — agents can register now.`
+                : 'Relay unreachable — check your connection, then retry.'}
+          </p>
+          <div className="row-actions">
+            <StatusTag online={health === 'online'} connecting={health === 'checking'} />
+            {health !== 'checking' && (
+              <button
+                type="button"
+                className="btn btn-sm"
+                onClick={() => {
+                  setHealth('checking')
+                  const t0 = performance.now()
+                  fetch('/api/health')
+                    .then((r) => r.json())
+                    .then((d: { ok?: boolean }) => {
+                      setHealth(d?.ok === true ? 'online' : 'offline')
+                      setLatencyMs(Math.round(performance.now() - t0))
+                    })
+                    .catch(() => setHealth('offline'))
+                }}
+              >
+                Recheck
+              </button>
+            )}
+          </div>
+        </div>
+        <div className="card">
+          <h2>Your connections</h2>
+          <p>
+            {total === 0
+              ? 'No connections saved yet on this device.'
+              : `${total} saved · ${online} online · ${total - online} offline.`}
+          </p>
+          <div className="row-actions">
+            <a className="btn btn-sm btn-primary" href="#/ssh">
+              {total === 0 ? 'Add your first connection' : 'Open SSH list'}
+            </a>
+          </div>
+        </div>
+      </div>
+
+      {recent.length > 0 && (
+        <>
+          <h2>Recent</h2>
+          <ul className="ssh-list">
+            {recent.map((e) => (
+              <li key={e.id} className="card ssh-card">
+                <div className="ssh-head">
+                  <span className="ssh-icon" aria-hidden="true">
+                    <SshGlyph />
+                  </span>
+                  <span className="ssh-name">{e.name}</span>
+                  <StatusTag online={e.online} />
+                </div>
+                <div className="ssh-foot">
+                  <div className="row-actions">
+                    <a className="btn btn-sm" href="#/ssh">
+                      Open
+                    </a>
+                  </div>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+
+      <h2>How it works</h2>
+      <div className="grid">
+        <div className="card">
+          <h3>1. Run the agent</h3>
+          <p>On the machine, download the static binary and register a relay token:</p>
+          <CodeBlock code="./ks-ssh --no-serve --token=" />
+        </div>
+        <div className="card">
+          <h3>2. Save the token</h3>
+          <p>Paste the printed 9-character token into the SSH page. Presence is verified live over WSS.</p>
+          <div className="row-actions">
+            <a className="btn btn-sm" href="#/ssh">
+              Open SSH
+            </a>
+          </div>
+        </div>
+        <div className="card">
+          <h3>3. Open the live UI</h3>
+          <p>When the agent is online, Visit opens Terminal, Files, Ports and Host — the same UI as local --port, tunnelled over WSS with E2E.</p>
+        </div>
+      </div>
+
       <h2>Why us</h2>
       <div className="grid">
         <FeatureTile
@@ -349,7 +480,7 @@ function HomePage() {
         <FeatureTile
           icon={<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />}
           title="Private"
-          text="Tokens stay in your browser. Nothing is uploaded or tracked."
+          text="Tokens stay in your browser. Shell traffic is E2E-sealed with AES-256-GCM."
         />
         <FeatureTile
           icon={
@@ -401,32 +532,8 @@ function HomePage() {
           text="Dropped? Reconnect straight from the card."
         />
       </div>
-
-      <h2>Screenshots</h2>
-      <div className="shot-grid">
-        {['Home', 'SSH list', 'Installation'].map((label) => (
-          <div key={label} className="shot">
-            <Icon>
-              <rect x="3" y="3" width="18" height="18" rx="2" />
-              <circle cx="8.5" cy="8.5" r="1.5" />
-              <polyline points="21 15 16 10 5 21" />
-            </Icon>
-            <span>
-              {label} — your screenshot here
-            </span>
-          </div>
-        ))}
-      </div>
     </section>
   )
-}
-
-type SshEntry = {
-  id: string
-  name: string
-  token: string
-  note: string
-  online: boolean
 }
 
 function E2eBadge({ status }: { status: E2eStatus }) {
@@ -454,10 +561,15 @@ function E2eBadge({ status }: { status: E2eStatus }) {
 function SSHPage({
   entries,
   onChange,
+  settings,
 }: {
   entries: SshEntry[]
   onChange: (fn: (prev: SshEntry[]) => SshEntry[]) => void
+  settings: Settings
 }) {
+  const relayBase = relayHttpBase(settings)
+  const wsHost = relayWsHost(settings)
+  const hasFragKey = parseFragmentKey() !== null
   const [formOpen, setFormOpen] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [name, setName] = useState('')
@@ -527,16 +639,15 @@ function SSHPage({
     setConnectingId(entry.id)
     setBanner(null)
     const scheme = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    const ws = new WebSocket(
-      `${scheme}//${window.location.host}/v1/client?token=${t}`,
-    )
+    const ws = new WebSocket(`${scheme}//${wsHost}/v1/client?token=${t}`)
     socketsRef.current.set(entry.id, ws)
+    const timeoutMs = settings.connectTimeoutMs
     const timeout = setTimeout(() => {
       if (socketsRef.current.get(entry.id) !== ws) return
       closeSocket(entry.id)
       setConnectingId((cur) => (cur === entry.id ? null : cur))
       setBanner('Relay timed out. Is the agent running (`ks-ssh --token=`)?')
-    }, 8000)
+    }, timeoutMs)
     ws.onopen = () => {
       // Presence check only (no secrets). Include e2e capability when the
       // fragment carries `k` so the agent can distinguish E2E vs legacy.
@@ -640,6 +751,27 @@ function SSHPage({
     onChange((prev) => prev.filter((x) => x.id !== id))
   }
 
+  const [refreshing, setRefreshing] = useState(false)
+  const refreshAll = async () => {
+    if (refreshing || entries.length === 0) return
+    setRefreshing(true)
+    setBanner(null)
+    try {
+      const results = await Promise.all(
+        entries.map(async (e) => {
+          const tok = e.token.trim().toUpperCase()
+          if (!TOKEN_EXACT_RE.test(tok)) return { id: e.id, online: false }
+          const st = await fetchRelayStatus(relayBase, tok)
+          return { id: e.id, online: st?.agentOnline === true }
+        }),
+      )
+      const map = new Map(results.map((r) => [r.id, r.online]))
+      onChange((prev) => prev.map((x) => (map.has(x.id) ? { ...x, online: map.get(x.id) === true } : x)))
+    } finally {
+      setRefreshing(false)
+    }
+  }
+
   const total = entries.length
   const online = entries.filter((x) => x.online).length
 
@@ -680,6 +812,31 @@ function SSHPage({
           <span>Offline</span>
         </div>
       </div>
+
+      <div className="row-actions">
+        <button
+          type="button"
+          className="btn btn-sm"
+          disabled={refreshing || entries.length === 0}
+          onClick={() => void refreshAll()}
+        >
+          {refreshing ? 'Checking…' : 'Refresh live status'}
+        </button>
+        <span className="session-status session-hint">
+          Live via <code>/api/ssh/status</code> on {wsHost} · timeout {Math.round(settings.connectTimeoutMs / 1000)}s
+        </span>
+      </div>
+
+      {settings.requireE2E && !hasFragKey && (
+        <div className="card" role="note" aria-label="E2E key hint">
+          <h2>End-to-end encryption is required</h2>
+          <p>
+            Open this app from a full share link with <code>#k=…</code> (printed by{' '}
+            <code>ks-ssh --token=</code>). Presence checks work without it, but live
+            terminal and files stay sealed until the key is in the fragment.
+          </p>
+        </div>
+      )}
 
       {banner && (
         <div className="banner-error" role="alert">
@@ -915,10 +1072,14 @@ function SSHPage({
 function SessionPage({
   token,
   name,
+  settings,
 }: {
   token: string | null
   name: string | null
+  settings: Settings
 }) {
+  const relayBase = relayHttpBase(settings)
+  const wsHost = relayWsHost(settings)
   const activeToken = token
   const [meta, setMeta] = useState<{ hasUi: boolean; size: number } | null>(null)
   const [checking, setChecking] = useState(false)
@@ -1015,7 +1176,7 @@ function SessionPage({
     setSrcDoc(null)
     const load = async () => {
       try {
-        const res = await fetch(`/api/ui/${activeToken}/meta`, {
+        const res = await fetch(`${relayBase}/api/ui/${activeToken}/meta`, {
           signal: ctrl.signal,
         })
         const data = (await res.json().catch(() => null)) as {
@@ -1055,8 +1216,7 @@ function SessionPage({
     const scheme = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
     let ws: WebSocket | null = null
     try {
-      ws = new WebSocket(
-        `${scheme}//${window.location.host}/v1/client?token=${activeToken}`,
+      ws = new WebSocket(`${scheme}//${wsHost}/v1/client?token=${activeToken}`,
       )
     } catch {
       return
