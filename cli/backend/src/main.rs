@@ -547,3 +547,51 @@ async fn main() {
         (false, None) => serve(cli.host, cli.port, auth, oidc, relay_pin).await,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tower::ServiceExt;
+
+    /// The relay proxy (`rpc-*` → loopback) depends on this router serving
+    /// the full API without a public port. Smoke-test it in-process.
+    #[tokio::test]
+    async fn loopback_router_serves_api_without_open_port() {
+        let app = build_router(None, None, None);
+        let res = app
+            .oneshot(
+                axum::http::Request::builder()
+                    .uri("/api/hello")
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), axum::http::StatusCode::OK);
+        let body = axum::body::to_bytes(res.into_body(), 1024).await.unwrap();
+        assert!(body.windows(6).any(|w| w == b"KS SSH"));
+    }
+
+    #[tokio::test]
+    async fn loopback_router_exposes_relay_proxy_surface() {
+        // Every path the WSS `rpc-*` bridge may forward must exist here
+        // (auth-gated or open — never 404 from a missing route).
+        let public = ["/api/hello", "/api/record/status", "/api/auth/status"];
+        for uri in public {
+            let app = build_router(None, None, None);
+            let res = app
+                .oneshot(
+                    axum::http::Request::builder()
+                        .uri(uri)
+                        .body(axum::body::Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert!(
+                res.status() != axum::http::StatusCode::NOT_FOUND,
+                "{uri} must be routed"
+            );
+        }
+    }
+}

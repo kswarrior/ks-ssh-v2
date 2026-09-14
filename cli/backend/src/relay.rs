@@ -1444,10 +1444,27 @@ mod tests {
     #[test]
     fn ui_bundle_carries_zero_secrets() {
         // The pushed bundle is public build output served with `no-store`.
-        // Prove it embeds no E2E secret / PIN material: no `#k=` fragment
-        // keys, no 43-char key blobs, no PIN JSON.
+        // Prove it embeds no E2E secret / PIN material: no `#k=<43-char key>`
+        // fragment secret (code only mentions `#k=...` placeholders), no
+        // PIN JSON. (`k`/PIN live only in the URL fragment + memory.)
         let html = crate::ui::build_single_file().expect("build bundle");
-        assert!(!html.contains("#k="), "bundle must not embed an E2E key");
+        let mut found_key = false;
+        let bytes = html.as_bytes();
+        // Scan for `#k=` followed by 43 URL-safe chars (a real embedded key).
+        for (i, w) in bytes.windows(3).enumerate() {
+            if w == b"#k=" {
+                let rest = &html[i + 3..];
+                let keylen = rest
+                    .chars()
+                    .take_while(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
+                    .count();
+                if keylen == 43 {
+                    found_key = true;
+                    break;
+                }
+            }
+        }
+        assert!(!found_key, "bundle must not embed an E2E key");
         assert!(
             !html.contains("\"pin\"") || html.contains("relay-auth"),
             "bundle must not embed a viewer PIN"
