@@ -921,12 +921,14 @@ pub async fn api_upload_url(opt_ctx: Option<Extension<auth::AuthContext>>, heade
     let size = std::fs::metadata(&target).map(|m| m.len()).unwrap_or(0);
     if size > UPLOAD_MAX_BYTES as u64 {
         let _ = std::fs::remove_file(&target);
+        audit_file(&opt_ctx, &headers, "file-upload-url", &b.url, false);
         return (
             StatusCode::PAYLOAD_TOO_LARGE,
             format!("file too large (max {} MB)", UPLOAD_MAX_BYTES / 1024 / 1024),
         )
             .into_response();
     }
+    audit_file(&opt_ctx, &headers, "file-upload-url", &b.url, true);
     (
         StatusCode::OK,
         Json(serde_json::json!({ "ok": true, "path": target.to_string_lossy(), "size": size })),
@@ -1315,6 +1317,7 @@ pub async fn api_download_zip(opt_ctx: Option<Extension<auth::AuthContext>>, hea
             .into_response();
     }
     let zip_name = format!("{}.zip", base.replace('"', "_"));
+    audit_file(&opt_ctx, &headers, "file-zip", &q.path, true);
     Response::builder()
         .status(StatusCode::OK)
         .header(header::CONTENT_TYPE, "application/zip")
@@ -1431,6 +1434,7 @@ pub async fn api_zip_many(opt_ctx: Option<Extension<auth::AuthContext>>, headers
         }
     }
     let size = std::fs::metadata(&out_path).map(|m| m.len()).unwrap_or(0);
+    audit_file(&opt_ctx, &headers, "file-zip", &b.dir, true);
     (
         StatusCode::OK,
         Json(serde_json::json!({ "ok": true, "path": out_path.to_string_lossy(), "size": size })),
@@ -1536,6 +1540,7 @@ pub async fn api_unzip_file(opt_ctx: Option<Extension<auth::AuthContext>>, heade
                 .into_response();
         }
     }
+    let _audit_target = b.file.clone();
     match tokio::process::Command::new("unzip")
         .args(["-n", "-q"])
         .arg(&file)
@@ -1544,11 +1549,14 @@ pub async fn api_unzip_file(opt_ctx: Option<Extension<auth::AuthContext>>, heade
         .output()
         .await
     {
-        Ok(o) if o.status.success() => (
-            StatusCode::OK,
-            Json(serde_json::json!({ "ok": true, "dest": dest.to_string_lossy() })),
-        )
-            .into_response(),
+        Ok(o) if o.status.success() => {
+            audit_file(&opt_ctx, &headers, "file-unzip", &_audit_target, true);
+            (
+                StatusCode::OK,
+                Json(serde_json::json!({ "ok": true, "dest": dest.to_string_lossy() })),
+            )
+                .into_response()
+        }
         Ok(o) => {
             let tail = String::from_utf8_lossy(&o.stderr);
             let tail = tail.trim().lines().last().unwrap_or("unzip failed");

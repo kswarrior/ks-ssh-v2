@@ -814,6 +814,407 @@ function SSHPage({
   )
 }
 
+function SessionPage({
+  token,
+  name,
+}: {
+  token: string | null
+  name: string | null
+}) {
+  const activeToken = token
+  const [meta, setMeta] = useState<{ hasUi: boolean; size: number } | null>(null)
+  const [checking, setChecking] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [srcDoc, setSrcDoc] = useState<string | null>(null)
+  const [cacheBust, setCacheBust] = useState(0)
+  const wrapRef = useRef<HTMLDivElement | null>(null)
+
+  // Browser tab title follows the session.
+  useEffect(() => {
+    document.title =
+      name != null
+        ? `KS SSH — ${name}`
+        : activeToken != null
+          ? `KS SSH — Session ${activeToken}`
+          : 'KS SSH — Session'
+  }, [name, activeToken])
+
+  // Check /api/ui/<token>/meta, then prefer raw /v/<token> iframe.
+  // Fall back to WSS ui-request -> srcdoc when HTTP has no UI yet.
+  useEffect(() => {
+    if (!activeToken) return
+    let cancelled = false
+    const ctrl = new AbortController()
+    setChecking(true)
+    setError(null)
+    setMeta(null)
+    setSrcDoc(null)
+    const load = async () => {
+      try {
+        const res = await fetch(`/api/ui/${activeToken}/meta`, {
+          signal: ctrl.signal,
+        })
+        const data = (await res.json().catch(() => null)) as {
+          ok?: boolean
+          hasUi?: boolean
+          size?: number
+        } | null
+        if (cancelled) return
+        if (res.ok && data?.hasUi) {
+          setMeta({ hasUi: true, size: Number(data.size) || 0 })
+          setChecking(false)
+          return
+        }
+        // HTTP has nothing yet — try live WSS (agent may be mid-upload).
+        await loadViaWss(activeToken, ctrl.signal, cancelled, {
+          setMeta,
+          setSrcDoc,
+          setError,
+          setChecking,
+        })
+      } catch (e) {
+        if (cancelled || ctrl.signal.aborted) return
+        setError(e instanceof Error ? e.message : 'check failed')
+        setChecking(false)
+      }
+    }
+    void load()
+    return () => {
+      cancelled = true
+      ctrl.abort()
+    }
+  }, [activeToken, cacheBust])
+
+  // Live reload: when the agent re-pushes, the room broadcasts ui-ready.
+  useEffect(() => {
+    if (!activeToken || srcDoc !== null) return
+    const scheme = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+    let ws: WebSocket | null = null
+    try {
+      ws = new WebSocket(
+        `${scheme}//${window.location.host}/v1/client?token=${activeToken}`,
+      )
+    } catch {
+      return
+    }
+    ws.onopen = () => {
+      try {
+        // Advertise E2E capability when the fragment carries `k`
+        // (UI itself stays plaintext by design; session payloads use enc).
+        const k = parseFragmentKey()
+        ws?.send(
+          JSON.stringify(
+            k
+              ? { type: 'hello', role: 'client', token: activeToken, e2e: E2E_ALG }
+              : { type: 'hello', role: 'client', token: activeToken },
+          ),
+        )
+      } catch {
+        // Ignore — reload happens on next check.
+      }
+    }
+    ws.onmessage = (e) => {
+      try {
+        const msg = JSON.parse(String(e.data)) as { type?: string }
+        // `enc` is opaque sealed traffic — ignore here (UI is plaintext).
+        if (msg?.type === 'enc') return
+        if (msg?.type === 'ui-ready') {
+          setCacheBust((n) => n + 1)
+        }
+      } catch {
+        // Non-JSON relay traffic — ignore here.
+      }
+    }
+    return () => {
+      try {
+        ws?.close()
+      } catch {
+        // Already closed — ignore.
+      }
+    }
+  }, [activeToken, srcDoc])
+
+  const openFullscreen = async () => {
+    try {
+      const el = wrapRef.current
+      if (el?.requestFullscreen) {
+        await el.requestFullscreen()
+      } else if (activeToken) {
+        // Fallback: raw /v/ page in a new tab is already fullscreen-capable.
+        window.open(`/v/${activeToken}`, '_blank', 'noopener')
+      }
+    } catch {
+      setError('Fullscreen blocked — use "Open raw" in a new tab instead.')
+    }
+  }
+
+  if (!activeToken) {
+    return (
+      <section className="page" aria-labelledby="page-title-session">
+        <h1 id="page-title-session">Session</h1>
+        <p className="lead">No session selected.</p>
+        <div className="card">
+          <p>Pick a connection from the SSH page to open its fullscreen UI.</p>
+          <div className="row-actions">
+            <a className="btn btn-primary" href="#/ssh">
+              Open SSH
+            </a>
+          </div>
+        </div>
+      </section>
+    )
+  }
+
+  const frameSrc =
+    meta?.hasUi && srcDoc === null
+      ? `/v/${activeToken}${cacheBust ? `?t=${cacheBust}` : ''}`
+      : undefined
+
+  return (
+    <section className="page page-session" aria-labelledby="page-title-session">
+      <div className="page-head">
+        <h1 id="page-title-session">{name ?? `Session ${activeToken}`}</h1>
+        <div className="row-actions">
+          <E2eBadge status={parseFragmentKey() ? 'on' : 'off'} />
+          {(meta?.hasUi || srcDoc) && (
+            <>
+              <button type="button" className="btn btn-sm btn-primary" onClick={openFullscreen}>
+                Fullscreen
+              </button>
+              <a
+                className="btn btn-sm"
+                href={`/v/${activeToken}`}
+                target="_blank"
+                rel="noreferrer"
+              >
+                Open raw
+              </a>
+            </>
+          )}
+          <a className="btn btn-sm" href="#/ssh">
+            Back
+          </a>
+        </div>
+      </div>
+      <p className="lead">
+        The whole UI pushed by your CLI over WSS — no port forwarding.
+        The bundle itself is public (plaintext); the private session needs
+        the full link with <code>#k=...</code> for 🔒 E2E.
+      </p>
+      {checking && <p aria-live="polite">Checking for agent UI …</p>}
+      {error && (
+        <div className="banner-error" role="alert">
+          <p>{error}</p>
+          <div className="row-actions">
+            <button type="button" className="btn btn-sm" onClick={() => setCacheBust((n) => n + 1)}>
+              Retry
+            </button>
+          </div>
+        </div>
+      )}
+      {!checking && !meta?.hasUi && !srcDoc && !error && (
+        <div className="card">
+          <p>
+            Waiting for the agent UI for <code>{activeToken}</code>. On the
+            machine, run: <code>ks-ssh --no-serve --token={activeToken}</code>
+          </p>
+          <div className="row-actions">
+            <button type="button" className="btn btn-sm" onClick={() => setCacheBust((n) => n + 1)}>
+              Reload
+            </button>
+          </div>
+        </div>
+      )}
+
+      {(meta?.hasUi || srcDoc) && (
+        <div className="session-wrap" ref={wrapRef}>
+          <div className="session-bar">
+            <code>{name ?? activeToken}</code>
+            {meta && <span>{Math.round(meta.size / 1024)} KB</span>}
+            <span className="header-spacer" />
+            <button type="button" className="btn btn-sm btn-primary" onClick={openFullscreen}>
+              Fullscreen
+            </button>
+          </div>
+          {srcDoc !== null ? (
+            <iframe
+              title={`Agent UI ${activeToken}`}
+              className="session-frame"
+              srcDoc={srcDoc}
+              allow="fullscreen"
+              allowFullScreen
+              sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
+            />
+          ) : (
+            <iframe
+              title={`Agent UI ${activeToken}`}
+              className="session-frame"
+              src={frameSrc}
+              allow="fullscreen"
+              allowFullScreen
+            />
+          )}
+        </div>
+      )}
+    </section>
+  )
+}
+
+async function loadViaWss(
+  token: string,
+  signal: AbortSignal,
+  cancelled: boolean,
+  hooks: {
+    setMeta: (m: { hasUi: boolean; size: number } | null) => void
+    setSrcDoc: (s: string | null) => void
+    setError: (s: string | null) => void
+    setChecking: (b: boolean) => void
+  },
+): Promise<void> {
+  return new Promise((resolve) => {
+    if (signal.aborted || cancelled) {
+      resolve()
+      return
+    }
+    const scheme = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+    let ws: WebSocket
+    try {
+      ws = new WebSocket(`${scheme}//${window.location.host}/v1/client?token=${token}`)
+    } catch {
+      hooks.setError(`No UI for ${token} yet — is the CLI running with --token=${token}?`)
+      hooks.setChecking(false)
+      resolve()
+      return
+    }
+    let chunks: (string | null)[] | null = null
+    const timeout = setTimeout(() => {
+      try {
+        ws.close()
+      } catch {
+        // Already closed — ignore.
+      }
+      if (!cancelled && !signal.aborted) {
+        hooks.setError(
+          `No UI for ${token} yet. Run: ks-ssh --no-serve --token=${token}`,
+        )
+        hooks.setChecking(false)
+      }
+      resolve()
+    }, 10000)
+    const done = (ok: boolean) => {
+      clearTimeout(timeout)
+      try {
+        ws.close()
+      } catch {
+        // Already closed — ignore.
+      }
+      resolve()
+      void ok
+    }
+    signal.addEventListener('abort', () => {
+      clearTimeout(timeout)
+      try {
+        ws.close()
+      } catch {
+        // Already closed — ignore.
+      }
+      resolve()
+    })
+    ws.onopen = () => {
+      // hello carries token+role only (no k); e2e advertises capability.
+      // `k` never leaves fragment/memory. ui-request stays plaintext
+      // (UI bundle exception — public build output).
+      const k = parseFragmentKey()
+      ws.send(
+        JSON.stringify(
+          k
+            ? { type: 'hello', role: 'client', token, e2e: E2E_ALG }
+            : { type: 'hello', role: 'client', token },
+        ),
+      )
+      ws.send(JSON.stringify({ type: 'ui-request' }))
+    }
+    ws.onmessage = (e) => {
+      try {
+        const msg = JSON.parse(String(e.data)) as {
+          type?: string
+          encoding?: string
+          size?: number
+          chunks?: number
+          i?: number
+          data?: string
+        }
+        // `enc` is opaque sealed session traffic — ignore for UI fetch.
+        if (msg?.type === 'enc') return
+        if (msg?.type === 'ui-begin') {
+          const n = Number(msg.chunks) || 0
+          if (n > 0 && n <= 256) chunks = new Array(n).fill(null)
+          return
+        }
+        if (msg?.type === 'ui-chunk' && chunks) {
+          const i = Number(msg.i)
+          if (Number.isInteger(i) && i >= 0 && i < chunks.length && typeof msg.data === 'string') {
+            chunks[i] = msg.data
+          }
+          return
+        }
+        if (msg?.type === 'ui-end' && chunks) {
+          if (chunks.some((c) => c === null)) return
+          try {
+            const html = decodeUiChunks(chunks as string[])
+            if (cancelled || signal.aborted) {
+              done(false)
+              return
+            }
+            hooks.setSrcDoc(html)
+            hooks.setMeta({ hasUi: true, size: html.length })
+            hooks.setChecking(false)
+          } catch {
+            hooks.setError('UI decode failed — try Reload.')
+            hooks.setChecking(false)
+          }
+          done(true)
+          return
+        }
+        if (msg?.type === 'ui-missing' || msg?.type === 'ui-error') {
+          if (!cancelled && !signal.aborted) {
+            hooks.setError(`No UI for ${token} yet. Run: ks-ssh --no-serve --token=${token}`)
+            hooks.setChecking(false)
+          }
+          done(false)
+        }
+      } catch {
+        // Opaque relay traffic — ignore.
+      }
+    }
+    ws.onerror = () => {
+      if (!cancelled && !signal.aborted && chunks === null) {
+        hooks.setError(`No UI for ${token} yet. Run: ks-ssh --no-serve --token=${token}`)
+        hooks.setChecking(false)
+      }
+      done(false)
+    }
+  })
+}
+
+function decodeUiChunks(chunks: string[]): string {
+  let total = 0
+  const parts: Uint8Array[] = chunks.map((b64) => {
+    const bin = atob(b64)
+    const arr = new Uint8Array(bin.length)
+    for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i)
+    total += arr.length
+    return arr
+  })
+  const all = new Uint8Array(total)
+  let off = 0
+  for (const p of parts) {
+    all.set(p, off)
+    off += p.length
+  }
+  return new TextDecoder().decode(all)
+}
+
 function InstallationPage() {
   return (
     <section className="page" aria-labelledby="page-title-installation">
@@ -877,6 +1278,11 @@ export default function App() {
         ? hashToPage(window.location.hash)
         : null) ?? 'home',
   )
+  const [sessionToken, setSessionToken] = useState<string | null>(() =>
+    typeof window !== 'undefined'
+      ? hashToSessionToken(window.location.hash)
+      : null,
+  )
   const isMobile = useIsMobile(768)
   const btnRef = useRef<HTMLButtonElement>(null)
   const asideRef = useRef<HTMLElement>(null)
@@ -916,13 +1322,16 @@ export default function App() {
     const onHash = () => {
       const next = hashToPage(window.location.hash)
       if (next) setPage(next)
+      setSessionToken(hashToSessionToken(window.location.hash))
     }
     window.addEventListener('hashchange', onHash)
     return () => window.removeEventListener('hashchange', onHash)
   }, [])
 
   // Browser tab title follows the active page.
+  // (The session page sets its own title with the connection name.)
   useEffect(() => {
+    if (page === 'session') return
     const label = NAV.find((p) => p.id === page)?.label
     document.title = label && label !== 'Home' ? `KS SSH — ${label}` : 'KS SSH'
   }, [page])
@@ -983,6 +1392,25 @@ export default function App() {
   const patchSettings = (patch: Partial<Settings>) =>
     setSettings((prev) => ({ ...prev, ...patch }))
 
+  const sessionName =
+    sessionToken != null
+      ? (entries.find(
+          (x) => x.token.trim().toUpperCase() === sessionToken,
+        )?.name ?? null)
+      : null
+
+  const onNavClick = () => {
+    if (isMobile) {
+      setOpen(false)
+      btnRef.current?.focus()
+    } else {
+      // Move screen-reader/keyboard focus to the new page.
+      window.requestAnimationFrame(() => {
+        mainRef.current?.focus({ preventScroll: true })
+      })
+    }
+  }
+
   return (
     <div className="app-shell">
       <a className="skip-link" href="#main">
@@ -1012,22 +1440,24 @@ export default function App() {
                   className={isActive ? 'active' : undefined}
                   aria-current={isActive ? 'page' : undefined}
                   tabIndex={drawerHidden ? -1 : undefined}
-                  onClick={() => {
-                    if (isMobile) {
-                      setOpen(false)
-                      btnRef.current?.focus()
-                    } else {
-                      // Move screen-reader/keyboard focus to the new page.
-                      window.requestAnimationFrame(() => {
-                        mainRef.current?.focus({ preventScroll: true })
-                      })
-                    }
-                  }}
+                  onClick={onNavClick}
                 >
                   {item.label}
                 </a>
               )
             })}
+            {page === 'session' && sessionToken && (
+              <a
+                key="session"
+                href={`#/session/${sessionToken}`}
+                className="active"
+                aria-current="page"
+                tabIndex={drawerHidden ? -1 : undefined}
+                onClick={onNavClick}
+              >
+                {sessionName ?? `Session ${sessionToken}`}
+              </a>
+            )}
           </nav>
         </aside>
 
@@ -1123,6 +1553,13 @@ export default function App() {
         >
           {page === 'home' && <HomePage />}
           {page === 'ssh' && <SSHPage entries={entries} onChange={setEntries} />}
+          {page === 'session' && (
+            <SessionPage
+              key={sessionToken ?? 'none'}
+              token={sessionToken}
+              name={sessionName}
+            />
+          )}
           {page === 'installation' && <InstallationPage />}
           {page === 'settings' && (
             <SettingsPage settings={settings} onChange={patchSettings} />

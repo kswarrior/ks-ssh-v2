@@ -316,30 +316,55 @@ function ShellSession({
   id,
   active,
   sid,
+  off0,
+  fontSize,
+  predict,
   onStatus,
   onReady,
   onProc,
   onHandle,
+  onOffset,
+  onLatency,
+  onBell,
 }: {
   id: string
   active: boolean
   /** Backend session id to reattach to (null = ask the backend for one). */
   sid: string | null
+  /** Persisted resume offset for this tab (v2 stream bytes already seen). */
+  off0: number
+  fontSize: number
+  /** Predictive local echo enabled (engages only above 50ms RTT). */
+  predict: boolean
   onStatus: (id: string, s: TermStatus) => void
   onReady: (id: string, sid: string | null) => void
   onProc: (id: string, proc: string | null) => void
   onHandle: (id: string, h: TermHandle | null) => void
+  onOffset: (id: string, off: number) => void
+  onLatency: (id: string, ms: number | null) => void
+  onBell: (id: string) => void
 }) {
   const [status, setStatus] = useState<TermStatus>('offline')
   // "↓ latest" pill when the user scrolled up to read older output.
   const [stuck, setStuck] = useState(true)
+  // Auto-reconnect attempt in flight (0 = steady). Drives the retry pill.
+  const [retryAttempt, setRetryAttempt] = useState(0)
+  // Last smoothed RTT for the retry pill + prediction gating.
+  const [rttMs, setRttMs] = useState<number | null>(null)
+  // Ctrl+F in-terminal search bar.
+  const [searchOpen, setSearchOpen] = useState(false)
+  const [searchTerm, setSearchTerm] = useState('')
+  const [searchMiss, setSearchMiss] = useState(false)
   // Bump to tear down the socket and start a fresh shell.
   const [gen, setGen] = useState(0)
 
   const wsRef = useRef<WebSocket | null>(null)
   const containerRef = useRef<HTMLDivElement | null>(null)
+  const searchInputRef = useRef<HTMLInputElement | null>(null)
   const termRef = useRef<Terminal | null>(null)
   const fitRef = useRef<FitAddon | null>(null)
+  const searchRef = useRef<SearchAddon | null>(null)
+  const serializeRef = useRef<SerializeAddon | null>(null)
   // Keystrokes typed while the socket is still connecting.
   const pendingRef = useRef<string[]>([])
   // Last size sent to the shell — resizes that change nothing are skipped.
@@ -351,6 +376,24 @@ function ShellSession({
   // Backend session id for this tab — survives refresh via localStorage
   // (parent prop on mount) and reconnects reattach to the same shell.
   const sidRef = useRef<string | null>(sid)
+  // v2 stream: next expected PTY byte offset. Advanced by every frame and
+  // persisted (throttled) so refresh/resume never duplicates or loses.
+  const offRef = useRef<number>(off0 >= 0 ? Math.floor(off0) : 0)
+  // True once the server proved v2 (ready.v === 2). All v2-only traffic
+  // (offsets, ping/ack) stays gated behind this — old backends keep v1.
+  const v2Ref = useRef(false)
+  // Auto-reconnect bookkeeping (refs: read inside socket callbacks).
+  const attemptRef = useRef(0)
+  const backoffTimerRef = useRef<number | undefined>(undefined)
+  // RTT smoothing + watchdog.
+  const rttRef = useRef<number | null>(null)
+  const lastMsgRef = useRef(0)
+  const lastAckRef = useRef(0)
+  const unackedRef = useRef(0)
+  // Predictive echo: unconfirmed locally-echoed chars + their UTF-8 bytes.
+  const predCharsRef = useRef<string[]>([])
+  const predBytesRef = useRef<number[]>([])
+  const altBufRef = useRef(false)
   // Current input line (not yet submitted) + running process guess for the
   // tab label. Refs so the xterm listeners (mounted once) always see them.
   const lineRef = useRef('')
@@ -402,6 +445,180 @@ function ShellSession({
 
   const focusKeys = () => {
     setTimeout(() => termRef.current?.focus(), 30)
+  }
+
+  // Latest-callback refs so long-lived socket handlers never go stale.
+  const onOffsetRef = useRef(onOffset)
+  onOffsetRef.current = onOffset
+  const onLatencyRef = useRef(onLatency)
+  onLatencyRef.current = onLatency
+  const onBellRef = useRef(onBell)
+  onBellRef.current = onBell
+  const predictRef = useRef(predict)
+  predictRef.current = predict
+
+  /** Persist the resume watermark (throttled by the caller). */
+  const saveOffset = () => {
+    onOffsetRef.current(idRef.current, offRef.current)
+  }
+
+  /** Throttled v2 ack: received watermark for gap accounting. */
+  const maybeAck = (force: boolean) => {
+    if (!v2Ref.current) return
+    const ws = wsRef.current
+    if (!ws || ws.readyState !== WebSocket.OPEN) return
+    const now = Date.now()
+    if (!force && now - lastAckRef.current < 500 && unackedRef.current < 32768) {
+      return
+    }
+    lastAckRef.current = now
+    unackedRef.current = 0
+    try {
+      ws.send(JSON.stringify({ type: 'ack', seq: offRef.current }))
+    } catch {
+      // Socket died mid-send — the reconnect carries the offset anyway.
+    }
+  }
+
+  /** Record an RTT sample (smoothed) for prediction gating + display. */
+  const noteRtt = (rtt: number) => {
+    if (!Number.isFinite(rtt) || rtt < 0) return
+    const prev = rttRef.current
+    const smooth = prev == null ? rtt : Math.round(prev * 0.7 + rtt * 0.3)
+    rttRef.current = smooth
+    setRttMs(smooth)
+    onLatencyRef.current(idRef.current, smooth)
+  }
+
+  const clearRtt = () => {
+    rttRef.current = null
+    setRttMs(null)
+    onLatencyRef.current(idRef.current, null)
+  }
+
+  // ---------- Predictive local echo (Mosh-lite) ----------
+  // Printable keystrokes render dimmed immediately when the smoothed RTT
+  // is high and the server has been quiet; the bytes are confirmed against
+  // the returning server echo by prefix match and repaired to normal
+  // intensity. Any conflict abandons (normalizes) the predictions.
+
+  /** Approx cell width for cursor repair (wide CJK/emoji = 2). */
+  const cellWidth = (ch: string): number => {
+    const cp = ch.codePointAt(0) ?? 0
+    if (cp < 0x1100) return 1
+    if (
+      (cp >= 0x1100 && cp <= 0x115f) ||
+      (cp >= 0x2e80 && cp <= 0xa4cf) ||
+      (cp >= 0xac00 && cp <= 0xd7a3) ||
+      (cp >= 0xf900 && cp <= 0xfaff) ||
+      (cp >= 0xfe30 && cp <= 0xfe4f) ||
+      (cp >= 0xff00 && cp <= 0xff60) ||
+      (cp >= 0xffe0 && cp <= 0xffe6) ||
+      (cp >= 0x20000 && cp <= 0x3fffd) ||
+      (cp >= 0x1f300 && cp <= 0x1faff) ||
+      (cp >= 0x2600 && cp <= 0x27bf) ||
+      cp === 0x231a ||
+      cp === 0x231b
+    ) {
+      return 2
+    }
+    return 1
+  }
+
+  /** Rewrite pending predictions in normal intensity, keep them on screen. */
+  const sealPredictions = () => {
+    const chars = predCharsRef.current
+    if (chars.length === 0) return
+    const term = termRef.current
+    predCharsRef.current = []
+    predBytesRef.current = []
+    if (!term) return
+    try {
+      let cells = 0
+      for (const c of chars) cells += cellWidth(c)
+      // Back up over the dimmed chars, rewrite them normal, restore cursor.
+      term.write(`\x1b7\x1b[${cells}D\x1b[22m${chars.join('')}\x1b8`)
+    } catch {
+      // Repair is cosmetic — the chars themselves are already correct.
+    }
+  }
+
+  const abandonPredictions = () => {
+    // Conflict (server output that doesn't match): normalize what we showed
+    // and stop predicting until the line goes quiet again.
+    sealPredictions()
+  }
+
+  /** Confirm a prefix of the prediction queue against server bytes. */
+  const confirmPredictions = (bytes: Uint8Array) => {
+    let queue = predBytesRef.current
+    if (queue.length === 0) return bytes
+    let i = 0
+    while (queue.length > 0 && i < bytes.length && queue[0] === bytes[i]) {
+      queue.shift()
+      i += 1
+    }
+    if (i === 0) {
+      // Server said something else entirely — conflict.
+      abandonPredictions()
+      return bytes
+    }
+    // Drop fully-confirmed leading chars, repair them to normal intensity.
+    const chars = predCharsRef.current
+    let used = 0
+    let count = 0
+    while (count < chars.length) {
+      const enc = new TextEncoder().encode(chars[count])
+      if (used + enc.length > i) break
+      used += enc.length
+      count += 1
+    }
+    if (count > 0) {
+      const done = chars.splice(0, count)
+      predBytesRef.current = queue
+      const term = termRef.current
+      if (term) {
+        try {
+          let cells = 0
+          for (const c of done) cells += cellWidth(c)
+          term.write(`\x1b7\x1b[${cells}D\x1b[22m${done.join('')}\x1b8`)
+        } catch {
+          // Cosmetic only.
+        }
+      }
+      queue = predBytesRef.current
+    }
+    predBytesRef.current = queue
+    return bytes.subarray(i)
+  }
+
+  /** Maybe locally echo one typed char (returns nothing). */
+  const predictInput = (data: string) => {
+    if (
+      !predictRef.current ||
+      data.length !== 1 ||
+      altBufRef.current ||
+      predCharsRef.current.length >= PREDICT_MAX
+    ) {
+      return
+    }
+    const ch = data
+    if (ch < ' ' || ch === '\x7f') return
+    const rtt = rttRef.current
+    if (rtt == null || rtt <= PREDICT_RTT_MS) return
+    if (Date.now() - lastMsgRef.current < PREDICT_IDLE_MS) return
+    const ws = wsRef.current
+    if (!ws || ws.readyState !== WebSocket.OPEN) return
+    const term = termRef.current
+    if (!term) return
+    try {
+      term.write(`\x1b[2m${ch}\x1b[22m`)
+      predCharsRef.current.push(ch)
+      const enc = new TextEncoder().encode(ch)
+      for (const b of enc) predBytesRef.current.push(b)
+    } catch {
+      // Prediction is best-effort only.
+    }
   }
 
   const send = (data: string) => {
