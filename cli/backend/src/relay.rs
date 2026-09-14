@@ -284,6 +284,7 @@ async fn on_text(
                         Some("data") => {
                             // v1: acknowledge bridged payloads (PTY bridging
                             // comes next — same enc path). Ack INSIDE enc.
+                            crate::db::audit("-", "local", "relay-data", token, "ok");
                             send_enc(tx, state, &serde_json::json!({"type":"ack"})).await?;
                         }
                         _ => {}
