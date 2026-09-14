@@ -111,7 +111,7 @@ fn relay_ws_base(relay: &str) -> String {
 }
 
 async fn serve(host: String, port: u16, auth: Option<Arc<AuthState>>) {
-    let state = AppState { auth: auth.clone() };
+    let state = AppState { auth: auth.clone(), oidc: None, relay_pin: None };
 
     // Public: health ping + login flow (needed to show the login page).
     let public = Router::new()

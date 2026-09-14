@@ -1108,7 +1108,7 @@ impl AuthState {
             // Owner is always admin — role changes ignored.
             let keep = keep_token.map(str::to_string);
             g.sessions
-                .retain(|tok, name| name != target || keep.as_deref() == Some(tok.as_str()));
+                .retain(|tok, s| s.username != target || keep.as_deref() == Some(tok.as_str()));
             return Ok(UserInfo {
                 username: self.owner_username.clone(),
                 is_owner: true,
@@ -1145,19 +1145,19 @@ impl AuthState {
                 let tokens: Vec<String> = g
                     .sessions
                     .iter()
-                    .filter(|(_, n)| *n == target)
+                    .filter(|(_, s)| s.username == target)
                     .map(|(t, _)| t.clone())
                     .collect();
                 for tok in tokens {
                     if (password_changed || role_changed) && keep.as_deref() != Some(tok.as_str()) {
                         g.sessions.remove(&tok);
-                    } else {
-                        g.sessions.insert(tok, final_name.clone());
+                    } else if let Some(s) = g.sessions.get_mut(&tok) {
+                        s.username = final_name.clone();
                     }
                 }
             } else {
                 g.sessions
-                    .retain(|tok, name| name != target || keep.as_deref() == Some(tok.as_str()));
+                    .retain(|tok, s| s.username != target || keep.as_deref() == Some(tok.as_str()));
             }
         }
         let created = g.users.get(&final_name).map(|u| u.created_at);
@@ -1191,7 +1191,7 @@ impl AuthState {
         if g.users.remove(target).is_none() {
             return Err(UserError::NotFound);
         }
-        g.sessions.retain(|_, name| name != target);
+        g.sessions.retain(|_, s| s.username != target);
         // Clear any rate-limit buckets + OIDC links for the deleted user.
         let want = target.to_ascii_lowercase();
         g.rate.retain(|k, _| k.split('|').nth(1).unwrap_or("") != want);
@@ -1650,6 +1650,7 @@ fn load_users_file(path: &PathBuf) -> (HashMap<String, StoredUser>, HashMap<Stri
             // Owner stays admin — a file role of admin on a non-owner name is
             // fine (explicit grant), but never downgrades the owner.
             let totp_secret = fu.totp_secret.as_deref().and_then(totp_parse_secret);
+            let totp_enabled = fu.totp_enabled && totp_secret.is_some();
             let recovery_hashes: Vec<[u8; 32]> = fu
                 .recovery_hashes
                 .iter()
@@ -1667,7 +1668,7 @@ fn load_users_file(path: &PathBuf) -> (HashMap<String, StoredUser>, HashMap<Stri
                     created_at: fu.created_at,
                     role,
                     totp_secret,
-                    totp_enabled: fu.totp_enabled && totp_secret.is_some(),
+                    totp_enabled,
                     recovery_hashes,
                     oidc_sub: fu.oidc_sub.filter(|s| !s.trim().is_empty()),
                 },
@@ -2836,7 +2837,7 @@ mod tests {
             Err(UserError::InvalidUsername)
         );
         assert_eq!(
-            a.create_user("bob2", "123"),
+            a.create_user("bob2", "123", None),
             Err(UserError::WeakPassword)
         );
         assert_eq!(
