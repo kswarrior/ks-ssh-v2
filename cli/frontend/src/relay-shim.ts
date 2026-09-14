@@ -414,6 +414,7 @@ class RelayConnection {
     this.authed = false
     this.authFlight = null
     this.authResolve = null
+    this.upgradePending = []
     if (this.keepalive !== undefined) {
       window.clearInterval(this.keepalive)
       this.keepalive = undefined
@@ -493,6 +494,18 @@ class RelayConnection {
       }
       this.rememberFp(this.agentFp ?? mine)
       this.e2e = await E2eChannel.create(this.k as string, this.token, this.agentSess, this.agentEpoch)
+      // Process any enc messages that arrived during the upgrade window.
+      const pending = this.upgradePending
+      this.upgradePending = []
+      for (const env of pending) {
+        try {
+          const inner = await this.e2e.open(env)
+          this.routeAgentMessage(inner)
+        } catch {
+          showRelayBanner('E2E decrypt failed — wrong #k=... or tampered message?')
+          break
+        }
+      }
     } catch {
       this.e2e = null
       this.e2eRequired = true
