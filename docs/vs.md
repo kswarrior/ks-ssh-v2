@@ -35,12 +35,17 @@ sshx.io · **tmate** · **upterm** · **ttyd** · **wetty** = wetty/GoTTY ·
   (`auth.rs:65,105,192,2798`); TOTP 2FA + recovery codes (`auth.rs:370,1979`);
   optional OIDC SSO behind `--oidc-issuer/--oidc-client-id` (auto-provision as
   viewer, `auth.rs:1475,2403,2434`); 5 fails → 5min lockout (`auth.rs:55`).
-  Local-UI only.
+  Enforced on the shared router, so login/RBAC/audit apply over the relay
+  too (agent proxies to a loopback server with the same middleware,
+  forwarding the viewer's cookie, `main.rs:289,542`, `relay.rs:418,542`).
 - **Relay:** `--no-serve --token=` → outbound WSS + UI bundle push → `/v/TOKEN`,
   `#/view/TOKEN`; `--e2e-key=` reuses `k`, `--no-ui` skips push, `--no-e2e` =
-  legacy plaintext. Thin SSH-page view = pairing/status; full shell = `/v/TOKEN`.
-- **Panel:** Files + Ports + Host are **local** (`/api/*`) — over relay they show
-  `Cannot reach the host …`.
+  legacy plaintext. The pushed bundle is full-function: HTTP `/api/*` rides
+  `rpc-*` and PTY rides `shell-open`/`shell-send` to a loopback server with
+  the same router/auth/DB (`relay.rs:13,362`, `main.rs:289`), audited as
+  `relay-rpc`/`relay-shell-open`/`relay-shell-close` (token only).
+- **Panel:** Files + Ports + Host are served by `/api/*` — locally and, via
+  the `rpc-*` bridge, over relay with the same login/RBAC.
 - **Audit + recording:** append-only SQLite audit (`db.rs:335`, `GET /api/audit`,
   `GET /api/audit/export`, `auth.rs:2312,2342`, Audit page with filter +
   JSON/CSV export, `--audit-retain-days` default 90) and per-shell recording

@@ -2,9 +2,11 @@
 //!
 //! When enabled, the frontend shows a login page and every sensitive
 //! endpoint (`/api/*` except `/api/hello` + `/api/auth/*`, plus
-//! `/v1/shell`) requires the session cookie. Auth is local-UI only —
-//! the relay path (`--token`) is unaffected (see `--relay-auth` for the
-//! opt-in viewer PIN that closes the bearer-open share link).
+//! `/v1/shell`) requires the session cookie. Auth rides the shared router,
+//! so it applies over the relay too: the agent proxies `rpc-*`/`shell-*`
+//! to a loopback server with the same middleware, forwarding the viewer's
+//! `ks_ssh_auth` cookie (see `--relay-auth` for the extra routing-layer
+//! viewer PIN).
 //!
 //! Case 9 (Identity & audit, Teleport-level at homelab scale):
 //! - **Crypto**: Argon2id (salt per user). Legacy unsalted SHA-256 hashes

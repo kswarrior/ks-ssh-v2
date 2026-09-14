@@ -522,7 +522,7 @@ async fn main() {
         // Local UI plus relay agent alongside.
         (false, Some(t)) => {
             if auth.is_some() && relay_pin.is_none() {
-                eprintln!("note: --user/--pass protects the local UI only; the relay share link stays bearer-open (restart with --relay-auth for a viewer PIN)");
+                eprintln!("note: the relay share link is reachable by token, but login/RBAC/audit still apply over relay (same loopback router) — restart with --relay-auth to also require a viewer PIN");
             }
             let ws_base = relay_ws_base(&cli.relay);
             let push_ui = !cli.no_ui;

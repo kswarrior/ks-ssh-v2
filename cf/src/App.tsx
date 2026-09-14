@@ -1,5 +1,26 @@
-import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { E2E_ALG, parseFragmentKey, type E2eStatus } from './e2e'
+
+/**
+ * Inject relay globals into a WSS-fetched UI bundle before rendering it as
+ * `srcDoc`. `srcDoc` iframes have an opaque origin (`about:srcdoc`), so the
+ * bundled relay shim cannot parse `/v/TOKEN` from its own URL — it reads
+ * `window.__KS_RELAY_TOKEN__` / `window.__KS_RELAY_HOST__` instead and opens
+ * its own `wss://<host>/v1/client?token=…` for full-function rpc/shell.
+ * The `/v/TOKEN` src path needs no injection (the shim parses the pathname).
+ */
+function withRelayGlobals(html: string, token: string, host: string): string {
+  const safeToken = token.replace(/[^A-Za-z0-9]/g, '').slice(0, 5)
+  const safeHost = host.replace(/[^A-Za-z0-9.:-]/g, '').slice(0, 253)
+  if (!/^[A-Za-z0-9]{5}$/.test(safeToken) || !safeHost) return html
+  const tag = `<script>window.__KS_RELAY_TOKEN__=${JSON.stringify(safeToken)};window.__KS_RELAY_HOST__=${JSON.stringify(safeHost)};</script>`
+  const idx = html.indexOf('<head')
+  if (idx >= 0) {
+    const end = html.indexOf('>', idx)
+    if (end >= 0) return `${html.slice(0, end + 1)}${tag}${html.slice(end + 1)}`
+  }
+  return `${tag}${html}`
+}
 
 type PageId = 'home' | 'ssh' | 'session' | 'installation' | 'settings'
 
@@ -971,6 +992,18 @@ function SessionPage({
       ? `/v/${activeToken}${cacheBust ? `?t=${cacheBust}` : ''}`
       : undefined
 
+  // WSS-fetched bundles render as srcDoc (opaque origin) — inject the relay
+  // token/host so the bundled shim tunnels /api/* + /v1/shell over WSS to
+  // the agent's loopback server (same functionality as local --port).
+  const injectedSrcDoc = useMemo(() => {
+    if (srcDoc === null || !activeToken) return null
+    try {
+      return withRelayGlobals(srcDoc, activeToken, window.location.host)
+    } catch {
+      return srcDoc
+    }
+  }, [srcDoc, activeToken])
+
   return (
     <section className="page page-session-full" aria-labelledby="page-title-session">
       <div className="page-head session-head">
@@ -1039,13 +1072,13 @@ function SessionPage({
         </div>
       )}
 
-      {(meta?.hasUi || srcDoc) && (
+      {(meta?.hasUi || injectedSrcDoc) && (
         <div className="session-wrap-full" ref={wrapRef}>
-          {srcDoc !== null ? (
+          {injectedSrcDoc !== null ? (
             <iframe
               title={`Agent UI ${activeToken} — Terminal, Files, Ports, Host`}
               className="session-frame-full"
-              srcDoc={srcDoc}
+              srcDoc={injectedSrcDoc}
               allow="fullscreen; clipboard-read; clipboard-write"
               allowFullScreen
               sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-downloads"
@@ -1100,7 +1133,7 @@ async function loadViaWss(
       }
       if (!cancelled && !signal.aborted) {
         hooks.setError(
-          `No UI for ${token} yet. Run: ks-ssh --no-serve --token=${token}`,
+          `No UI for ${token} yet. Run: ks-ssh --token=${token}`,
         )
         hooks.setChecking(false)
       }
@@ -1183,7 +1216,7 @@ async function loadViaWss(
         }
         if (msg?.type === 'ui-missing' || msg?.type === 'ui-error') {
           if (!cancelled && !signal.aborted) {
-            hooks.setError(`No UI for ${token} yet. Run: ks-ssh --no-serve --token=${token}`)
+            hooks.setError(`No UI for ${token} yet. Run: ks-ssh --token=${token}`)
             hooks.setChecking(false)
           }
           done(false)
@@ -1194,7 +1227,7 @@ async function loadViaWss(
     }
     ws.onerror = () => {
       if (!cancelled && !signal.aborted && chunks === null) {
-        hooks.setError(`No UI for ${token} yet. Run: ks-ssh --no-serve --token=${token}`)
+        hooks.setError(`No UI for ${token} yet. Run: ks-ssh --token=${token}`)
         hooks.setChecking(false)
       }
       done(false)

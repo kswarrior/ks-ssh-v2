@@ -292,15 +292,28 @@ impl E2e {
 
     /// Encrypt the next outbound plaintext (inner JSON bytes).
     pub fn encrypt_next(&mut self, plaintext: &[u8]) -> anyhow::Result<Envelope> {
+        if plaintext.len() > MAX_ENC_PLAINTEXT {
+            anyhow::bail!("enc plaintext too large");
+        }
         let seq = self.tx_seq;
-        let env = encrypt_with_seq(&self.key, &self.token, seq, plaintext)?;
+        let env = encrypt_bound(
+            &self.key,
+            &self.token,
+            &self.session,
+            &self.tx_dir,
+            self.epoch,
+            seq,
+            plaintext,
+            None,
+        )?;
         self.tx_seq = self.tx_seq.wrapping_add(1);
         Ok(env)
     }
 
     /// Decrypt the next inbound envelope. Rejects replays/duplicates/
     /// out-of-order (`seq` must equal the expected counter) and wrong-key /
-    /// tampered tags. On failure the counter does NOT advance.
+    /// tampered / cross-session / cross-epoch / reflected tags. On failure
+    /// the counter does NOT advance.
     pub fn decrypt_next(&mut self, env: &Envelope) -> anyhow::Result<Vec<u8>> {
         if env.kind != "enc" {
             anyhow::bail!("not an enc envelope");
@@ -311,7 +324,17 @@ impl E2e {
         if env.seq != self.rx_next {
             anyhow::bail!("replay/duplicate/out-of-order (got seq {})", env.seq);
         }
-        let pt = decrypt_envelope(&self.key, &self.token, env)?;
+        let pt = decrypt_bound(
+            &self.key,
+            &self.token,
+            &self.session,
+            &self.rx_dir,
+            self.epoch,
+            env,
+        )?;
+        if pt.len() > MAX_ENC_PLAINTEXT {
+            anyhow::bail!("enc plaintext too large");
+        }
         self.rx_next = self.rx_next.wrapping_add(1);
         Ok(pt)
     }
@@ -324,9 +347,19 @@ impl E2e {
     pub fn rx_next(&self) -> u64 {
         self.rx_next
     }
+    #[allow(dead_code)]
+    pub fn session(&self) -> &str {
+        &self.session
+    }
+    #[allow(dead_code)]
+    pub fn epoch(&self) -> u64 {
+        self.epoch
+    }
 }
 
 /// One-shot encrypt with an explicit `seq` (stateless; prefer `E2e`).
+/// Legacy AAD=token (empty session/epoch/dir) — keeps the published
+/// `e2e.fixture.json` vector byte-identical.
 pub fn encrypt_with_seq(
     key: &E2eKey,
     token: &str,
@@ -338,25 +371,35 @@ pub fn encrypt_with_seq(
     encrypt_with_nonce(key, token, seq, plaintext, &nonce_bytes)
 }
 
-/// Deterministic encrypt with caller-supplied 12-byte nonce.
-/// Used for cross-language fixtures (TS roundtrip vector); production code
-/// must use random nonces via [`encrypt_with_seq`] / [`E2e::encrypt_next`].
-pub fn encrypt_with_nonce(
+/// Session-bound one-shot encrypt (explicit `seq`, `sess`, `dir`, `epoch`).
+pub fn encrypt_bound(
     key: &E2eKey,
     token: &str,
+    session: &str,
+    dir: &str,
+    epoch: u64,
     seq: u64,
     plaintext: &[u8],
-    nonce_bytes: &[u8; 12],
+    nonce_override: Option<&[u8; 12]>,
 ) -> anyhow::Result<Envelope> {
+    let nonce_bytes = match nonce_override {
+        Some(n) => *n,
+        None => {
+            let mut nb = [0u8; 12];
+            getrandom::fill(&mut nb).map_err(|e| anyhow::anyhow!("rng: {e}"))?;
+            nb
+        }
+    };
     let subkey = key.derive();
     let cipher = Aes256Gcm::new_from_slice(&subkey).expect("32-byte key");
-    let nonce = (*nonce_bytes).into();
+    let nonce = nonce_bytes.into();
+    let aad_bytes = aad(token, session, dir, epoch);
     let ct = cipher
         .encrypt(
             &nonce,
             Payload {
                 msg: plaintext,
-                aad: token.to_uppercase().as_bytes(),
+                aad: &aad_bytes,
             },
         )
         .map_err(|e| anyhow::anyhow!("encrypt: {e}"))?;
@@ -366,17 +409,18 @@ pub fn encrypt_with_nonce(
         kind: "enc".to_string(),
         v: E2E_VERSION,
         seq,
-        nonce: encode_b64url(nonce_bytes),
+        nonce: encode_b64url(&nonce_bytes),
         ct: encode_b64url(&ct),
     })
 }
 
-/// One-shot decrypt (stateless seq check is done by [`E2e::decrypt_next`]).
-/// Wrong key / tampered tag → Err (caller must show generic
-/// "E2E decrypt failed" without leaking details).
-pub fn decrypt_envelope(
+/// Session-bound one-shot decrypt.
+pub fn decrypt_bound(
     key: &E2eKey,
     token: &str,
+    session: &str,
+    dir: &str,
+    epoch: u64,
     env: &Envelope,
 ) -> anyhow::Result<Vec<u8>> {
     if env.kind != "enc" || env.v != E2E_VERSION {
@@ -393,18 +437,43 @@ pub fn decrypt_envelope(
         .try_into()
         .map_err(|_| anyhow::anyhow!("bad nonce length"))?;
     let nonce = nonce_arr.into();
+    let aad_bytes = aad(token, session, dir, epoch);
     let pt = cipher
         .decrypt(
             &nonce,
             Payload {
                 msg: &ct,
-                aad: token.to_uppercase().as_bytes(),
+                aad: &aad_bytes,
             },
         )
         .map_err(|_| anyhow::anyhow!("E2E decrypt failed"))?;
     let mut sk = subkey;
     sk.zeroize();
     Ok(pt)
+}
+
+/// Deterministic encrypt with caller-supplied 12-byte nonce.
+/// Used for cross-language fixtures (TS roundtrip vector); production code
+/// must use random nonces via [`encrypt_with_seq`] / [`E2e::encrypt_next`].
+pub fn encrypt_with_nonce(
+    key: &E2eKey,
+    token: &str,
+    seq: u64,
+    plaintext: &[u8],
+    nonce_bytes: &[u8; 12],
+) -> anyhow::Result<Envelope> {
+    encrypt_bound(key, token, "", "", 0, seq, plaintext, Some(nonce_bytes))
+}
+
+/// One-shot decrypt (stateless seq check is done by [`E2e::decrypt_next`]).
+/// Wrong key / tampered tag → Err (caller must show generic
+/// "E2E decrypt failed" without leaking details).
+pub fn decrypt_envelope(
+    key: &E2eKey,
+    token: &str,
+    env: &Envelope,
+) -> anyhow::Result<Vec<u8>> {
+    decrypt_bound(key, token, "", "", 0, env)
 }
 
 /// base64url, no pad (for `k`, `nonce`, `ct`).
@@ -532,5 +601,123 @@ mod tests {
         let env = a.encrypt_next(b"{\"type\":\"data\"}").unwrap();
         // Same key but different room token (AAD) → tag fails.
         assert!(b.decrypt_next(&env).is_err());
+    }
+
+    #[test]
+    fn e2e_session_binding_rejects_cross_session() {
+        let key = E2eKey::from_bytes([11u8; 32]);
+        let mut agent = E2e::new_session(key.clone(), "ABCDE1234", "sessAAA", 0, true);
+        let mut client_ok = E2e::new_session(key.clone(), "ABCDE1234", "sessAAA", 0, false);
+        let mut client_other =
+            E2e::new_session(key.clone(), "ABCDE1234", "sessBBB", 0, false);
+        // Agent tx (a2c) → client rx (mirrored dirs): ok.
+        let env = agent.encrypt_next(b"{\"type\":\"shell-recv\"}").unwrap();
+        assert!(client_ok.decrypt_next(&env).is_ok());
+        // Same key/token/seq but different session id → tag fails.
+        let env2 = agent.encrypt_next(b"{\"type\":\"shell-recv\"}").unwrap();
+        assert!(client_other.decrypt_next(&env2).is_err());
+    }
+
+    #[test]
+    fn e2e_direction_reflection_rejected() {
+        let key = E2eKey::from_bytes([12u8; 32]);
+        let mut agent = E2e::new_session(key.clone(), "ABCDE1234", "sess1", 0, true);
+        // Attacker reflects the agent's own a2c ciphertext back at the agent
+        // (which expects c2a): AAD dir mismatch → fail.
+        let env = agent.encrypt_next(b"{\"type\":\"data\"}").unwrap();
+        assert!(agent.decrypt_next(&env).is_err());
+    }
+
+    #[test]
+    fn e2e_epoch_replay_rejected_across_reconnect() {
+        let key = E2eKey::from_bytes([13u8; 32]);
+        // Epoch 0 session (first connection).
+        let mut agent0 = E2e::new_session(key.clone(), "ABCDE1234", "sess1", 0, true);
+        let env0 = agent0.encrypt_next(b"{\"type\":\"data\"}").unwrap();
+        // Reconnect bumps epoch; seq restarts at 0 but AAD differs.
+        let mut client1 = E2e::new_session(key.clone(), "ABCDE1234", "sess1", 1, false);
+        assert!(client1.decrypt_next(&env0).is_err());
+        // Fresh epoch-1 traffic works.
+        let mut agent1 = E2e::new_session(key.clone(), "ABCDE1234", "sess1", 1, true);
+        let env1 = agent1.encrypt_next(b"{\"type\":\"data\"}").unwrap();
+        assert!(client1.decrypt_next(&env1).is_ok());
+    }
+
+    #[test]
+    fn e2e_fixture_vector_stable() {
+        // Published cross-language vector stays byte-identical (legacy AAD).
+        let k = E2eKey::from_base64url("AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8")
+            .unwrap();
+        let nonce: [u8; 12] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11];
+        let env = encrypt_with_nonce(
+            &k,
+            "ABCDE",
+            7,
+            b"{\"type\":\"data\",\"data\":\"hello e2e\"}",
+            &nonce,
+        )
+        .unwrap();
+        assert_eq!(env.nonce, "AAECAwQFBgcICQoL");
+        assert_eq!(
+            env.ct,
+            "a2XGzNkSK2_xPULPNdQcR8aq0aRkDcZyAUbLUP51uDkwWZcjKLdEVF_RKQ_rFo5Hy1g"
+        );
+        let pt = decrypt_envelope(&k, "ABCDE", &env).unwrap();
+        assert_eq!(pt, b"{\"type\":\"data\",\"data\":\"hello e2e\"}");
+    }
+
+    #[test]
+    fn e2e_fingerprint_stable_and_unique() {
+        let k1 = E2eKey::from_bytes([21u8; 32]);
+        let k2 = E2eKey::from_bytes([22u8; 32]);
+        let f1 = k1.fingerprint();
+        assert_eq!(f1.len(), 16);
+        assert!(f1.chars().all(|c| c.is_ascii_hexdigit()));
+        assert_eq!(f1, k1.fingerprint());
+        assert_ne!(f1, k2.fingerprint());
+    }
+
+    #[test]
+    fn e2e_padding_roundtrips() {
+        let key = E2eKey::from_bytes([23u8; 32]);
+        let mut a = E2e::new_session(key.clone(), "ABCDE1234", "s", 0, true);
+        let mut b = E2e::new_session(key, "ABCDE1234", "s", 0, false);
+        let mut inner = serde_json::json!({"type":"data","data":"hi"});
+        add_padding(&mut inner);
+        let pt = serde_json::to_vec(&inner).unwrap();
+        let env = a.encrypt_next(&pt).unwrap();
+        let back = b.decrypt_next(&env).unwrap();
+        let v: serde_json::Value = serde_json::from_slice(&back).unwrap();
+        assert_eq!(v.get("type").and_then(|t| t.as_str()), Some("data"));
+    }
+
+    #[test]
+    fn e2e_downgrade_rejected_by_strict() {
+        assert!(!strict_peer_ok(true, false));
+        assert!(strict_peer_ok(true, true));
+        assert!(strict_peer_ok(false, false));
+        assert!(strict_peer_ok(false, true));
+        assert!(E2E_ERROR_MSG.contains("E2E error"));
+    }
+
+    #[test]
+    fn e2e_aad_legacy_vs_bound() {
+        assert_eq!(aad("abcde", "", "", 0), b"ABCDE");
+        assert_eq!(
+            aad("abcde", "s1", "a2c", 0),
+            b"ABCDE|s1|a2c|0"
+        );
+        assert_eq!(
+            aad("ABCDE", "s1", "c2a", 3),
+            b"ABCDE|s1|c2a|3"
+        );
+    }
+
+    #[test]
+    fn e2e_session_id_unique() {
+        let a = new_session_id();
+        let b = new_session_id();
+        assert_eq!(a.len(), 32);
+        assert_ne!(a, b);
     }
 }
