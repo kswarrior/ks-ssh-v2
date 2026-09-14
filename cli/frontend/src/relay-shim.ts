@@ -12,9 +12,22 @@
  * future sealed session payloads. Token routes, never logged beyond routing.
  */
 
+import {
+  E2E_ALG,
+  E2eChannel,
+  fingerprint as e2eFingerprint,
+  isEncEnvelope,
+  readRelayKey,
+  type EncEnvelope,
+} from './relay-e2e.ts'
+
 const RPC_RAW = 48 * 1024
 const RPC_TIMEOUT_MS = 120_000
 const SHELL_OPEN_TIMEOUT_MS = 10_000
+const HELLO_TIMEOUT_MS = 10_000
+/** Tokens are 9 chars fresh, 5 chars legacy — both route. */
+const TOKEN_RE = /^[A-Za-z0-9]{5}$|^[A-Za-z0-9]{9}$/
+const TOKEN_PATH_RE = /^\/v\/([A-Za-z0-9]{5}|[A-Za-z0-9]{9})(?:\/|$)/
 
 type RelayGlobals = {
   __KS_RELAY_TOKEN__?: unknown
@@ -25,7 +38,7 @@ function relayToken(): string | null {
   try {
     const g = window as unknown as RelayGlobals
     const injected = typeof g.__KS_RELAY_TOKEN__ === 'string' ? g.__KS_RELAY_TOKEN__ : ''
-    if (/^[A-Za-z0-9]{5}$/.test(injected)) return injected.toUpperCase()
+    if (TOKEN_RE.test(injected)) return injected.toUpperCase()
   } catch {
     // Ignore — fall through to pathname parsing.
   }
@@ -44,7 +57,7 @@ function relayToken(): string | null {
     ) {
       return null
     }
-    const m = window.location.pathname.match(/^\/v\/([A-Za-z0-9]{5})(?:\/|$)/)
+    const m = window.location.pathname.match(TOKEN_PATH_RE)
     if (m?.[1]) return m[1].toUpperCase()
   } catch {
     // Non-browser or opaque origin (srcDoc without injection) — not relay.

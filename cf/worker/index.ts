@@ -1,12 +1,27 @@
 import { TunnelRoom } from './room.js'
+import {
+  RATE_IP_LIMIT,
+  RATE_IP_WINDOW_MS,
+  RATE_MISS_LIMIT,
+  RATE_MISS_WINDOW_MS,
+  checkLimit,
+  clientIp,
+  rateLimited,
+  validToken as validTokenQ,
+  type LimitState,
+} from './limit.js'
 
 export { TunnelRoom }
 
-const TOKEN_RE = /^[A-Z0-9]{5}$/
+const TOKEN_RE = /^[A-Z0-9]{5,9}$/
+
+// Per-isolate fixed windows: IP-wide + per-IP token-miss (scan) budgets.
+// (DO rooms additionally enforce per-socket message rates in room.ts.)
+const ipHits: LimitState = new Map()
+const tokenMiss: LimitState = new Map()
 
 function validToken(url: URL): string | null {
-  const t = (url.searchParams.get('token') ?? '').toUpperCase()
-  return TOKEN_RE.test(t) ? t : null
+  return validTokenQ(url.searchParams.get('token'))
 }
 
 function pathToken(pathname: string, prefix: string): string | null {
@@ -25,6 +40,12 @@ function stubFor(env: Env, token: string) {
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url)
+    const now = Date.now()
+
+    // Per-IP budget first (429s make token scans expensive).
+    const ip = clientIp(request)
+    const ipCheck = checkLimit(ipHits, ip, now, RATE_IP_LIMIT, RATE_IP_WINDOW_MS)
+    if (!ipCheck.allowed) return rateLimited(ipCheck.retryAfter)
 
     // E2E secret `k` lives ONLY in the URL fragment (never sent to the
     // server). If it ever shows up in the query string, reject loudly —
@@ -38,6 +59,7 @@ export default {
     }
 
     // WSS relay: CLI agent registers, web clients join — by token.
+    // Bad tokens burn the per-IP scan budget (token scans 429 quickly).
     if (url.pathname === '/v1/agent' || url.pathname === '/v1/client') {
       if (request.headers.get('Upgrade') !== 'websocket') {
         return Response.json(
@@ -47,8 +69,10 @@ export default {
       }
       const token = validToken(url)
       if (!token) {
+        const miss = checkLimit(tokenMiss, `miss:${ip}`, now, RATE_MISS_LIMIT, RATE_MISS_WINDOW_MS)
+        if (!miss.allowed) return rateLimited(miss.retryAfter)
         return Response.json(
-          { ok: false, error: 'bad token (want 5 letters/numbers)' },
+          { ok: false, error: 'bad token (want 5-9 letters/numbers)' },
           { status: 400 },
         )
       }

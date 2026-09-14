@@ -34,7 +34,7 @@ sshx.io · **tmate** · **upterm** · **ttyd** · **wetty** = wetty/GoTTY ·
   (`auth.rs:786`). Roles admin/operator/viewer enforced per route
   (`auth.rs:67,107,194,2820`); TOTP 2FA + recovery codes (`auth.rs:372,2001`);
   optional OIDC SSO behind `--oidc-issuer/--oidc-client-id` (auto-provision as
-  viewer, `auth.rs:1477,2425,2456`); 5 fails → 5min lockout (`auth.rs:55`).
+  viewer, `auth.rs:1477,2425,2456`); 5 fails → 5min lockout (`auth.rs:57`).
   Enforced on the shared router, so login/RBAC/audit apply over the relay
   too (agent proxies to a loopback server with the same middleware,
   forwarding the viewer's cookie, `main.rs:293`, `relay.rs:560,719`).
@@ -42,7 +42,7 @@ sshx.io · **tmate** · **upterm** · **ttyd** · **wetty** = wetty/GoTTY ·
   `#/view/TOKEN`; `--e2e-key=` reuses `k`, `--no-ui` skips push, `--no-e2e` =
   legacy plaintext. The pushed bundle is full-function: HTTP `/api/*` rides
   `rpc-*` and PTY rides `shell-open`/`shell-send` to a loopback server with
-  the same router/auth/DB (`relay.rs:14,362`, `main.rs:293`), audited as
+  the same router/auth/DB (`relay.rs:14,497`, `main.rs:293`), audited as
   `relay-rpc`/`relay-shell-open`/`relay-shell-close` (token only).
 - **Panel:** Files + Ports + Host are served by `/api/*` — locally and, via
   the `rpc-*` bridge, over relay with the same login/RBAC.
@@ -112,9 +112,9 @@ scale). Evidence per rubric item:
   change (`auth.rs:46-48,2713`, `change_own_password`/`totp_verify` session
   rotation); self-service change-password (`auth.rs:1963`, `POST
   /api/auth/change-password`).
-- **Least-privilege RBAC:** admin/operator/viewer (`auth.rs:65`), per-route
-  matrix (`auth.rs:105,192`) enforced in middleware with 403 + audit row
-  (`auth.rs:2798`); viewer = read files/host/ports + read-only shell attach
+- **Least-privilege RBAC:** admin/operator/viewer (`auth.rs:67`), per-route
+  matrix (`auth.rs:107,194`) enforced in middleware with 403 + audit row
+  (`auth.rs:2820`); viewer = read files/host/ports + read-only shell attach
   (`shell.rs:855,1057`); operator = + shell write/upload/mkdir, no
   kill/delete/chmod/users; admin = all. Owner always admin, legacy users
   default operator. Role picker + lockout status + session revoke in `Users.tsx`
