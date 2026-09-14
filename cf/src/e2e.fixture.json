@@ -11,5 +11,18 @@
   "plaintext": "{\"type\":\"data\",\"data\":\"hello e2e\"}",
   "seq": 7,
   "token": "ABCDE",
-  "_note": "Rust-generated (aes-gcm + HKDF-SHA256 salt=32 zeros info=ks-ssh-e2e-v1 AAD=token). TS must decrypt ct->plaintext with k/token."
+  "_note": "Rust-generated (aes-gcm + HKDF-SHA256 salt=32 zeros info=ks-ssh-e2e-v1 AAD=token). TS must decrypt ct->plaintext with k/token.",
+  "session_vector": {
+    "k": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+    "token": "ABCDE1234",
+    "sess": "0123456789abcdef0123456789abcdef",
+    "epoch": 2,
+    "dir": "c2a",
+    "seq": 0,
+    "nonce": "AAECAwQFBgcICQoL",
+    "plaintext": "{\"type\":\"shell-send\",\"id\":\"s1\"}",
+    "ct": "a2XGzNkSK2_xKkveOJodFselwedqFY1-RhCFTO8y95eWsHJfdmXQl1NQsaSyEdM",
+    "fingerprint": "7508e2b9fe76ad77",
+    "_note": "WebCrypto-generated, Rust-verified byte-for-byte (e2e_session_vector_stable). AAD=TOKEN|sess|dir|epoch. TS must decrypt with session binding; cross-session/epoch/dir replays must fail."
+  }
 }
