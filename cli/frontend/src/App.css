@@ -3085,6 +3085,296 @@ a.file-link {
   color: var(--text-h);
 }
 
+/* ---------- Host loading: stylish host-aware skeleton ---------- */
+
+.host-loading {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+.host-load-hero {
+  flex-direction: row;
+  align-items: center;
+  gap: 14px;
+  padding: 16px 18px;
+  position: relative;
+  overflow: hidden;
+}
+
+.host-load-hero::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(
+    100deg,
+    transparent 30%,
+    rgba(139, 124, 255, 0.12) 50%,
+    transparent 70%
+  );
+  background-size: 200% 100%;
+  animation: skeleton-shimmer 1.8s ease-in-out infinite;
+}
+
+.host-orb {
+  width: 52px;
+  height: 52px;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  color: #fff;
+  background: linear-gradient(135deg, var(--accent-hi), var(--accent-lo));
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  box-shadow:
+    0 8px 22px -8px var(--accent-shadow),
+    0 0 24px -6px var(--accent-shadow),
+    inset 0 1px 0 rgba(255, 255, 255, 0.3);
+  animation: host-orb-pulse 1.8s ease-in-out infinite;
+}
+
+.host-orb svg {
+  width: 26px;
+  height: 26px;
+  display: block;
+}
+
+.host-load-text {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  flex: 1;
+}
+
+.host-load-title {
+  font-weight: 750;
+  font-size: 16px;
+  letter-spacing: -0.01em;
+  color: var(--text-h);
+}
+
+.host-load-sub {
+  font-size: 13px;
+  color: var(--text);
+}
+
+.host-probing {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.host-pulse-dot {
+  width: 9px;
+  height: 9px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: #22c55e;
+  box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.55);
+  animation: host-ping 1.6s ease-out infinite;
+}
+
+.host-skel-card {
+  pointer-events: none;
+}
+
+.host-skel-kv {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.host-skel-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.host-skel-dt {
+  flex: 0 0 88px;
+  height: 12px;
+}
+
+.host-skel-dd {
+  height: 14px;
+  flex: 1 1 auto;
+}
+
+.host-skel-stat {
+  width: 76px;
+  height: 26px;
+}
+
+.host-skel-line {
+  height: 13px;
+}
+
+.host-skel-graph {
+  height: 110px;
+  border-radius: 8px;
+  border: 1px solid var(--glass-border);
+}
+
+.host-skel-graph-ram {
+  opacity: 0.9;
+}
+
+.host-skel-cores {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  gap: 6px;
+  align-items: flex-end;
+  flex-wrap: wrap;
+}
+
+.host-skel-cores li {
+  min-width: 18px;
+}
+
+.host-skel-core {
+  width: 14px;
+  height: 44px;
+  display: flex;
+  align-items: flex-end;
+  border: 1px solid var(--glass-border);
+  border-radius: 6px;
+  background: var(--field-bg);
+  overflow: hidden;
+}
+
+.host-skel-core > span {
+  display: block;
+  width: 100%;
+  background: linear-gradient(180deg, var(--accent-hi), var(--accent-lo));
+  opacity: 0.65;
+  animation: host-core-breathe 1.6s ease-in-out infinite;
+}
+
+.host-skel-bar {
+  height: 12px;
+}
+
+.host-skel-disk {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.host-skel-disk + .host-skel-disk {
+  margin-top: 8px;
+  padding-top: 14px;
+  border-top: 1px solid var(--glass-border);
+}
+
+.host-skel-disk-top {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+/* Refresh: thin progress bar + dimmed (but still visible) host data. */
+
+.host-refresh-bar {
+  height: 3px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: var(--field-bg);
+  border: 1px solid var(--glass-border);
+}
+
+.host-refresh-bar > span {
+  display: block;
+  height: 100%;
+  width: 40%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--accent-hi), var(--accent-glow));
+  animation: host-bar-slide 1.1s ease-in-out infinite;
+}
+
+.host-stale {
+  opacity: 0.62;
+  filter: saturate(0.85);
+  pointer-events: none;
+  transition: opacity 0.2s ease;
+}
+
+.spin {
+  animation: host-spin 0.9s linear infinite;
+}
+
+@keyframes host-orb-pulse {
+  0%,
+  100% {
+    transform: scale(1);
+    box-shadow:
+      0 8px 22px -8px var(--accent-shadow),
+      0 0 24px -6px var(--accent-shadow),
+      inset 0 1px 0 rgba(255, 255, 255, 0.3);
+  }
+  50% {
+    transform: scale(1.05);
+    box-shadow:
+      0 10px 28px -8px var(--accent-shadow),
+      0 0 34px -4px var(--accent-shadow),
+      inset 0 1px 0 rgba(255, 255, 255, 0.3);
+  }
+}
+
+@keyframes host-ping {
+  0% {
+    box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.55);
+  }
+  70% {
+    box-shadow: 0 0 0 9px rgba(34, 197, 94, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(34, 197, 94, 0);
+  }
+}
+
+@keyframes host-core-breathe {
+  0%,
+  100% {
+    opacity: 0.4;
+  }
+  50% {
+    opacity: 0.85;
+  }
+}
+
+@keyframes host-bar-slide {
+  0% {
+    transform: translateX(-110%);
+  }
+  100% {
+    transform: translateX(280%);
+  }
+}
+
+@keyframes host-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .host-orb,
+  .host-pulse-dot,
+  .host-skel-core > span,
+  .host-refresh-bar > span,
+  .host-load-hero::after,
+  .spin {
+    animation: none;
+  }
+}
+
 /* ---------- Settings: placeholder page (flush top like Files) ---------- */
 
 .content-settings {
