@@ -654,7 +654,6 @@ export default function FilesPage() {
       setSelected([])
       setConfirmBulkDelete(false)
       setDeep(null)
-      setSelected([])
     } catch (e) {
       setError(
         e instanceof Error
@@ -948,6 +947,94 @@ export default function FilesPage() {
         a.remove()
       }, i * 400)
     })
+  }
+
+  /* ---------- Bulk zip + per-item zip/extract ---------- */
+
+  const submitBulkZip = async () => {
+    if (!data || selectedEntries.length === 0) return
+    setBulkBusy(true)
+    setActionError(null)
+    try {
+      const names = selectedEntries.map((e) => e.name)
+      const out = `bulk-${selectedEntries.length}-items.zip`
+      const res = await fetch('/api/files/zip-many', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ dir: data.path, names, out }),
+      })
+      if (!res.ok) {
+        const text = await res.text().catch(() => '')
+        throw new Error(text || `zip failed (${res.status})`)
+      }
+      const json = (await res.json()) as { path?: string }
+      // Fetch the freshly created archive, then refresh the listing.
+      const a = document.createElement('a')
+      a.href = downloadUrl(json.path ?? `${data.path}/${out}`)
+      a.download = out
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      await load(data.path)
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'Zip failed.')
+    } finally {
+      setBulkBusy(false)
+    }
+  }
+
+  const submitExtract = async (e: FileEntry) => {
+    setMenuOpen(null)
+    setActionError(null)
+    setBusy(true)
+    try {
+      const res = await fetch('/api/files/unzip', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ file: e.path }),
+      })
+      if (!res.ok) {
+        const text = await res.text().catch(() => '')
+        throw new Error(text || `extract failed (${res.status})`)
+      }
+      await load(data?.path)
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'Extract failed.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  /* ---------- Deep (recursive) search ---------- */
+
+  const runDeepSearch = async () => {
+    const q = query.trim()
+    if (!data || !q) return
+    setDeep({ query: q, results: [], truncated: false, loading: true, error: null })
+    try {
+      const res = await fetch(
+        `/api/files/search?root=${encodeURIComponent(data.path)}&q=${encodeURIComponent(q)}&max=100`,
+      )
+      if (!res.ok) {
+        const text = await res.text().catch(() => '')
+        throw new Error(text || `search failed (${res.status})`)
+      }
+      const json = (await res.json()) as SearchResponse
+      setDeep({ query: q, results: json.entries, truncated: json.truncated, loading: false, error: null })
+    } catch (err) {
+      setDeep({ query: q, results: [], truncated: false, loading: false, error: err instanceof Error ? err.message : 'Search failed.' })
+    }
+  }
+
+  const openDeepHit = (h: SearchHit) => {
+    setDeep(null)
+    if (h.is_dir) {
+      void load(h.path)
+    } else if (previewKindOf(h.name)) {
+      setPreviewing({ name: h.name, path: h.path, is_dir: false, size: h.size, modified: h.modified } as FileEntry)
+    } else {
+      void openEditor({ name: h.name, path: h.path, is_dir: false, size: h.size, modified: h.modified } as FileEntry)
+    }
   }
 
   /* ---------- Copy / move / duplicate ---------- */
@@ -1336,11 +1423,31 @@ export default function FilesPage() {
               type="text"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && query.trim() && data && !loading) {
+                  e.preventDefault()
+                  void runDeepSearch()
+                }
+              }}
               placeholder="Search files…"
               autoComplete="off"
               spellCheck={false}
             />
           </label>
+          <button
+            type="button"
+            className="btn btn-sm"
+            onClick={() => void runDeepSearch()}
+            disabled={loading || busy || !!error || !data || !query.trim()}
+            title="Search file names in this folder and all subfolders"
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <circle cx="11" cy="11" r="7" />
+              <path d="m21 21-4.3-4.3" />
+              <path d="M11 8v6M8 11h6" />
+            </svg>
+            <span className="btn-label">Deep</span>
+          </button>
           <div className="ports-right">
             <label className="ports-select-wrap">
               <span className="sr-only">File type filter</span>
@@ -1821,7 +1928,49 @@ export default function FilesPage() {
                               >
                                 Download
                               </a>
+                              <a
+                                role="menuitem"
+                                className="file-menu-item"
+                                href={zipUrl(e.path)}
+                                download={`${e.name}.zip`}
+                                title={`Download ${e.name} as a .zip archive`}
+                              >
+                                Download .zip
+                              </a>
+                              {!e.is_dir && isZipName(e.name) && (
+                                <button
+                                  type="button"
+                                  role="menuitem"
+                                  className="file-menu-item"
+                                  onClick={() => void submitExtract(e)}
+                                  title={`Extract ${e.name} into this folder`}
+                                >
+                                  Extract here
+                                </button>
+                              )}
                             </>
+                          )}
+                          {!e.is_dir && isZipName(e.name) && (
+                            <button
+                              type="button"
+                              role="menuitem"
+                              className="file-menu-item"
+                              onClick={() => void submitExtract(e)}
+                              title={`Extract ${e.name} into this folder`}
+                            >
+                              Extract here
+                            </button>
+                          )}
+                          {e.is_dir && (
+                            <a
+                              role="menuitem"
+                              className="file-menu-item"
+                              href={zipUrl(e.path)}
+                              download={`${e.name}.zip`}
+                              title={`Download ${e.name} as a .zip archive`}
+                            >
+                              Download .zip
+                            </a>
                           )}
                           <button
                             type="button"
