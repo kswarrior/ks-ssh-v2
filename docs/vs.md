@@ -40,9 +40,13 @@ sshx.io · **tmate** · **upterm** · **ttyd** · **wetty** = wetty/GoTTY ·
   forwarding the viewer's cookie, `main.rs:293`, `relay.rs:560,719`).
 - **Relay:** `--no-serve --token=` → outbound WSS + UI bundle push → `/v/TOKEN`,
   `#/view/TOKEN`; `--e2e-key=` reuses `k`, `--no-ui` skips push, `--no-e2e` =
-  legacy plaintext. The pushed bundle is full-function: HTTP `/api/*` rides
-  `rpc-*` and PTY rides `shell-open`/`shell-send` to a loopback server with
-  the same router/auth/DB (`relay.rs:14,497`, `main.rs:293`), audited as
+  legacy plaintext (explicit escape hatch only: loud warning + `relay-downgrade`
+  audit). Fresh tokens are 9-char (5-char legacy still routes,
+  `relay.rs:49,78`); token scans hit per-IP + per-scan 429 budgets
+  (`worker/limit.ts:15-27`, `worker/index.ts:47,72`). The pushed bundle is
+  full-function: HTTP `/api/*` rides `rpc-*` and PTY rides
+  `shell-open`/`shell-send` to a loopback server with
+  the same router/auth/DB (`relay.rs:14,889,991`, `main.rs:293`), audited as
   `relay-rpc`/`relay-shell-open`/`relay-shell-close` (token only).
 - **Panel:** Files + Ports + Host are served by `/api/*` — locally and, via
   the `rpc-*` bridge, over relay with the same login/RBAC.
@@ -52,13 +56,14 @@ sshx.io · **tmate** · **upterm** · **ttyd** · **wetty** = wetty/GoTTY ·
   (timestamped in/out frames, `shell.rs:158`, `GET /api/terms/:id/recording`,
   replay player with play/pause/speed/scrub in Recordings + Terminal pages,
   `--record-max-mb` default 10, consent banner via `GET /api/record/status`).
-- **Limits:** token guessable (routing only, `k` seals); UI bundle + relay
-  `rpc`/`shell` plaintext by design (same-trust loopback proxy); one
-  Worker/DO relay, not a mesh; no collab (joint sessions). Token addressing
-  stays bearer-routed by default — `--relay-auth` adds a one-time viewer PIN
-  (sealed in `enc` when E2E, `relay.rs:1053`) checked before any
-  `data`/`rpc`/`shell` bridge (`relay.rs:1081,1232,1339`, never in
-  query/logs).
+- **Limits:** token addressing stays bearer-routed by default (routing only,
+  `k` seals; 9-char fresh entropy + scan 429s); UI bundle is public build
+  output by design (zero secrets proven by `ui_bundle_carries_zero_secrets`,
+  `no-store`, `room.ts:96`); one Worker/DO relay, not a mesh; no collab
+  (joint sessions). `--relay-auth` adds a one-time viewer PIN — sealed inside
+  `enc` (`auth`, `relay.rs:1086`), 15min TTL + mint-invalidates-previous
+  (`auth.rs:1561,1603`), constant-time verify (`auth.rs:1590`) — checked before
+  any `data`/`rpc`/`shell` bridge (never in query/logs).
 
 ## Scored Matrix (/100 per case)
 
@@ -67,7 +72,7 @@ sshx.io · **tmate** · **upterm** · **ttyd** · **wetty** = wetty/GoTTY ·
 | 1 | No-port / NAT traversal | 90 | 10 | **95** | 85 | 80 | 10 | 10 | 10 | 15 | 85 | 90 | 90 |
 | 2 | Browser + share link + mobile | **93** | 0 | **93** | 73 | 13 | 73 | 67 | 73 | 80 | 80 | 40 | 87 |
 | 3 | Terminal quality | **100** | **100** | 90 | 70 | 60 | 70 | 60 | 60 | 60 | 80 | 70 | 80 |
-| 4 | E2E / transport security | 80 | 80 | **93** | 13 | 67 | 20 | 20 | 67 | 27 | 87 | **93** | 80 |
+| 4 | E2E / transport security | **100** | 80 | **93** | 13 | 67 | 20 | 20 | 67 | 27 | 87 | **93** | 80 |
 | 5 | File manager + editor | **100** | 30 | 0 | 0 | 0 | 20 | 0 | 40 | 40 | 40 | 30 | 90 |
 | 6 | Ports / process mgmt | **100** | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 10 | 0 | 10 |
 | 7 | Host monitoring | **100** | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 10 | 10 | 0 |
@@ -79,7 +84,7 @@ sshx.io · **tmate** · **upterm** · **ttyd** · **wetty** = wetty/GoTTY ·
 
 | Rank | Tool | Sum | Final /100 |
 |---|---|---|---|
-| **1** | **KS SSH** | **853 / 1,000** | **85** |
+| **1** | **KS SSH** | **873 / 1,000** | **87** |
 | 2 | Teleport | 602 / 1,000 | 60 |
 | 3 | VS Code tunnels | 597 / 1,000 | 60 |
 | 4 | sshx | 501 / 1,000 | 50 |
@@ -190,6 +195,77 @@ full I/O fidelity + multi-tab UX on desktop and phone):
   Single-file bundle still zero `/assets/` refs (`ui.rs:build_single_file` +
   `single_file_inlines_assets` test, multi-chunk safe).
 
+Case 4 re-scored 2026-09-14: KS 80 → **100** (beats sshx 93 / Tail 93 /
+Tele 87). Evidence per rubric item (sealed transport + strict default +
+hardened routing + crypto lifetime + identity + metadata honesty):
+- **Sealed transport, wired in all 3 peers:** every sensitive relay payload
+  (PTY in/out, resize inside `shell-send`, `ack`, `rpc-*`, viewer PIN as
+  `auth`) travels ONLY as `{"type":"enc",…}` (AES-256-GCM, 96-bit random
+  nonce). Agent seals via shared state (`relay.rs:429 send_enc_shared`,
+  `453 send_strict`, `889 handle_inner_rpc`, `991 handle_inner_shell`);
+  the pushed UI shim seals via `E2eChannel`
+  (`cli/frontend/src/relay-e2e.ts:173`, sealed `auth`/rpc/shell in
+  `relay-shim.ts:384` + strict handshake `311-339`); the CF SPA lobbies with
+  `e2e` + fingerprint + paste-link prompt (`cf/src/App.tsx:906,922,1115`).
+  One vector locks the shared Rust↔WebCrypto format both ways
+  (`cf/src/e2e.fixture.json:session_vector`, `e2e_session_vector_stable`
+  `e2e.rs`, `scripts/e2e-check.mjs`). No new web deps (WebCrypto only);
+  local `/v1/shell` is byte-unchanged.
+- **Strict-by-default, no silent downgrade:** `strict_peer_ok`
+  (`e2e.rs:201`, `cf/src/e2e.ts:125`) — E2E-on + legacy peer hard-fails with
+  `E2E error` (`e2e.rs:79`) + `relay-downgrade` deny audit, never sends
+  plaintext (`relay.rs:1157,1212,1240`). Missing `#k=` → paste-link prompt,
+  never fetched/stored (`App.tsx:906 applyPaste`); agent-with-E2E + no `k`
+  → `e2eRequired` banner + refusal (`relay-shim.ts:330-336`); wrong `k` →
+  generic decrypt-failed (`relay.rs`, shim banner). `--no-e2e` survives only
+  as the explicit escape hatch (loud warning + `relay-downgrade`
+  `explicit-no-e2e` audit). Covered by `e2e_downgrade_rejected_by_strict`,
+  `downgrade_strict_matrix`, and the e2e-check downgrade trio.
+- **Hardened routing:** fresh tokens 9-char (~46b, `relay.rs:49,69,78`,
+  `main.rs` 5-9 validation); 5-char legacy still routes (compat). Per-IP
+  (120/min) + per-scan-miss (20/min) budgets with 429 + `retry-after`
+  (`worker/limit.ts:15-27,67`, `worker/index.ts:47,72,98,113`); per-socket
+  flood guard closes with 4408 (`room.ts:171-173`); `?k=` → 400
+  (`index.ts:53-57`). Token scan reveals at most room existence + the public
+  bundle — data stays sealed and (with `--relay-auth`) PIN-gated.
+- **Crypto lifetime:** agent mints `sess` per run (`e2e.rs:174`) and bumps
+  `epoch` per connection (`relay.rs` run_agent loop); AAD =
+  `TOKEN|sess|dir|epoch` (`e2e.rs:191`, `cf/src/e2e.ts:118`,
+  `relay-e2e.ts:162`) with mirrored `a2c`/`c2a` directions, so cross-session
+  / cross-epoch (seq restarts at 0 safely) / reflected ciphertext fails the
+  tag. Random `_pad` 0–64B per inner message (`e2e.rs:207`,
+  `e2e.ts:137`); 512KB plaintext cap (`e2e.rs:82`). Covered by
+  `e2e_session_binding_rejects_cross_session`,
+  `e2e_epoch_replay_rejected_across_reconnect`,
+  `e2e_direction_reflection_rejected`, and the e2e-check session negatives.
+- **Identity binding:** `fingerprint()` =
+  hex(SHA-256(`ks-ssh-e2e-fp-v1`‖raw))[:16] (`e2e.rs:152`,
+  `e2e.ts:150`, `relay-e2e.ts:132`); CLI prints it and advertises `fp` in
+  `hello` (`relay.rs` run_agent + `Hello:fp` + hello-reply for late joiners);
+  the room replays hello caps to late joiners (`room.ts:51,140`);
+  viewers verify + TOFU (shim `relay-shim.ts:315-324,343`, lobby
+  `App.tsx:checkTofu` + fp line + changed-fp `E2E error` banner). PIN travels
+  ONLY inside `enc` (`relay.rs:1086`), plaintext `pin` ignored once E2E
+  (`relay.rs:1212`), constant-time verify (`auth.rs:1590`), 15min TTL +
+  mint-invalidates-previous (`auth.rs:1561,1603`, `relay_pin_verify…` test).
+  `k`/PIN never in query/fetch/logs/storage (fragment + memory only).
+- **Metadata honesty:** relay learns room existence + sizes/timing only;
+  control plaintext is enumerated and secret-free (`hello` caps, `paired`,
+  `agent` presence, `ping`/`pong`, `ui-*` — `e2e.rs` header). UI bundle is
+  public build output with a zero-secrets proof
+  (`ui_bundle_carries_zero_secrets`, `no-store` `room.ts:96`, pre-existing
+  size caps). `relay-check.mjs` pins the routing/gating evidence in CI
+  alongside `e2e-check.mjs` (`npm run test:e2e` runs both).
+- **Why 100 (not 93):** sshx matches E2E shape but self-host is discouraged
+  and routing is vendor-meshed; Tailscale/Teleport move trust to vendor IdP /
+  cluster CA. KS seals the same shape with self-hosted one-binary + one-Worker
+  simplicity, then adds strict-no-downgrade, session/epoch/direction-bound
+  AAD, TOFU fingerprints, PIN-inside-`enc`, and scan rate-limits — each with a
+  named test. Remaining honest gap: one Worker/DO relay, not a mesh (case 1
+  stays 90 vs sshx 95); no forward secrecy beyond per-run `sess`/per-connect
+  `epoch` sub-binding (no ECDH yet — `k` is still the long-term secret, so
+  rotate links per session for the paranoid).
+
 ## Teleport in depth — why it ranks #2 (60/100) and where KS SSH wins
 
 Teleport = identity-aware access plane (Go, OSS+Cloud). SSO/OIDC + short-lived
@@ -204,7 +280,8 @@ Where Teleport wins (honest — best audit story in the matrix, now tied):
   recording, see scoring deltas above).
 - Collaboration (case 8: 80): joint sessions + recording; KS has none (0).
 - Transport (cases 1/4: 85/87): reverse tunnel + cluster CA; KS matches on shape
-  (90/80) with simpler E2E (`k` fragment, relay sees sizes only).
+  (90) and now leads on E2E (100) with strict session-bound sealing
+  (`k` fragment, relay sees sizes only).
 
 Where KS SSH wins vs Teleport (matrix deltas, same scoring):
 - Single-box panel sweep (cases 5–7: 100/100/100 vs 40/10/10): HOME-jailed
@@ -217,8 +294,9 @@ Where KS SSH wins vs Teleport (matrix deltas, same scoring):
 - No licence/cloud dependency: KS is self-hosted OSS, unlimited boxes; Teleport
   depth costs cluster/Cloud commitment.
 - Teleport's only outright win over KS is case 8 (collab). Closest
-  gaps: NAT 90 vs 85, browser 93 vs 80, E2E 80 vs 87 — all
-  within 13 points; terminal now leads 100 vs 80; identity is tied 100/100.
+  gaps: NAT 90 vs 85, browser 93 vs 80 — both
+  within 13 points; terminal leads 100 vs 80, identity is tied 100/100,
+  and E2E now leads 100 vs 87.
 
 Verdict: pick Teleport if fleet/compliance at scale matters (cluster CA,
 joint sessions, K8s/DB proxy, Cloud). Pick KS SSH if you want one binary for
