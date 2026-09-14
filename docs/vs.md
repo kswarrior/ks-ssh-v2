@@ -42,7 +42,7 @@ sshx.io · **tmate** · **upterm** · **ttyd** · **wetty** = wetty/GoTTY ·
   `#/view/TOKEN`; `--e2e-key=` reuses `k`, `--no-ui` skips push, `--no-e2e` =
   legacy plaintext. The pushed bundle is full-function: HTTP `/api/*` rides
   `rpc-*` and PTY rides `shell-open`/`shell-send` to a loopback server with
-  the same router/auth/DB (`relay.rs:13,362`, `main.rs:289`), audited as
+  the same router/auth/DB (`relay.rs:14,362`, `main.rs:293`), audited as
   `relay-rpc`/`relay-shell-open`/`relay-shell-close` (token only).
 - **Panel:** Files + Ports + Host are served by `/api/*` — locally and, via
   the `rpc-*` bridge, over relay with the same login/RBAC.
@@ -54,10 +54,11 @@ sshx.io · **tmate** · **upterm** · **ttyd** · **wetty** = wetty/GoTTY ·
   `--record-max-mb` default 10, consent banner via `GET /api/record/status`).
 - **Limits:** token guessable (routing only, `k` seals); UI bundle + relay
   `rpc`/`shell` plaintext by design (same-trust loopback proxy); one
-  Worker/DO relay, not a mesh; no collab (joint sessions). Token addressing stays bearer-routed by
-  default — `--relay-auth` adds a one-time viewer PIN checked before any
-  `data`/`rpc`/`shell` bridge (`auth.rs:1550`, `relay.rs:678,788,882`,
-  never in query/logs).
+  Worker/DO relay, not a mesh; no collab (joint sessions). Token addressing
+  stays bearer-routed by default — `--relay-auth` adds a one-time viewer PIN
+  (sealed in `enc` when E2E, `relay.rs:1053`) checked before any
+  `data`/`rpc`/`shell` bridge (`relay.rs:1081,1232,1339`, never in
+  query/logs).
 
 ## Scored Matrix (/100 per case)
 
@@ -143,15 +144,18 @@ scale). Evidence per rubric item:
    (`main.rs:94-103`); playback respects RBAC (viewer plays, only admin
   deletes, `shell.rs:750`). Covered by recording roundtrip + cap tests.
 - **Relay identity (honest close):** `--relay-auth` requires a one-time viewer
-  PIN in client hello before any `data`/`rpc`/`shell` bridge (`auth.rs:1550`,
-  `relay.rs:678,788,882` + `relay-viewer-auth` audit); authed local users mint
-  fresh PINs (`POST /api/relay/pin`, `auth.rs:2625`). And with auth on, the
-  relay is login-gated anyway: rpc/shell proxy to a loopback server running
-  the same router, forwarding the viewer's cookie (`main.rs:289`,
-  `relay.rs:418,542`) — same RBAC, same audit (`relay-rpc`,
-  `relay-shell-open`/`relay-shell-close`, token only, never `k`/PIN). Token
-  addressing stays bearer-routed by default (documented in the startup note +
-  More page).
+  PIN — sealed inside `enc` (`auth`, `relay.rs:1053`) once E2E is negotiated,
+  legacy plaintext `hello.pin` only for non-E2E peers (`relay.rs:1151`) —
+  before any `data`/`rpc`/`shell` bridge (`relay.rs:1081,1232,1339` +
+  `relay-viewer-auth` audits); authed local users mint fresh PINs
+  (`POST /api/relay/pin`, `auth.rs:2625`). Strict-by-default E2E refuses
+  plaintext/downgrade peers with `relay-downgrade` audits
+  (`relay.rs:1218,1240`). And with auth on, the relay is login-gated anyway:
+  rpc/shell proxy to a loopback server running the same router, forwarding
+  the viewer's cookie (`main.rs:293`, `relay.rs:560,719`) — same RBAC, same
+  audit (`relay-rpc`, `relay-shell-open`/`relay-shell-close`, token only,
+  never `k`/PIN). Token addressing stays bearer-routed by default
+  (documented in the startup note + More page).
 
 Case 3 re-scored 2026-09-14: KS 80 → **100** (OpenSSH parity in browser).
 Evidence per rubric item (real PTY + instant feel + resilient reconnect +

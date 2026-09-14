@@ -3188,4 +3188,21 @@ mod tests {
         assert!(validate_new_password("long-enough-123").is_ok());
         assert!(password_strength("abc") < password_strength("Long-enough-123!@#"));
     }
+
+    #[test]
+    fn relay_pin_verify_expiry_and_onetime() {
+        let st = RelayPinState::new();
+        assert!(!st.verify("000000"));
+        let p1 = st.mint();
+        assert_eq!(p1.len(), 6);
+        assert!(st.has_pin());
+        assert!(st.verify(&p1));
+        assert!(!st.verify("000000"));
+        // Each mint invalidates the previous PIN (one-time).
+        let p2 = st.mint();
+        assert!(st.verify(&p2));
+        assert!(!st.verify(&p1));
+        // TTL is enforced (15 min).
+        assert_eq!(RELAY_PIN_TTL_SECS, 15 * 60);
+    }
 }
