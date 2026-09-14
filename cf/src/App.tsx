@@ -8,14 +8,13 @@ import {
   type EncEnvelope,
 } from './e2e'
 
-type PageId = 'home' | 'ssh' | 'view' | 'installation' | 'settings'
+type PageId = 'home' | 'ssh' | 'installation' | 'settings'
 
 type NavItem = { id: PageId; label: string; hash: string }
 
 const NAV: NavItem[] = [
   { id: 'home', label: 'Home', hash: '#/' },
   { id: 'ssh', label: 'SSH', hash: '#/ssh' },
-  { id: 'view', label: 'View', hash: '#/view' },
   { id: 'installation', label: 'Installation', hash: '#/installation' },
   { id: 'settings', label: 'Settings', hash: '#/settings' },
 ]
@@ -65,25 +64,8 @@ function writeJSON(key: string, value: unknown) {
 /** Map a location hash to a page, or null when it is not a page route. */
 function hashToPage(hash: string): PageId | null {
   const clean = hash.replace(/^#\/?/, '')
-  // Support deep links like #/view/ABCDE -> view page.
-  if (clean === 'view' || clean.startsWith('view/')) return 'view'
   const found = NAV.find((p) => p.hash.replace(/^#\/?/, '') === clean)
   return found ? found.id : null
-}
-
-/** Extract a 5-char token from #/view/ABCDE or ?token=ABCDE. */
-function hashToViewToken(hash: string): string | null {
-  // Supports `#/view/ABCDE` and `#/view/ABCDE#k=...` (fragment key ignored here;
-  // use parseFragmentKey() for `k` — never query/fetch).
-  const m = hash.match(/^#\/view\/([A-Za-z0-9]{0,5})/)
-  if (m?.[1] && /^[A-Za-z0-9]{5}$/.test(m[1])) return m[1].toUpperCase()
-  try {
-    const q = new URLSearchParams(window.location.search).get('token')
-    if (q && /^[A-Za-z0-9]{5}$/.test(q)) return q.toUpperCase()
-  } catch {
-    // URL parsing unavailable — ignore.
-  }
-  return null
 }
 
 function useIsMobile(breakpoint = 768): boolean {
@@ -379,7 +361,6 @@ function ActiveSession({
   const [lines, setLines] = useState<string[]>([])
   const [draft, setDraft] = useState('')
   const [agentOnline, setAgentOnline] = useState(false)
-  const [hasUi, setHasUi] = useState(false)
   // E2E: `k` lives in memory only — never localStorage, never query/fetch.
   const [e2eKey, setE2eKey] = useState<string | null>(() => parseFragmentKey())
   const [e2eStatus, setE2eStatus] = useState<E2eStatus>(() =>
@@ -514,24 +495,11 @@ function ActiveSession({
       if (msg?.type === 'paired' || msg?.type === 'registered') {
         push(msg.agent ? 'paired — agent online' : 'paired — waiting for agent …')
         setAgentOnline(msg.agent === true)
-        if (msg.hasUi === true) {
-          setHasUi(true)
-          push(`agent UI ready (${msg.size ?? '?'} bytes) — open View for fullscreen`)
-        }
         return
       }
       if (msg?.type === 'agent') {
         push(msg.online ? 'agent online' : 'agent offline')
         setAgentOnline(msg.online === true)
-        return
-      }
-      if (msg?.type === 'ui-ready') {
-        setHasUi(true)
-        push(`agent UI ready (${msg.size ?? '?'} bytes) — open View for fullscreen`)
-        return
-      }
-      if (msg?.type === 'ui-pending') {
-        push('agent UI uploading …')
         return
       }
       if (msg?.type === 'pong') return
@@ -615,11 +583,6 @@ function ActiveSession({
         <div className="row-actions">
           <StatusTag online={agentOnline} />
           <E2eBadge status={e2eKey ? e2eStatus : 'off'} />
-          {hasUi && (
-            <a className="btn btn-sm btn-primary" href={`#/view/${token}`}>
-              Fullscreen UI
-            </a>
-          )}
           <button type="button" className="btn btn-sm" onClick={onBack}>
             Back
           </button>

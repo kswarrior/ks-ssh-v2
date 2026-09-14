@@ -5,7 +5,7 @@
 //! with the same id reattaches to the still-running shell, replaying the
 //! scrollback ring first. Detached sessions are reaped after a TTL.
 //!
-//! Protocol:
+//! Protocol (v1 — unchanged, default):
 //! * client -> server: raw keystrokes (`onData` from xterm.js). Only the
 //!   exact JSON `{"type":"resize","cols":N,"rows":N}` is control traffic —
 //!   everything else (even typed JSON) goes to the shell as input.
@@ -13,6 +13,22 @@
 //!   PTY bytes (Binary frames) for xterm.js, plus the exact Text
 //!   `{"type":"exit"}` once when the shell exits (followed by Close).
 //!   A superseded socket gets Close code 4000 ("attached elsewhere").
+//!
+//! Protocol (v2 — opt-in via `?v=2`, fully backward compatible):
+//! * Old clients never send `v`/`from`, so they always get the v1 shapes
+//!   above, byte-identical. Old servers ignore the unknown `v`/`from`
+//!   query fields (serde default) and keep speaking v1.
+//! * v2 `ready` adds stream state:
+//!   `{"type":"ready","id":...,"v":2,"seq":N,"behind":false}`
+//!   (`seq` = total PTY bytes ever produced; `behind` = the requested
+//!   `?from=` offset was already evicted from the ring).
+//! * v2 Binary frames are `u64 LE stream offset + raw PTY bytes`, so the
+//!   client can detect gaps and resume with `?from=LAST` without
+//!   duplication or loss (replay sends only the missed tail).
+//! * v2 client -> server control (exact shapes only, else shell input):
+//!   `{"type":"ack","seq":N}` (received watermark, visible in /api/terms),
+//!   `{"type":"ping","t":ms}` -> server replies `{"type":"pong","t":ms}`
+//!   for client-side RTT. `resize` works as in v1.
 //!
 //! Persistence (`--db`, see `crate::db`): sessions are mirrored into SQLite
 //! — any visitor can list (`GET /api/terms`) and reattach to them, and the
@@ -49,9 +65,19 @@ const MAX_SESSIONS: usize = 64;
 /// Close code telling a socket it lost a takeover fight.
 const CLOSE_SUPERSEDED: u16 = 4000;
 
+/// Negotiated protocol version. v1 = legacy shapes (default).
+const PROTO_V2: u8 = 2;
+
 #[derive(Deserialize)]
 pub struct ShellQuery {
     pub id: Option<String>,
+    /// Opt-in protocol version (`?v=2`). Unknown to old servers (ignored),
+    /// absent from old clients (v1 shapes).
+    #[serde(default)]
+    pub v: Option<u8>,
+    /// v2 resume offset: total PTY bytes already received (`?from=N`).
+    #[serde(default)]
+    pub from: Option<u64>,
 }
 
 fn valid_session_id(t: &str) -> bool {
@@ -70,16 +96,53 @@ fn new_session_id() -> String {
 }
 
 /// Keep the last RING_CAP bytes of PTY output for reattach replay.
-fn push_ring(ring: &mut VecDeque<u8>, bytes: &[u8]) {
+/// `base` tracks the stream offset of the ring front (total bytes evicted).
+fn push_ring(ring: &mut VecDeque<u8>, base: &mut u64, bytes: &[u8]) {
     ring.extend(bytes.iter());
     let overflow = ring.len().saturating_sub(RING_CAP);
     if overflow > 0 {
         ring.drain(..overflow);
+        *base = base.saturating_add(overflow as u64);
     }
 }
 
+/// v2 binary frame: `u64 LE stream offset + raw PTY bytes`.
+fn encode_frame(base: u64, bytes: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(8 + bytes.len());
+    out.extend_from_slice(&base.to_le_bytes());
+    out.extend_from_slice(bytes);
+    out
+}
+
+/// Split a v2 binary frame back into `(stream offset, PTY bytes)`.
+/// Returns `None` when the frame is too short to hold an offset.
+fn decode_frame(frame: &[u8]) -> Option<(u64, &[u8])> {
+    if frame.len() < 8 {
+        return None;
+    }
+    let mut b = [0u8; 8];
+    b.copy_from_slice(&frame[..8]);
+    Some((u64::from_le_bytes(b), &frame[8..]))
+}
+
+/// Exact-shape v2 control: `{"type":"ping","t":ms}` -> the echoed `t`.
+fn parse_ping(v: &serde_json::Value) -> Option<u64> {
+    if v.get("type").and_then(|t| t.as_str()) != Some("ping") {
+        return None;
+    }
+    v.get("t").and_then(|t| t.as_u64())
+}
+
+/// Exact-shape v2 control: `{"type":"ack","seq":N}` -> received watermark.
+fn parse_ack(v: &serde_json::Value) -> Option<u64> {
+    if v.get("type").and_then(|t| t.as_str()) != Some("ack") {
+        return None;
+    }
+    v.get("seq").and_then(|s| s.as_u64())
+}
+
 enum Out {
-    Data(Vec<u8>),
+    Data { base: u64, bytes: Vec<u8> },
     Eof,
     Takeover,
 }
@@ -93,6 +156,13 @@ struct Session {
     /// Current subscriber (None while detached).
     sub: StdMutex<Option<tokio::sync::mpsc::Sender<Out>>>,
     ring: StdMutex<VecDeque<u8>>,
+    /// Stream offset of the ring front (total bytes evicted from the ring).
+    /// Invariant: `offset == ring_base + ring.len()`.
+    ring_base: StdMutex<u64>,
+    /// Total PTY bytes ever produced by this session (v2 stream offsets).
+    offset: AtomicU64,
+    /// Highest `ack` watermark reported by the attached client (v2).
+    acked: AtomicU64,
     dead: AtomicBool,
     /// Bumped on every attach; lets stale sockets notice a takeover.
     epoch: AtomicU64,
@@ -106,7 +176,7 @@ static SESSIONS: LazyLock<tokio::sync::Mutex<HashMap<String, Arc<Session>>>> =
     LazyLock::new(|| tokio::sync::Mutex::new(HashMap::new()));
 
 pub async fn ws_handler(ws: WebSocketUpgrade, Query(q): Query<ShellQuery>) -> impl IntoResponse {
-    ws.on_upgrade(move |socket| handle_socket(socket, q.id))
+    ws.on_upgrade(move |socket| handle_socket(socket, q))
 }
 
 fn spawn_shell(
@@ -171,6 +241,9 @@ fn spawn_session(id: String) -> anyhow::Result<Arc<Session>> {
         writer_tx,
         sub: StdMutex::new(None),
         ring: StdMutex::new(VecDeque::new()),
+        ring_base: StdMutex::new(0),
+        offset: AtomicU64::new(0),
+        acked: AtomicU64::new(0),
         dead: AtomicBool::new(false),
         epoch: AtomicU64::new(0),
         last_active: StdMutex::new(Instant::now()),
@@ -202,14 +275,22 @@ fn spawn_session(id: String) -> anyhow::Result<Arc<Session>> {
                 Ok(0) => break,
                 Ok(n) => {
                     let bytes = &buf[..n];
+                    // Claim this chunk's stream offset first so frames stay
+                    // ordered even under contention.
+                    let base = reader_session.offset.fetch_add(n as u64, Ordering::SeqCst);
                     if let Ok(mut ring) = reader_session.ring.lock() {
-                        push_ring(&mut ring, bytes);
+                        if let Ok(mut rbase) = reader_session.ring_base.lock() {
+                            push_ring(&mut ring, &mut rbase, bytes);
+                        }
                     }
                     reader_session.dirty.store(true, Ordering::SeqCst);
                     let tx = reader_session.sub.lock().ok().and_then(|g| g.clone());
                     if let Some(tx) = tx {
                         // Detached (or taken over) — ring keeps the bytes.
-                        let _ = tx.blocking_send(Out::Data(bytes.to_vec()));
+                        let _ = tx.blocking_send(Out::Data {
+                            base,
+                            bytes: bytes.to_vec(),
+                        });
                     }
                 }
                 Err(_) => break,
@@ -283,6 +364,9 @@ async fn get_or_create_session(want: Option<String>) -> Arc<Session> {
                 ring: StdMutex::new(VecDeque::from(
                     format!("ks-ssh: cannot spawn shell: {e}\r\n").into_bytes(),
                 )),
+                ring_base: StdMutex::new(0),
+                offset: AtomicU64::new(0),
+                acked: AtomicU64::new(0),
                 dead: AtomicBool::new(true),
                 epoch: AtomicU64::new(0),
                 last_active: StdMutex::new(Instant::now()),
@@ -403,6 +487,9 @@ pub async fn load_persisted() -> usize {
             writer_tx,
             sub: StdMutex::new(None),
             ring: StdMutex::new(row.scrollback.into_iter().collect()),
+            ring_base: StdMutex::new(0),
+            offset: AtomicU64::new(row.scrollback.len() as u64),
+            acked: AtomicU64::new(0),
             dead: AtomicBool::new(true),
             epoch: AtomicU64::new(0),
             last_active: StdMutex::new(Instant::now()),
