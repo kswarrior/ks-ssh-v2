@@ -24,6 +24,18 @@ pub struct ListQuery {
 #[derive(Deserialize)]
 pub struct DownloadQuery {
     pub path: String,
+    /// `?inline=1` serves bytes with `Content-Disposition: inline` so the
+    /// browser previews images/video/audio/PDF instead of downloading.
+    /// String-based (not bool) so `inline=1` parses from query strings.
+    #[serde(default)]
+    pub inline: Option<String>,
+}
+
+fn inline_requested(q: &DownloadQuery) -> bool {
+    match q.inline.as_deref().map(str::trim) {
+        Some("1") | Some("true") | Some("yes") | Some("inline") => true,
+        _ => false,
+    }
 }
 
 #[derive(Deserialize)]
@@ -41,6 +53,18 @@ pub struct SaveBody {
 #[derive(Deserialize)]
 pub struct MkdirBody {
     pub path: String,
+}
+
+#[derive(Deserialize)]
+pub struct CopyBody {
+    pub from: String,
+    pub to: String,
+}
+
+#[derive(Deserialize)]
+pub struct ChmodBody {
+    pub path: String,
+    pub mode: u32,
 }
 
 #[derive(Deserialize)]
@@ -70,6 +94,9 @@ pub struct FileEntry {
     pub is_dir: bool,
     pub size: u64,
     pub modified: Option<i64>,
+    /// Unix permission bits (e.g. 0o755). None on non-unix hosts.
+    pub mode: Option<u32>,
+    pub is_symlink: bool,
 }
 
 #[derive(Serialize)]
@@ -173,6 +200,15 @@ fn entry_of(path: PathBuf, meta: std::fs::Metadata) -> FileEntry {
         .ok()
         .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
         .map(|d| d.as_secs() as i64);
+    #[cfg(unix)]
+    let mode = Some(
+        std::os::unix::fs::PermissionsExt::mode(&meta.permissions()) & 0o7777,
+    );
+    #[cfg(not(unix))]
+    let mode: Option<u32> = None;
+    let is_symlink = std::fs::symlink_metadata(&path)
+        .map(|m| m.is_symlink())
+        .unwrap_or(false);
     FileEntry {
         name: path
             .file_name()
@@ -182,6 +218,8 @@ fn entry_of(path: PathBuf, meta: std::fs::Metadata) -> FileEntry {
         is_dir,
         size,
         modified,
+        mode,
+        is_symlink,
     }
 }
 
@@ -736,13 +774,15 @@ pub async fn api_download_file(Query(q): Query<DownloadQuery>) -> Response {
         .file_name()
         .map(|n| n.to_string_lossy().to_string())
         .unwrap_or_else(|| "download".to_string());
+    let disposition = if inline_requested(&q) {
+        format!("inline; filename=\"{name}\"")
+    } else {
+        format!("attachment; filename=\"{name}\"")
+    };
     Response::builder()
         .status(StatusCode::OK)
         .header(header::CONTENT_TYPE, mime.as_ref())
-        .header(
-            header::CONTENT_DISPOSITION,
-            format!("attachment; filename=\"{name}\""),
-        )
+        .header(header::CONTENT_DISPOSITION, disposition)
         .header(header::CONTENT_LENGTH, bytes.len().to_string())
         .body(Body::from(bytes))
         .unwrap_or_else(|_| {
