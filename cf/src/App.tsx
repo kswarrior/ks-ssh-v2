@@ -670,17 +670,35 @@ function SSHPage({
         }
         // `enc` payloads are opaque here — handled in the active session.
         if (msg?.type === 'enc') return
-        if (msg?.type === 'paired' || msg?.type === 'registered') {
+        if (msg?.type === 'paired') {
           clearTimeout(timeout)
           setConnectingId((cur) => (cur === entry.id ? null : cur))
-          onChange((prev) =>
-            prev.map((x) => (x.id === entry.id ? { ...x, online: true } : x)),
-          )
-        } else if (msg?.type === 'agent' && msg.online === false) {
-          closeSocket(entry.id)
-          onChange((prev) =>
-            prev.map((x) => (x.id === entry.id ? { ...x, online: false } : x)),
-          )
+          const agentPresent = msg.agent === true
+          if (agentPresent) {
+            onChange((prev) =>
+              prev.map((x) => (x.id === entry.id ? { ...x, online: true } : x)),
+            )
+          } else {
+            closeSocket(entry.id)
+            onChange((prev) =>
+              prev.map((x) => (x.id === entry.id ? { ...x, online: false } : x)),
+            )
+          }
+        } else if (msg?.type === 'registered') {
+          clearTimeout(timeout)
+          setConnectingId((cur) => (cur === entry.id ? null : cur))
+        } else if (msg?.type === 'agent') {
+          const isOnline = msg.online === true
+          if (isOnline) {
+            onChange((prev) =>
+              prev.map((x) => (x.id === entry.id ? { ...x, online: true } : x)),
+            )
+          } else {
+            closeSocket(entry.id)
+            onChange((prev) =>
+              prev.map((x) => (x.id === entry.id ? { ...x, online: false } : x)),
+            )
+          }
         }
       } catch {
         // Binary relay payloads are handled in the active session.
