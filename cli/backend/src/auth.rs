@@ -240,14 +240,9 @@ fn from_hex(s: &str) -> Option<[u8; 32]> {
 }
 
 fn hash_argon2(pass: &str) -> String {
-    use argon2::{
-        Argon2,
-        password_hash::{SaltString, rand_core::OsRng},
-    };
-    use argon2::PasswordHasher as _;
-    let salt = SaltString::generate(&mut OsRng);
+    use argon2::{Argon2, password_hash::PasswordHasher as _};
     Argon2::default()
-        .hash_password(pass.as_bytes(), &salt)
+        .hash_password(pass.as_bytes())
         .map(|h| h.to_string())
         .unwrap_or_else(|_| {
             // Practically unreachable — fall back to a distinct marker so we
@@ -337,33 +332,36 @@ fn totp_parse_secret(secret_b32: &str) -> Option<Vec<u8>> {
 }
 
 fn totp_check(secret_raw: &[u8], code: &str) -> bool {
-    use totp_rs::{Algorithm, Secret, Totp};
+    use totp_rs::Algorithm;
     let code = code.trim().replace([' ', '-'], "");
     if code.len() != 6 || !code.bytes().all(|b| b.is_ascii_digit()) {
         return false;
     }
-    let Ok(totp) = Totp::new(
-        Algorithm::SHA1,
-        6,
-        1,
-        30,
-        Secret::Raw(secret_raw.to_vec()).to_bytes().unwrap_or_default(),
-    ) else {
+    let secret = totp_rs::Secret::new(secret_raw.to_vec().into_boxed_slice());
+    let builder = totp_rs::Builder::new()
+        .with_algorithm(Algorithm::SHA1)
+        .with_digits(6)
+        .with_skew(1)
+        .with_step_duration(30)
+        .with_secret(secret)
+        .build();
+    let Ok(totp) = builder else {
         return false;
     };
     totp.check_current(&code).is_some()
 }
 
 fn totp_current_for_tests(secret_raw: &[u8]) -> Option<String> {
-    use totp_rs::{Algorithm, Secret, Totp};
-    let totp = Totp::new(
-        Algorithm::SHA1,
-        6,
-        1,
-        30,
-        Secret::Raw(secret_raw.to_vec()).to_bytes().unwrap_or_default(),
-    )
-    .ok()?;
+    use totp_rs::Algorithm;
+    let secret = totp_rs::Secret::new(secret_raw.to_vec().into_boxed_slice());
+    let totp = totp_rs::Builder::new()
+        .with_algorithm(Algorithm::SHA1)
+        .with_digits(6)
+        .with_skew(1)
+        .with_step_duration(30)
+        .with_secret(secret)
+        .build()
+        .ok()?;
     Some(totp.generate_current().to_string())
 }
 
@@ -425,6 +423,7 @@ fn new_state_token() -> String {
 
 fn new_pkce_verifier() -> String {
     // 32 random bytes → 43-char base64url (within 43..128).
+    use base64::Engine as _;
     let mut raw = [0u8; 32];
     let _ = getrandom::fill(&mut raw);
     base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(raw)
@@ -1724,7 +1723,7 @@ pub struct AppState {
     pub relay_pin: Option<std::sync::Arc<RelayPinState>>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct LoginInfo {
     pub token: String,
     pub username: String,

@@ -175,6 +175,39 @@
     inset 0 1px 0 rgba(255, 255, 255, 0.1);
 }
 
+/* ---------- Header ⋮ menu (Dark/light, More, Logout) ---------- */
+
+.header-menu-wrap {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.header-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 71;
+  min-width: 220px;
+  max-width: min(260px, calc(100vw - 16px));
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  border: 1px solid var(--glass-border);
+  border-radius: 10px;
+  background: var(--panel-bg);
+  -webkit-backdrop-filter: blur(24px) saturate(150%);
+  backdrop-filter: blur(24px) saturate(150%);
+  box-shadow: var(--shadow-lg);
+}
+
+.header-menu .term-tab-menu-item svg {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  margin-right: 10px;
+}
+
 /* ---------- Header tabs (desktop, right side) ---------- */
 
 .header-tabs {

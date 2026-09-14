@@ -1411,12 +1411,6 @@ export default function App() {
                 </svg>
               )}
             </button>
-            <span
-              className="status-dot"
-              role="status"
-              aria-label="Online"
-              title="Online"
-            />
           </header>
 
           <main

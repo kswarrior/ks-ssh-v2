@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import TerminalPage, { type SshEntry } from './pages/Terminal'
 import FilesPage from './pages/Files'
 import PortsPage from './pages/Ports'
@@ -134,6 +134,27 @@ export default function App() {
   // Login gate: enabled only when the backend runs with --user/--pass.
   // `null` = still checking; relay views (no /api/auth/*) fall back to open.
   const [auth, setAuth] = useState<AuthStatus | null>(null)
+  const [menuOpen, setMenuOpen] = useState(false)
+  const menuWrapRef = useRef<HTMLDivElement | null>(null)
+
+  // Close the header ⋮ menu on outside click / Escape.
+  useEffect(() => {
+    if (!menuOpen) return
+    const onDown = (e: PointerEvent) => {
+      if (menuWrapRef.current && !menuWrapRef.current.contains(e.target as Node)) {
+        setMenuOpen(false)
+      }
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setMenuOpen(false)
+    }
+    document.addEventListener('pointerdown', onDown)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('pointerdown', onDown)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [menuOpen])
 
   // Ask the backend whether a login page is required.
   useEffect(() => {
@@ -460,85 +481,121 @@ export default function App() {
               <path d="M6 6.5h.01M6 17.5h.01" />
             </svg>
           </button>
-          <button
-            type="button"
-            className={`icon-btn${tab === 'more' || tab === 'users' ? ' active' : ''}`}
-            aria-label="More"
-            title="More"
-            aria-current={tab === 'more' || tab === 'users' ? 'page' : undefined}
-            onClick={() => go(MORE_ITEM)}
-          >
-            <svg
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              aria-hidden="true"
-            >
-              <circle cx="5" cy="12" r="1.6" />
-              <circle cx="12" cy="12" r="1.6" />
-              <circle cx="19" cy="12" r="1.6" />
-            </svg>
-          </button>
-          <button
-            type="button"
-            className="icon-btn"
-            aria-label={theme === 'light' ? 'Switch to dark mode' : 'Switch to light mode'}
-            title={theme === 'light' ? 'Switch to dark mode' : 'Switch to light mode'}
-            onClick={() => setTheme((t) => (t === 'light' ? 'dark' : 'light'))}
-          >
-            {theme === 'light' ? (
-              <svg
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                aria-hidden="true"
-              >
-                <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
-              </svg>
-            ) : (
-              <svg
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                aria-hidden="true"
-              >
-                <circle cx="12" cy="12" r="4" />
-                <path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" />
-              </svg>
-            )}
-          </button>
-          {auth.protected && (
+          <div className="header-menu-wrap" ref={menuWrapRef}>
             <button
               type="button"
-              className="icon-btn"
-              aria-label={auth.user ? `Log out (${auth.user})` : 'Log out'}
-              title={auth.user ? `Log out (${auth.user})` : 'Log out'}
-              onClick={() => void logout()}
+              className={`icon-btn${tab === 'more' || tab === 'users' || menuOpen ? ' active' : ''}`}
+              aria-label="Menu"
+              title="Menu"
+              aria-haspopup="menu"
+              aria-expanded={menuOpen}
+              onClick={() => setMenuOpen((o) => !o)}
             >
               <svg
                 viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
+                fill="currentColor"
                 aria-hidden="true"
               >
-                <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
-                <path d="m16 17 5-5-5-5" />
-                <path d="M21 12H9" />
+                <circle cx="12" cy="5" r="1.7" />
+                <circle cx="12" cy="12" r="1.7" />
+                <circle cx="12" cy="19" r="1.7" />
               </svg>
             </button>
-          )}
+            {menuOpen && (
+              <div className="header-menu" role="menu" aria-label="Menu">
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="term-tab-menu-item"
+                  onClick={() => {
+                    setTheme((t) => (t === 'light' ? 'dark' : 'light'))
+                    setMenuOpen(false)
+                  }}
+                >
+                  {theme === 'light' ? (
+                    <svg
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      aria-hidden="true"
+                    >
+                      <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
+                    </svg>
+                  ) : (
+                    <svg
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      aria-hidden="true"
+                    >
+                      <circle cx="12" cy="12" r="4" />
+                      <path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" />
+                    </svg>
+                  )}
+                  {theme === 'light' ? 'Dark mode' : 'Light mode'}
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="term-tab-menu-item"
+                  onClick={() => {
+                    go(MORE_ITEM)
+                    setMenuOpen(false)
+                  }}
+                >
+                  <svg
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    aria-hidden="true"
+                  >
+                    <circle cx="5" cy="12" r="1.6" />
+                    <circle cx="12" cy="12" r="1.6" />
+                    <circle cx="19" cy="12" r="1.6" />
+                  </svg>
+                  More
+                </button>
+                {auth.protected && (
+                  <>
+                    <div className="term-tab-menu-sep" aria-hidden="true" />
+                    <button
+                      type="button"
+                      role="menuitem"
+                      className="term-tab-menu-item danger"
+                      onClick={() => {
+                        setMenuOpen(false)
+                        void logout()
+                      }}
+                    >
+                      <svg
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        aria-hidden="true"
+                      >
+                        <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+                        <path d="m16 17 5-5-5-5" />
+                        <path d="M21 12H9" />
+                      </svg>
+                      {auth.user ? `Log out (${auth.user})` : 'Log out'}
+                    </button>
+                  </>
+                )}
+              </div>
+            )}
+          </div>
         </header>
 
         <main
