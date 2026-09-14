@@ -1088,7 +1088,7 @@ function SessionPage({
       <div className="page-head session-head">
         <h1 id="page-title-session">{name ?? `Session ${activeToken}`}</h1>
         <div className="row-actions session-actions">
-          <E2eBadge status={parseFragmentKey() ? 'on' : 'off'} />
+          <E2eBadge status={e2eStatus} />
           {(meta?.hasUi || srcDoc) && (
             <>
               <button type="button" className="btn btn-sm" onClick={() => setCacheBust((n) => n + 1)}>
@@ -1112,6 +1112,66 @@ function SessionPage({
           </a>
         </div>
       </div>
+      {tofuChanged && fp && (
+        <div className="banner-error" role="alert">
+          <p>
+            🔒 E2E fingerprint changed (<code>{fp}</code>) — the agent key
+            rotated or this link is wrong. Verify against the CLI&apos;s
+            printed <code>E2E fingerprint</code> before continuing.
+          </p>
+        </div>
+      )}
+      {!fragKey && (
+        <div className="card" role="group" aria-labelledby="e2e-paste-title">
+          <h2 id="e2e-paste-title">End-to-end encrypted link required</h2>
+          <p className="lead">
+            This session seals terminal and file traffic with AES-256-GCM, and
+            the key opens only from the full link the CLI printed
+            (<code>/v/{activeToken}#k=…</code>). Paste it once — the key stays
+            in the fragment and memory, never in fetch URLs or storage.
+          </p>
+          <div className="form">
+            <label className="field">
+              Full share link (with <code>#k=…</code>)
+              <input
+                type="text"
+                value={paste}
+                onChange={(e) => {
+                  setPaste(e.target.value)
+                  setPasteError(null)
+                }}
+                placeholder={`https://…/v/${activeToken}#k=…`}
+                autoComplete="off"
+                spellCheck={false}
+              />
+            </label>
+          </div>
+          {pasteError && (
+            <p className="session-status" role="alert">
+              {pasteError}
+            </p>
+          )}
+          <div className="row-actions">
+            <button type="button" className="btn btn-sm btn-primary" onClick={applyPaste}>
+              Unlock with pasted link
+            </button>
+          </div>
+        </div>
+      )}
+      {fragKey && fp && (
+        <p className="session-status session-hint">
+          🔒 E2E fingerprint <code>{fp}</code>
+          {tofuFirst ? ' (first seen on this device — compare with the CLI)' : ' (matches this device)'}
+          {gated ? ' · 🔐 viewer PIN required inside the live UI' : ''}.
+        </p>
+      )}
+      {fragKey && gated && (
+        <p className="session-status session-hint">
+          This link is PIN-gated (<code>--relay-auth</code>): the live UI will
+          prompt for the viewer PIN. The PIN travels inside E2E only — never
+          in query strings or logs.
+        </p>
+      )}
       {checking && (
         <p className="session-status" aria-live="polite">
           Checking for agent UI …
