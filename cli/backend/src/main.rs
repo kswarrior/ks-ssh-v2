@@ -153,13 +153,11 @@ fn relay_ws_base(relay: &str) -> String {
     }
 }
 
-async fn serve(
-    host: String,
-    port: u16,
+fn build_router(
     auth: Option<Arc<AuthState>>,
     oidc: Option<Arc<auth::OidcState>>,
     relay_pin: Option<Arc<auth::RelayPinState>>,
-) {
+) -> Router {
     let state = AppState {
         auth: auth.clone(),
         oidc: oidc.clone(),
@@ -259,7 +257,17 @@ async fn serve(
         }
         None => public.merge(protected).fallback(serve_ui),
     };
+    app
+}
 
+async fn serve(
+    host: String,
+    port: u16,
+    auth: Option<Arc<AuthState>>,
+    oidc: Option<Arc<auth::OidcState>>,
+    relay_pin: Option<Arc<auth::RelayPinState>>,
+) {
+    let app = build_router(auth, oidc, relay_pin);
     let addr = format!("{host}:{port}");
     let listener = tokio::net::TcpListener::bind(&addr)
         .await
@@ -270,6 +278,36 @@ async fn serve(
     axum::serve(listener, app.into_make_service())
         .await
         .expect("serve");
+}
+
+/// Loopback-only server for the relay proxy (`--token` mode).
+/// Binds `127.0.0.1:0` (never exposed), spawns the server in the background
+/// and returns the base URL (`http://127.0.0.1:PORT`) the relay agent
+/// forwards `rpc-*` / `shell-*` messages to. Shares the same in-memory
+/// shell sessions, auth state and DB as the public server (same process),
+/// so Visit-over-WSS sees exactly what `--port` serves locally.
+async fn serve_loopback(
+    auth: Option<Arc<AuthState>>,
+    oidc: Option<Arc<auth::OidcState>>,
+    relay_pin: Option<Arc<auth::RelayPinState>>,
+) -> String {
+    let app = build_router(auth, oidc, relay_pin);
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind loopback");
+    let addr = listener.local_addr().expect("loopback addr");
+    let base = format!("http://{addr}");
+    // Reaper/persister are idempotent to spawn (extra task is harmless;
+    // `serve()` also spawns them when the public UI runs).
+    shell::spawn_reaper();
+    shell::spawn_persister();
+    tokio::spawn(async move {
+        if let Err(e) = axum::serve(listener, app.into_make_service()).await {
+            eprintln!("loopback relay server error: {e:#}");
+        }
+    });
+    println!("Relay loopback: {base} (local only, proxied over WSS)");
+    base
 }
 
 #[tokio::main]
