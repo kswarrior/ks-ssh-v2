@@ -1632,13 +1632,70 @@ function decodeUiChunks(chunks: string[]): string {
   return new TextDecoder().decode(all)
 }
 
-function InstallationPage() {
+function InstallationPage({ settings }: { settings: Settings }) {
+  const relayBase = relayHttpBase(settings)
+  const [health, setHealth] = useState<'checking' | 'online' | 'offline'>('checking')
+  useEffect(() => {
+    let alive = true
+    const ctrl = new AbortController()
+    fetch(`${relayBase}/api/health`, { signal: ctrl.signal })
+      .then((r) => r.json())
+      .then((d: { ok?: boolean }) => {
+        if (alive) setHealth(d?.ok === true ? 'online' : 'offline')
+      })
+      .catch(() => {
+        if (alive) setHealth('offline')
+      })
+    return () => {
+      alive = false
+      ctrl.abort()
+    }
+  }, [relayBase])
   return (
     <section className="page" aria-labelledby="page-title-installation">
       <h1 id="page-title-installation">Installation</h1>
-      <p className="lead">Paste this in your terminal to download and run:</p>
+      <p className="lead">
+        Relay status:{' '}
+        {health === 'checking' ? 'checking…' : health === 'online' ? 'online — agents can register now.' : 'unreachable — check your connection.'}{' '}
+        <StatusTag online={health === 'online'} connecting={health === 'checking'} />
+      </p>
       <div className="card">
-        <CodeBlock code="curl -sSfL https://raw.githubusercontent.com/kswarrior/ks-ssh-v2/refs/heads/main/cli/release/ks-ssh -o ks-ssh && chmod +x ks-ssh && ./ks-ssh" />
+        <h2>1. Download the agent</h2>
+        <p>Paste this in your terminal to download and run:</p>
+        <CodeBlock code="curl -sSfL https://raw.githubusercontent.com/kswarrior/ks-ssh-v2/refs/heads/main/cli/release/ks-ssh -o ks-ssh && chmod +x ks-ssh && ./ks-ssh --help" />
+      </div>
+      <div className="card">
+        <h2>2. Local UI (same machine)</h2>
+        <p>Serves Terminal, Files, Ports and Host on loopback:</p>
+        <CodeBlock code="./ks-ssh --port 8080" />
+        <p className="session-status session-hint">Open http://127.0.0.1:8080 in a browser on that machine.</p>
+      </div>
+      <div className="card">
+        <h2>3. Relay (no open port)</h2>
+        <p>Registers a fresh 9-character token and prints a share link with #k=…:</p>
+        <CodeBlock code="./ks-ssh --no-serve --token=" />
+        <p>Paste the printed token into the SSH page, then open it from the full share link so E2E works.</p>
+      </div>
+      <div className="card">
+        <h2>4. Relay + local UI together</h2>
+        <CodeBlock code="./ks-ssh --token=ABCDE1234" />
+        <p className="session-status session-hint">Reuses your token; omit the value (--token=) to mint a fresh one.</p>
+      </div>
+      <div className="card">
+        <h2>5. Viewer PIN (optional)</h2>
+        <p>Require a one-time PIN sealed inside E2E before any shell or file bridge:</p>
+        <CodeBlock code="./ks-ssh --no-serve --token= --relay-auth" />
+      </div>
+      <div className="card">
+        <h2>Verify</h2>
+        <p>Confirm this relay answers, then check a token:</p>
+        <CodeBlock code={`curl -s ${typeof window !== 'undefined' ? window.location.origin : 'https://<relay-host>'}/api/health`} />
+        <CodeBlock code={`curl -s "${typeof window !== 'undefined' ? window.location.origin : 'https://<relay-host>'}/api/ssh/status?token=ABCDE1234"`} />
+        <div className="row-actions">
+          <a className="btn btn-sm btn-primary" href="#/ssh">
+            Open SSH
+          </a>
+        </div>
       </div>
     </section>
   )
@@ -1647,41 +1704,120 @@ function InstallationPage() {
 function SettingsPage({
   settings,
   onChange,
+  theme,
+  onTheme,
+  entryCount,
+  onClearData,
 }: {
   settings: Settings
   onChange: (patch: Partial<Settings>) => void
+  theme: Theme
+  onTheme: (t: Theme) => void
+  entryCount: number
+  onClearData: () => void
 }) {
+  const [confirmClear, setConfirmClear] = useState(false)
   return (
     <section className="page" aria-labelledby="page-title-settings">
       <h1 id="page-title-settings">Settings</h1>
-      <p className="lead">Settings save automatically on this device.</p>
+      <p className="lead">Settings save automatically on this device and take effect immediately.</p>
       <div className="card">
+        <h2>Relay</h2>
         <div className="form">
-          <label className="field">
-            Default user
+          <label className="field" style={{ gridColumn: '1 / -1' }}>
+            Relay host (empty = this Worker)
             <input
               type="text"
-              value={settings.defaultUser}
-              onChange={(e) => onChange({ defaultUser: e.target.value })}
-              placeholder="root"
-              autoComplete="username"
+              value={settings.relayHost}
+              onChange={(e) => onChange({ relayHost: e.target.value.trim().replace(/^https?:\/\//, '').replace(/\/.*$/, '').slice(0, 253) })}
+              placeholder={typeof window !== 'undefined' ? window.location.host : 'ks-ssh-v2.kswarriorpro.workers.dev'}
+              autoComplete="off"
+              spellCheck={false}
             />
           </label>
           <label className="field">
-            Default port
+            Presence timeout (ms)
             <input
               type="number"
-              value={settings.defaultPort}
-              onChange={(e) =>
-                onChange({
-                  defaultPort: Number.parseInt(e.target.value, 10) || 22,
-                })
-              }
-              min={1}
-              max={65535}
+              value={settings.connectTimeoutMs}
+              onChange={(e) => {
+                const n = Number.parseInt(e.target.value, 10)
+                onChange({ connectTimeoutMs: Number.isFinite(n) ? Math.min(30000, Math.max(3000, n)) : 8000 })
+              }}
+              min={3000}
+              max={30000}
+              step={1000}
             />
           </label>
+          <label className="field checkbox-row">
+            <input
+              type="checkbox"
+              checked={settings.requireE2E}
+              onChange={(e) => onChange({ requireE2E: e.target.checked })}
+            />
+            Require E2E key (#k=…) for live sessions
+          </label>
         </div>
+        <div className="row-actions">
+          <button type="button" className="btn btn-sm" onClick={() => onChange({ relayHost: DEFAULT_RELAY_HOST })}>
+            Reset relay host
+          </button>
+          <span className="session-status session-hint">
+            WSS connects to {relayWsHost(settings)} · HTTP via {relayHttpBase(settings) || '(same origin)'} · timeout{' '}
+            {Math.round(settings.connectTimeoutMs / 1000)}s
+          </span>
+        </div>
+      </div>
+      <div className="card">
+        <h2>Appearance</h2>
+        <div className="row-actions">
+          <button
+            type="button"
+            className={`btn btn-sm${theme === 'light' ? ' btn-primary' : ''}`}
+            aria-pressed={theme === 'light'}
+            onClick={() => onTheme('light')}
+          >
+            Light
+          </button>
+          <button
+            type="button"
+            className={`btn btn-sm${theme === 'dark' ? ' btn-primary' : ''}`}
+            aria-pressed={theme === 'dark'}
+            onClick={() => onTheme('dark')}
+          >
+            Dark
+          </button>
+        </div>
+      </div>
+      <div className="card">
+        <h2>Local data</h2>
+        <p>
+          {entryCount} saved connection{entryCount === 1 ? '' : 's'} on this device (tokens stay in your browser).
+        </p>
+        {!confirmClear ? (
+          <div className="row-actions">
+            <button type="button" className="btn btn-sm btn-danger" onClick={() => setConfirmClear(true)}>
+              Clear all local data
+            </button>
+          </div>
+        ) : (
+          <div className="row-actions">
+            <span className="session-status">Delete all connections and settings on this device?</span>
+            <button
+              type="button"
+              className="btn btn-sm btn-danger"
+              onClick={() => {
+                onClearData()
+                setConfirmClear(false)
+              }}
+            >
+              Yes, delete everything
+            </button>
+            <button type="button" className="btn btn-sm" onClick={() => setConfirmClear(false)}>
+              Cancel
+            </button>
+          </div>
+        )}
       </div>
     </section>
   )
@@ -1706,7 +1842,7 @@ export default function App() {
   const mainRef = useRef<HTMLElement>(null)
 
   const [settings, setSettings] = useState<Settings>(() =>
-    readJSON<Settings>('ks-ssh:settings', DEFAULT_SETTINGS),
+    normalizeSettings(readJSON<unknown>('ks-ssh:settings', DEFAULT_SETTINGS)),
   )
   const [entries, setEntries] = useState<SshEntry[]>(() => {
     try {
@@ -1807,7 +1943,19 @@ export default function App() {
   const drawerHidden = isMobile && !drawerOpen
 
   const patchSettings = (patch: Partial<Settings>) =>
-    setSettings((prev) => ({ ...prev, ...patch }))
+    setSettings((prev) => normalizeSettings({ ...prev, ...patch }))
+
+  const clearAllData = () => {
+    setEntries([])
+    setSettings({ ...DEFAULT_SETTINGS })
+    try {
+      localStorage.removeItem('ks-ssh:ssh')
+      localStorage.removeItem('ks-ssh:settings')
+      sessionStorage.clear()
+    } catch {
+      // Storage unavailable — in-memory state already cleared.
+    }
+  }
 
   const sessionName =
     sessionToken != null
@@ -1968,18 +2116,26 @@ export default function App() {
           id="main"
           tabIndex={-1}
         >
-          {page === 'home' && <HomePage />}
-          {page === 'ssh' && <SSHPage entries={entries} onChange={setEntries} />}
+          {page === 'home' && <HomePage entries={entries} />}
+          {page === 'ssh' && <SSHPage entries={entries} onChange={setEntries} settings={settings} />}
           {page === 'session' && (
             <SessionPage
               key={sessionToken ?? 'none'}
               token={sessionToken}
               name={sessionName}
+              settings={settings}
             />
           )}
-          {page === 'installation' && <InstallationPage />}
+          {page === 'installation' && <InstallationPage settings={settings} />}
           {page === 'settings' && (
-            <SettingsPage settings={settings} onChange={patchSettings} />
+            <SettingsPage
+              settings={settings}
+              onChange={patchSettings}
+              theme={theme}
+              onTheme={setTheme}
+              entryCount={entries.length}
+              onClearData={clearAllData}
+            />
           )}
         </main>
       </div>
