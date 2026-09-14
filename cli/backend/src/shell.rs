@@ -647,6 +647,72 @@ pub async fn api_list_terms() -> impl IntoResponse {
     axum::Json(serde_json::json!({ "sessions": sessions }))
 }
 
+/// DELETE /api/terms/:id — kill one shell session explicitly.
+///
+/// Closing a tab in the UI calls this, so the backend PTY does not linger
+/// detached for the 30-min TTL (which is what used to leave "live" rows in
+/// `GET /api/terms` long after the user closed the tab). Kills the PTY
+/// child, drops the in-memory session and deletes its SQLite history +
+/// recording frames. Attached sockets get EOF/exit on their next read.
+/// Viewer role cannot kill (read-only); operator+ can. Audited as
+/// `shell-kill` (session id only, never secrets).
+pub async fn api_kill_term(
+    opt_ctx: Option<Extension<auth::AuthContext>>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> impl IntoResponse {
+    if !valid_session_id(&id) {
+        return (StatusCode::BAD_REQUEST, "bad session id").into_response();
+    }
+    // Defense in depth: middleware already enforces operator+, but direct
+    // unit calls must not bypass it.
+    if let Some(Extension(ctx)) = opt_ctx.as_ref()
+        && ctx.role == auth::Role::Viewer
+    {
+        return (
+            StatusCode::FORBIDDEN,
+            axum::Json(serde_json::json!({ "error": "read-only" })),
+        )
+            .into_response();
+    }
+    let actor = opt_ctx
+        .as_ref()
+        .map(|Extension(c)| c.username.clone())
+        .unwrap_or_else(|| "-".to_string());
+    let ip = auth::client_ip(&headers);
+    let removed = {
+        let mut map = SESSIONS.lock().await;
+        map.remove(&id)
+    };
+    match removed {
+        Some(s) => {
+            // Wake the attached socket (if any) so it closes promptly with
+            // `exit` instead of hanging until the next PTY read.
+            if let Ok(slot) = s.sub.lock()
+                && let Some(tx) = slot.as_ref()
+            {
+                let _ = tx.try_send(Out::Eof);
+            }
+            reap_child(&s);
+            db::delete(&s.id);
+            db::audit(&actor, &ip, "shell-kill", &id, "ok");
+            (
+                StatusCode::OK,
+                axum::Json(serde_json::json!({ "ok": true })),
+            )
+                .into_response()
+        }
+        None => {
+            // Idempotent: killing an already-gone session is still OK for
+            // the UI (tab close races, double-clicks), but make sure no
+            // stale DB row lingers either.
+            db::delete(&id);
+            db::audit(&actor, &ip, "shell-kill", &id, "not-found");
+            (StatusCode::NOT_FOUND, axum::Json(serde_json::json!({ "error": "not found" }))).into_response()
+        }
+    }
+}
+
 /// GET /api/record/status — whether session recording is on (public, no secrets).
 /// The Terminal page shows a consent banner from this.
 pub async fn api_record_status() -> impl IntoResponse {

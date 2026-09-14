@@ -165,6 +165,14 @@ pub fn required_role(method: &str, path: &str) -> Required {
     if path == "/v1/shell" {
         return Required::Viewer;
     }
+    // Killing a shell session: operator+ (viewer is read-only). Closing a
+    // tab calls `DELETE /api/terms/:id` so the PTY does not linger detached.
+    if method == "DELETE"
+        && path.starts_with("/api/terms/")
+        && !path.ends_with("/recording")
+    {
+        return Required::Operator;
+    }
     // Admin-only mutating ops.
     if (method == "DELETE" && path == "/api/files")
         || (method == "POST" && path == "/api/files/chmod")
