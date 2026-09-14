@@ -142,6 +142,39 @@ scale). Evidence per rubric item:
   PINs (`POST /api/relay/pin`, `auth.rs:2625`); default stays bearer-open and
   is documented as such (startup note + More page).
 
+Case 3 re-scored 2026-09-14: KS 80 → **100** (OpenSSH parity in browser).
+Evidence per rubric item (real PTY + instant feel + resilient reconnect +
+full I/O fidelity + multi-tab UX on desktop and phone):
+- **Real PTY:** portable-pty shell (`shell.rs:spawn_shell`, `TERM=xterm-256color`
+  + truecolor), 256KB replay ring + 30min TTL + 64 sessions + resize
+  (`shell.rs:62-68`, `Terminal.tsx:sendResize`), bracketed-paste passthrough
+  (verified `\x1b[?2004h/l` in live frames).
+- **Instant feel:** predictive local echo — printable chars render dimmed
+  immediately, reconciled on server echo by byte-prefix match
+  (`Terminal.tsx:predictInput/confirmPredictions`); engages only above 50ms
+  smoothed RTT with 300ms server-idle gate, suspended in alt-buffer apps,
+  toggle in tab menu (`PREDICT_KEY` persisted).
+- **Resilient reconnect:** v2 `u64-LE offset + PTY bytes` frames
+  (`shell.rs:encode_frame/decode_frame`), `ready {v,seq,behind}`,
+  `?from=` tail-only replay with overlap trim (no dup/loss),
+  `ack {seq}` watermark in `/api/terms`, `ping {t}`/`pong {t}` RTT;
+  client exponential backoff 500ms→5s ×10, pending-input queue (256 cap)
+  flushed on open, resize resent, yellow dot + `reconnecting… (attempt N)` +
+  `NNms` pill (`Terminal.tsx:backoffMs`, `PING_MS`/`STALE_MS`).
+  Old clients/servers stay byte-identical v1 (no `v`/`from`).
+- **Full I/O fidelity:** xterm.js 5.3 + fit/search/web-links/unicode-11/
+  serialize (`package.json`, `Terminal.tsx:699-716`); unicode v11 active
+  (CJK/emoji widths), web-links clickable, Ctrl+F search bar over 5000-line
+  scrollback, serialize export-to-.txt + copy-all, Ctrl/⌘+C copies when
+  selected else SIGINT, 10KB paste verified intact (10241B heredoc live test).
+- **Multi-tab UX:** persisted tabs + active id, proc-guess labels (8-char),
+  per-tab bell flash + unread dot + RTT ms in tab bar, font A−/A+ persisted,
+  bottom touch bar (Esc/Tab/arrows/Home/End/^C/^D/Paste, coarse-pointer only),
+  ephemeral vertical split with per-pane socket (stacked on phones),
+  shared-host attach list (`Terminal.tsx`, `App.css:term-*`).
+  Single-file bundle still zero `/assets/` refs (`ui.rs:build_single_file` +
+  `single_file_inlines_assets` test, multi-chunk safe).
+
 ## Teleport in depth — why it ranks #2 (60/100) and where KS SSH wins
 
 Teleport = identity-aware access plane (Go, OSS+Cloud). SSO/OIDC + short-lived
