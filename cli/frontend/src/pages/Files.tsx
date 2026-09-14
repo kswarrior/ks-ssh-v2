@@ -544,6 +544,8 @@ export default function FilesPage() {
   const [showHidden, setShowHidden] = useState(true)
   const [query, setQuery] = useState('')
   const [typeFilter, setTypeFilter] = useState<FileTypeFilter>('all')
+  const [sortKey, setSortKey] = useState<SortKey>('name')
+  const [sortDir, setSortDir] = useState<SortDir>('asc')
   const [bulkBusy, setBulkBusy] = useState(false)
   const [confirmBulkDelete, setConfirmBulkDelete] = useState(false)
   // Deep (recursive) search results; null = browse mode.
@@ -554,6 +556,8 @@ export default function FilesPage() {
   const [view, setView] = useState<ViewMode>('grid')
   const [previewing, setPreviewing] = useState<FileEntry | null>(null)
   const [propsEntry, setPropsEntry] = useState<FileEntry | null>(null)
+  const [propsStat, setPropsStat] = useState<StatResponse | null>(null)
+  const [propsStatLoading, setPropsStatLoading] = useState(false)
   const [propsMode, setPropsMode] = useState('')
   const [propsBusy, setPropsBusy] = useState(false)
   const [propsError, setPropsError] = useState<string | null>(null)
@@ -1110,8 +1114,25 @@ export default function FilesPage() {
     setConfirmDelete(null)
     setActionError(null)
     setPropsEntry(e)
+    setPropsStat(null)
+    setPropsStatLoading(true)
     setPropsMode(e.mode != null ? e.mode.toString(8) : '')
     setPropsError(null)
+    // Fresh stat (owner, live mode, readonly flag) for the dialog.
+    void (async () => {
+      try {
+        const res = await fetch(
+          `/api/files/stat?path=${encodeURIComponent(e.path)}`,
+        )
+        if (!res.ok) return
+        const json = (await res.json()) as StatResponse
+        setPropsStat(json)
+      } catch {
+        // Listing data already shown — stat is a bonus.
+      } finally {
+        setPropsStatLoading(false)
+      }
+    })()
   }
 
   const submitChmod = async () => {
