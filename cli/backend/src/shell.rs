@@ -932,6 +932,7 @@ async fn handle_socket(
         };
         if ws_tx.send(Message::Binary(frame.into())).await.is_err() {
             release(&session, my_epoch);
+            db::audit(&actor, &ip, "shell-detach", &session.id, "ok");
             return;
         }
     }
@@ -942,6 +943,7 @@ async fn handle_socket(
             .await;
         let _ = ws_tx.send(Message::Close(None)).await;
         release(&session, my_epoch);
+        db::audit(&actor, &ip, "shell-detach", &session.id, "ok");
         return;
     }
 
@@ -1060,12 +1062,24 @@ async fn handle_socket(
                             continue;
                         }
                     }
+                    // Viewer role is read-only: drop shell input (control
+                    // traffic above still works).
+                    if read_only {
+                        continue;
+                    }
+                    // Session recording (input frame) before queueing.
+                    record_frame(&recv_session, "in", s.as_bytes());
                     // Queue for the blocking writer thread (backpressure ok).
                     if writer_tx.send(s.as_bytes().to_vec()).await.is_err() {
                         break;
                     }
                 }
                 Message::Binary(bin) => {
+                    // Viewer role is read-only.
+                    if read_only {
+                        continue;
+                    }
+                    record_frame(&recv_session, "in", &bin);
                     if writer_tx.send(bin.to_vec()).await.is_err() {
                         break;
                     }
@@ -1083,6 +1097,7 @@ async fn handle_socket(
     // Socket over — detach only. The shell keeps running for reattach;
     // the reaper (TTL) or an explicit kill reaps it later.
     release(&session, my_epoch);
+    db::audit(&actor, &ip, "shell-detach", &session.id, "ok");
 }
 
 #[cfg(test)]
@@ -1175,5 +1190,35 @@ mod tests {
             parse_ping(&serde_json::json!({"type": "exit"})),
             None
         );
+    }
+
+    #[test]
+    fn recording_roundtrip_input_output_order() {
+        // Timestamped input+output frames keep seq order for replay.
+        let mut rec = vec![
+            RecMem { seq: 0, ts_ms: 1000, kind: "out", data: b"$ ".to_vec() },
+            RecMem { seq: 1, ts_ms: 1010, kind: "in", data: b"ls\n".to_vec() },
+            RecMem { seq: 2, ts_ms: 1030, kind: "out", data: b"a.txt\n".to_vec() },
+        ];
+        rec.sort_by_key(|f| f.seq);
+        assert_eq!(rec[1].kind, "in");
+        assert_eq!(rec[1].data, b"ls\n");
+        // Reassembly in seq order reproduces the session narrative.
+        let kinds: Vec<&str> = rec.iter().map(|f| f.kind).collect();
+        assert_eq!(kinds, vec!["out", "in", "out"]);
+    }
+
+    #[test]
+    fn recording_cap_drops_oldest() {
+        let mut rec = vec![
+            RecMem { seq: 0, ts_ms: 1, kind: "out", data: vec![b'a'; 6] },
+            RecMem { seq: 1, ts_ms: 2, kind: "out", data: vec![b'b'; 6] },
+            RecMem { seq: 2, ts_ms: 3, kind: "in", data: vec![b'c'; 6] },
+        ];
+        let left = trim_rec_mem(&mut rec, 10);
+        // 18 bytes capped to 10 → oldest dropped, newest kept.
+        assert!(left <= 10);
+        assert_eq!(rec.last().unwrap().seq, 2);
+        assert!(rec.iter().all(|f| f.seq >= 1));
     }
 }
