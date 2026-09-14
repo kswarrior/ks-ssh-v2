@@ -2327,10 +2327,12 @@ dependencies = [
  "base32",
  "constant_time_eq",
  "hmac",
+ "percent-encoding",
  "rand 0.10.2",
  "serde",
  "sha1 0.11.0",
  "sha2",
+ "url",
  "zeroize",
 ]
 

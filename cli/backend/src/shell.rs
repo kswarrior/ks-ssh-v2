@@ -480,6 +480,7 @@ pub async fn load_persisted() -> usize {
             db::mark_dead(&row.id, db::now_secs());
         }
         let (writer_tx, _) = tokio::sync::mpsc::channel::<Vec<u8>>(1);
+        let restored_len = row.scrollback.len() as u64;
         let session = Arc::new(Session {
             id: row.id.clone(),
             master: StdMutex::new(None),
@@ -488,7 +489,7 @@ pub async fn load_persisted() -> usize {
             sub: StdMutex::new(None),
             ring: StdMutex::new(row.scrollback.into_iter().collect()),
             ring_base: StdMutex::new(0),
-            offset: AtomicU64::new(row.scrollback.len() as u64),
+            offset: AtomicU64::new(restored_len),
             acked: AtomicU64::new(0),
             dead: AtomicBool::new(true),
             epoch: AtomicU64::new(0),

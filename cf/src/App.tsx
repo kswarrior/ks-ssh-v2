@@ -755,7 +755,7 @@ function SSHPage({
           type?: string
           online?: boolean
         }
-        // `enc` payloads are opaque here — handled in the session view.
+        // `enc` payloads are opaque here — handled in the active session.
         if (msg?.type === 'enc') return
         if (msg?.type === 'paired' || msg?.type === 'registered') {
           clearTimeout(timeout)
@@ -770,7 +770,7 @@ function SSHPage({
           )
         }
       } catch {
-        // Binary relay payloads are handled in the session view.
+        // Binary relay payloads are handled in the active session.
       }
     }
     ws.onerror = () => {
