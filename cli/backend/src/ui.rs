@@ -168,7 +168,7 @@ mod tests {
         let out = replace_asset_tag(html, "script", "JS", "<script>", "</script>");
         assert!(!out.contains("/assets/a.js") && !out.contains("/assets/b.js"));
         assert_eq!(out.matches("<script>").count(), 1);
-        let out = replace_asset_tag(out, "link", "CSS", "<style>", "</style>");
+        let out = replace_asset_tag(&out, "link", "CSS", "<style>", "</style>");
         assert!(!out.contains("/assets/"), "all asset links stripped");
         assert_eq!(out.matches("<style>").count(), 1);
     }
