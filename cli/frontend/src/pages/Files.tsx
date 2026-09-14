@@ -51,6 +51,19 @@ function isZipName(name: string): boolean {
   return extOf(name) === 'zip'
 }
 
+type StatResponse = {
+  path: string
+  name: string
+  is_dir: boolean
+  size: number
+  modified: number | null
+  uid?: number
+  gid?: number
+  mode: number
+  mode_octal: string
+  readonly: boolean
+}
+
 type SearchHit = {
   name: string
   path: string
@@ -544,8 +557,6 @@ export default function FilesPage() {
   const [showHidden, setShowHidden] = useState(true)
   const [query, setQuery] = useState('')
   const [typeFilter, setTypeFilter] = useState<FileTypeFilter>('all')
-  const [sortKey, setSortKey] = useState<SortKey>('name')
-  const [sortDir, setSortDir] = useState<SortDir>('asc')
   const [bulkBusy, setBulkBusy] = useState(false)
   const [confirmBulkDelete, setConfirmBulkDelete] = useState(false)
   // Deep (recursive) search results; null = browse mode.
@@ -2297,7 +2308,17 @@ export default function FilesPage() {
               </div>
               <div>
                 <dt>Permissions</dt>
-                <dd>{formatMode(propsEntry.mode)}</dd>
+                <dd>{formatMode(propsStat?.mode ?? propsEntry.mode)}</dd>
+              </div>
+              <div>
+                <dt>Owner</dt>
+                <dd>
+                  {propsStatLoading && !propsStat
+                    ? 'Loading…'
+                    : propsStat
+                      ? `${propsStat.uid ?? '—'} : ${propsStat.gid ?? '—'}${propsStat.readonly ? ' · read-only' : ''}`
+                      : '—'}
+                </dd>
               </div>
             </dl>
             {propsEntry.mode != null ? (
