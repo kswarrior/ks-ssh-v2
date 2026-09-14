@@ -592,19 +592,39 @@ export default function FilesPage() {
 
   // Escape closes the editor (twice when there are unsaved changes).
   // Body scroll is locked so the editor feels like a real full page.
+  // Split in two so typing (editorText changes) doesn't re-subscribe the
+  // listener or flicker body overflow on every keystroke.
   useEffect(() => {
     if (!editing) return
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') closeEditor()
-    }
-    document.addEventListener('keydown', onKey)
     const prev = document.body.style.overflow
     document.body.style.overflow = 'hidden'
     return () => {
-      document.removeEventListener('keydown', onKey)
       document.body.style.overflow = prev
     }
-  })
+  }, [editing])
+
+  useEffect(() => {
+    if (!editing) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return
+      // Same two-step logic as closeEditor(), inlined so this effect only
+      // re-subscribes when the dirty/discard flags change (not per keystroke).
+      if (editorDirty && !confirmDiscard) {
+        setConfirmDiscard(true)
+      } else {
+        setEditing(null)
+        setEditorKind(null)
+        setEditorText('')
+        setEditorSaved('')
+        setEditorError(null)
+        setConfirmDiscard(false)
+      }
+    }
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [editing, editorDirty, confirmDiscard])
 
   // Reset code scroll when another file is opened in the editor.
   useEffect(() => {
@@ -673,6 +693,10 @@ export default function FilesPage() {
     const name = newName.trim()
     if (!name || name === e.name) {
       setRenaming(null)
+      return
+    }
+    if (name === '.' || name === '..') {
+      setActionError('Name cannot be . or ..')
       return
     }
     if (name.includes('/') || name.includes('\\')) {
