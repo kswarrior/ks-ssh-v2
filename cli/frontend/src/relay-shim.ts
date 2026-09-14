@@ -202,6 +202,7 @@ class RelayConnection {
   private e2eRequired = false
   private authed = false
   private authFlight: Promise<void> | null = null
+  private authResolve: ((ok: boolean) => void) | null = null
   /** Agent presence from `paired`/`agent` (null = unknown yet). */
   private agentOnline: boolean | null = null
 
@@ -389,8 +390,6 @@ class RelayConnection {
     })
     return flight
   }
-
-  private authResolve: ((ok: boolean) => void) | null = null
 
   private startKeepalive(): void {
     if (this.keepalive !== undefined) return
