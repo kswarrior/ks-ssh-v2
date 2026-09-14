@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { Terminal } from 'xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import 'xterm/css/xterm.css'
@@ -643,11 +644,13 @@ export default function TerminalPage({
   const [procs, setProcs] = useState<Record<string, string | null>>({})
   // Pending close confirmation — the kill only happens after Confirm.
   const [confirmId, setConfirmId] = useState<string | null>(null)
-  // Open ⋮ tab menu + its screen anchor (fixed positioning avoids clipping
-  // inside the scrollable tab bar).
+  // Open ⋮ tab menu + its viewport anchor. Rendered via portal to
+  // document.body so no transformed/filtered ancestor can hijack the fixed
+  // positioning or clip it inside the scrollable tab bar.
   const [menuId, setMenuId] = useState<string | null>(null)
   const [menuAnchor, setMenuAnchor] = useState<{
-    top: number
+    top: number | null
+    bottom: number | null
     right: number
   } | null>(null)
   // Live session actions per tab, registered by each ShellSession.
@@ -789,11 +792,29 @@ export default function TerminalPage({
       return
     }
     const r = anchor.getBoundingClientRect()
+    // Drop down by default; drop upward when there is not enough room
+    // below but more room above (short landscape phones, zoomed pages).
+    // The menu itself also caps at viewport height and scrolls inside.
+    const MENU_EST = 280
+    const spaceBelow = window.innerHeight - r.bottom
+    const right = Math.max(8, window.innerWidth - r.right)
     setMenuId(t.id)
-    setMenuAnchor({
-      top: Math.max(8, Math.min(r.bottom + 6, window.innerHeight - 240)),
-      right: Math.max(8, window.innerWidth - r.right),
-    })
+    if (spaceBelow >= MENU_EST || r.top <= spaceBelow) {
+      setMenuAnchor({
+        top: Math.max(8, Math.min(r.bottom + 6, window.innerHeight - MENU_EST)),
+        bottom: null,
+        right,
+      })
+    } else {
+      setMenuAnchor({
+        top: null,
+        bottom: Math.max(
+          8,
+          Math.min(window.innerHeight - r.top + 6, window.innerHeight - MENU_EST),
+        ),
+        right,
+      })
+    }
   }
 
   const closeMenu = () => {
@@ -929,20 +950,25 @@ export default function TerminalPage({
           </div>
         ))}
       </div>
-      {menuTerm && menuAnchor && (
-        <>
-          <div
-            className="term-menu-overlay"
-            onClick={closeMenu}
-            aria-hidden="true"
-          />
-          <div
-            className="term-tab-menu"
-            role="menu"
-            aria-label={`Actions for ${menuTerm.name}`}
-            style={{ top: menuAnchor.top, right: menuAnchor.right }}
-            onClick={(e) => e.stopPropagation()}
-          >
+      {menuTerm && menuAnchor
+        ? createPortal(
+            <>
+              <div
+                className="term-menu-overlay"
+                onClick={closeMenu}
+                aria-hidden="true"
+              />
+              <div
+                className="term-tab-menu"
+                role="menu"
+                aria-label={`Actions for ${menuTerm.name}`}
+                style={
+                  menuAnchor.top != null
+                    ? { top: menuAnchor.top, right: menuAnchor.right }
+                    : { bottom: menuAnchor.bottom ?? 8, right: menuAnchor.right }
+                }
+                onClick={(e) => e.stopPropagation()}
+              >
             <div className="term-tab-menu-head" title={menuTerm.name}>
               {(procs[menuTerm.id] ?? null)
                 ? `Running: ${procs[menuTerm.id]}`
@@ -999,8 +1025,10 @@ export default function TerminalPage({
               Delete terminal
             </button>
           </div>
-        </>
-      )}
+        </>,
+        document.body,
+      )
+        : null}
       {confirmTerm && (
         <div
           className="term-confirm-overlay"
