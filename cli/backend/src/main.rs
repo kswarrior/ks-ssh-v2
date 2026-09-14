@@ -236,6 +236,7 @@ async fn serve(
         )
         // Audit (admin only).
         .route("/api/audit", get(auth::api_list_audit))
+        .route("/api/audit/export", get(auth::api_export_audit))
         // Relay viewer PIN (operator+ mint, any-authed status).
         .route("/api/relay/pin/status", get(auth::api_relay_pin_status))
         .route("/api/relay/pin", post(auth::api_relay_pin_mint))

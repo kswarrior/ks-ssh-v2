@@ -2328,6 +2328,73 @@ pub async fn api_list_audit(
     (StatusCode::OK, Json(serde_json::json!({ "audit": rows }))).into_response()
 }
 
+#[derive(Deserialize)]
+pub struct AuditExportQuery {
+    pub limit: Option<usize>,
+    pub since: Option<i64>,
+    /// `json` (default) or `csv`.
+    pub format: Option<String>,
+}
+
+/// GET /api/audit/export?limit&since&format=json|csv — full audit dump
+/// (admin only). CSV uses `Content-Disposition: attachment` for one-click
+/// download from the Audit page. The export itself is audited (never data).
+pub async fn api_export_audit(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Extension(ctx): Extension<AuthContext>,
+    Query(q): Query<AuditExportQuery>,
+) -> Response {
+    if state.auth.is_none() {
+        return (StatusCode::NOT_FOUND, "auth disabled").into_response();
+    }
+    if ctx.role != Role::Admin {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(serde_json::json!({ "error": "admin only" })),
+        )
+            .into_response();
+    }
+    let rows = crate::db::audit_list(q.limit.unwrap_or(1000), q.since.unwrap_or(0));
+    crate::db::audit(&ctx.username, &client_ip(&headers), "audit-export", "-", "ok");
+    if q.format.as_deref().unwrap_or("json").trim().eq_ignore_ascii_case("csv") {
+        fn esc(s: &str) -> String {
+            if s.contains([',', '"', '\n', '\r']) {
+                format!("\"{}\"", s.replace('"', "\"\""))
+            } else {
+                s.to_string()
+            }
+        }
+        let mut out = String::from("id,ts,actor,ip,action,target,result\n");
+        for r in &rows {
+            out.push_str(&format!(
+                "{},{},{},{},{},{},{}\n",
+                r.id,
+                r.ts,
+                esc(&r.actor),
+                esc(&r.ip),
+                esc(&r.action),
+                esc(&r.target),
+                esc(&r.result)
+            ));
+        }
+        (
+            StatusCode::OK,
+            [
+                (header::CONTENT_TYPE, "text/csv; charset=utf-8".to_string()),
+                (
+                    header::CONTENT_DISPOSITION,
+                    "attachment; filename=\"ks-ssh-audit.csv\"".to_string(),
+                ),
+            ],
+            out,
+        )
+            .into_response()
+    } else {
+        (StatusCode::OK, Json(serde_json::json!({ "audit": rows }))).into_response()
+    }
+}
+
 // ---------------------------------------------------------------------------
 // OIDC handlers (only when `--oidc-issuer` + `--oidc-client-id` are set).
 // ---------------------------------------------------------------------------

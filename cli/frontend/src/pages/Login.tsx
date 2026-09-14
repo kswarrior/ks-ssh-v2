@@ -1,11 +1,31 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 
 export default function LoginPage({ onLoggedIn }: { onLoggedIn: (user: string) => void }) {
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
+  const [totp, setTotp] = useState('')
+  const [needTotp, setNeedTotp] = useState(false)
   const [showPass, setShowPass] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const [ssoEnabled, setSsoEnabled] = useState(false)
+
+  // SSO is optional behind --oidc-issuer/--oidc-client-id; only show the
+  // button when the backend reports it enabled.
+  useEffect(() => {
+    let alive = true
+    fetch('/api/auth/status', { cache: 'no-store', credentials: 'same-origin' })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (alive && d && typeof d.oidc_enabled !== 'undefined') {
+          setSsoEnabled(!!d.oidc_enabled)
+        }
+      })
+      .catch(() => {})
+    return () => {
+      alive = false
+    }
+  }, [])
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -18,11 +38,27 @@ export default function LoginPage({ onLoggedIn }: { onLoggedIn: (user: string) =
         headers: { 'Content-Type': 'application/json' },
         credentials: 'same-origin',
         cache: 'no-store',
-        body: JSON.stringify({ username: username.trim(), password }),
+        body: JSON.stringify({
+          username: username.trim(),
+          password,
+          // 6-digit TOTP code or a single-use recovery code (optional —
+          // the backend asks for it with need_totp when 2FA is enabled).
+          ...(totp.trim() ? { totp: totp.trim() } : {}),
+        }),
       })
-      const data = (await res.json().catch(() => null)) as { ok?: boolean; user?: string; error?: string } | null
+      const data = (await res.json().catch(() => null)) as {
+        ok?: boolean
+        user?: string
+        error?: string
+        need_totp?: boolean
+      } | null
       if (res.ok && data?.ok) {
         onLoggedIn(data.user ?? username.trim())
+      } else if (res.status === 401 && data?.need_totp) {
+        setNeedTotp(true)
+        setError('Two-factor code required — enter the 6-digit code from your authenticator app (or a recovery code).')
+      } else if (res.status === 429) {
+        setError(data?.error || 'Too many attempts — locked for 5 minutes.')
       } else {
         setError(data?.error || 'Invalid username or password')
       }
@@ -122,6 +158,22 @@ export default function LoginPage({ onLoggedIn }: { onLoggedIn: (user: string) =
                 />
                 Show password
               </label>
+              {(needTotp || totp) && (
+                <label className="field">
+                  Two-factor code
+                  <input
+                    type="text"
+                    name="totp"
+                    autoComplete="one-time-code"
+                    inputMode="numeric"
+                    autoFocus={needTotp}
+                    required={needTotp}
+                    value={totp}
+                    onChange={(e) => setTotp(e.target.value)}
+                    placeholder="6-digit code or recovery code"
+                  />
+                </label>
+              )}
               {error && (
                 <p className="login-error" role="alert">
                   {error}
@@ -132,7 +184,28 @@ export default function LoginPage({ onLoggedIn }: { onLoggedIn: (user: string) =
                   {busy ? 'Signing in…' : 'Log in'}
                 </button>
               </div>
+              {!needTotp && !totp && (
+                <button
+                  type="button"
+                  className="btn btn-sm"
+                  onClick={() => setNeedTotp(true)}
+                  title="My account has two-factor authentication enabled"
+                >
+                  I have a 2FA code
+                </button>
+              )}
             </form>
+            {ssoEnabled && (
+              <div className="login-sso">
+                <div className="login-sso-sep" aria-hidden="true">
+                  or
+                </div>
+                <a className="btn btn-primary" href="/api/auth/oidc/login">
+                  Continue with SSO
+                </a>
+                <p className="lead">Single sign-on via your identity provider (new accounts start as viewer).</p>
+              </div>
+            )}
           </section>
         </main>
       </div>
