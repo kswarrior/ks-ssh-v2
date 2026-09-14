@@ -130,14 +130,16 @@ per-core/df-filtered host (`host.rs`), `enc` HKDF/AAD/seq + `?k=` reject
 discouraged). Panel split (cases 5–7) favours single-box managers by design —
 that is why KS leads; flip the weight to collab/audit and sshx/Teleport win.
 
-Latest fixes 2026-09-14 (relay UX + honesty, no score change): `room.ts`
+Latest fixes 2026-09-14 (relay UX + honesty): `room.ts`
 chunk-0 parse fix (every UI push failed as `incomplete` before);
 SSH `Visit` → raw full-page `/v/TOKEN#k=…` (same UI as `--port`, no CF
 chrome, `#k` preserved; `Open raw`/fullscreen same); live relay status
 (`agentOnline/hasUi/gated`) drives SSH list/home/installation health;
 `/api/ssh/*` fake stub removed; `relay-check.mjs` bans demo/fake/example
 stubs and pins the status API. Token lengths clarified above (CLI: exactly
-5-or-9).
+5-or-9). **Case 8 re-score 0 → 35 in this doc** — your catch was right:
+accounts + takeover + chat count, joint sessions don't (see Case 8 below);
+Totals 873 → **908**, Final 87 → **91**.
 
 Case 9 re-scored 2026-09-14: KS 40 → **100** (Teleport parity at homelab
 scale). Evidence per rubric item:
@@ -297,6 +299,45 @@ hardened routing + crypto lifetime + identity + metadata honesty):
   stays 90 vs sshx 95); no forward secrecy beyond per-run `sess`/per-connect
   `epoch` sub-binding (no ECDH yet — `k` is still the long-term secret, so
   rotate links per session for the paranoid).
+
+Case 8 re-scored 2026-09-14: KS 0 → **35** (honest infra-without-joint). You
+were right — `0` ignored real multi-user work: accounts + RBAC + shared shells
++ chat. But `35` stays honest because joint sessions need simultaneous
+broadcast/cursors and KS only does takeover. Evidence:
+- **Multi-user + RBAC:** `Users.tsx` CRUD + role picker + lockout + session
+  revoke (`auth.rs:67,107,194` matrix, `auth.rs:2820` middleware 403 + audit,
+  `main.rs:187,226-238` routes). Any number of concurrent logins
+  (`auth.rs:531` `sessions HashMap`, 32-hex token `auth.rs:428`), viewer =
+  read files/host/ports + read-only shell attach (`shell.rs:855,921,1057`),
+  operator = + shell write/upload/mkdir, admin = all; `GET /api/auth/me`
+  reports role + 2FA (`auth.rs:1838`). The shared router is enforced over the
+  relay too (`main.rs:293`, `relay.rs:560,719` forwarding the viewer's cookie).
+- **Host-shared shells (takeover, not broadcast):** `shared on purpose`
+  (`main.rs:53`, `shell.rs:1,605`) — `GET /api/terms` lists host-wide shells so
+  any authed visitor can reattach. But `Session.sub: Mutex<Option<Sender>>`
+  (`shell.rs:234`) holds one active sink; `epoch` bump on attach
+  (`shell.rs:930`) + old sender gets `TrySend Takeover`/`CLOSE_SUPERSEDED=4000`
+  (`shell.rs:68,1022`, `Terminal.tsx:1168`) — second attacher evicts the first.
+  Viewer flag `read_only` (`shell.rs:921,1122`) allows streaming but drops input.
+  Ring `256KB` + `30min` TTL + `64` sessions (`shell.rs:62-68`), reaper +
+  persister every 5s (`shell.rs:871,536`), and `HostTerms` attach list
+  (`Terminal.tsx:395,1712`). No live viewer-count per shell.
+- **Persistent chat (async, not joint):** `GET /api/chat?since&limit`
+  + `POST /api/chat` (`chat.rs:47,63`), `db.rs:59` `MAX_CHAT_MESSAGES=1000`
+  (SQLite `chat_messages` `db.rs:197` + mem `MEM_CHAT 500`), `3s` polling
+  `ChatWidget.tsx:71`, audited `chat-send` (`chat.rs:88`, `auth.rs:125` viewer-
+  allowed), works over the same `rpc-*`/`enc` bridge so it is live over relay
+  (`room.ts:36` `clients Set` fanout `room.ts:371` `[...clients]` for N viewers
+  per token, `200/10s → 4408` flood guard). Still 3s lag, global room only —
+  no per-shell inline chat, no typing indicators, no cursor sharing.
+- **Why 35 (not 60–100):** sshx `100` = canvas panes + cursors + follow +
+  ephemeral mesh; tmate `80` / Tele `80` / VSCode `70` = simultaneous joint +
+  recording/pane-share. KS fails all simultaneity: one `sub`, eviction not
+  broadcast, ephemeral splits are local-only (`Terminal.tsx:1672` never shared),
+  no file co-edit (last writer wins), no per-cursor, no tmux pane-share. `35`
+  sits just above `ttyd 20` (unauth PTY) and below `Guac 40` (LDAP + RDP but
+  still single-user) — honest for infra + takeover + chat without joint. A
+  strict joint-only rubric would be `30`, a generous infra-counting one `40`.
 
 ## Teleport in depth — why it ranks #2 (60/100) and where KS SSH wins
 
