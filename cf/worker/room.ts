@@ -465,7 +465,7 @@ export class TunnelRoom implements DurableObject {
       const raw = ws.deserializeAttachment() as string | null
       if (!raw) return null
       const parsed = JSON.parse(raw) as { role?: Role }
-      return parsed.role === 'client' ? 'client' : 'agent'
+      return parsed.role === 'client' ? 'client' : parsed.role === 'agent' ? 'agent' : null
     } catch {
       return null
     }

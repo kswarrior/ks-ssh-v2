@@ -627,7 +627,7 @@ async fn proxy_rpc(
     if let Some(cl) = resp.content_length()
         && cl > MAX_RPC_BYTES as u64
     {
-        rpc_error(out_tx, &id, 413, "response too large for relay (32MB cap)");
+        rpc_error_shared(out_tx, shared, peer, e2e_on, token, &id, 413, "response too large for relay (32MB cap)").await;
         return;
     }
     let bytes = match resp.bytes().await {
@@ -1275,10 +1275,6 @@ async fn on_text(
                 eprintln!("{E2E_ERROR_MSG} (data)");
                 crate::db::audit("-", "local", "relay-downgrade", token, "deny");
                 return Ok(());
-            }
-            if e2e_on {
-                // Unreachable when strict (peer must have E2E, hence enc) —
-                // kept only for `--no-e2e` peers that cannot seal.
             }
             crate::db::audit("-", "local", "relay-data", token, "ok");
             send_out(out_tx, &serde_json::json!({"type":"ack"}));
