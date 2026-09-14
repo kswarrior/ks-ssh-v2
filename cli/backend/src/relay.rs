@@ -359,6 +359,8 @@ async fn agent_session(
                             peer.clone(),
                             e2e_on,
                             local_fp.clone(),
+                            sess.clone(),
+                            epoch,
                             &relay_pin,
                             &mut viewer_ok,
                         )
@@ -1050,6 +1052,8 @@ async fn on_text(
     peer: SharedPeer,
     e2e_on: bool,
     local_fp: Option<String>,
+    sess: String,
+    epoch: u64,
     relay_pin: &Option<std::sync::Arc<crate::auth::RelayPinState>>,
     viewer_ok: &mut bool,
 ) -> anyhow::Result<()> {
