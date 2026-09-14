@@ -1,4 +1,5 @@
 mod auth;
+mod db;
 mod e2e;
 mod files;
 mod host;
@@ -41,6 +42,11 @@ struct Cli {
     /// Skip the local web UI (no open port at all).
     #[arg(long)]
     no_serve: bool,
+    /// SQLite file for terminal session history (`./ks-ssh.db` by default).
+    /// Shells are shared on purpose — any visitor can reattach to them.
+    /// Empty string disables persistence.
+    #[arg(long, default_value = "./ks-ssh.db")]
+    db: String,
     /// Relay via the Worker instead of opening a port.
     /// Give a token to reuse it, or pass `--token=` for a random one.
     #[arg(long, num_args(0..=1), require_equals(true), default_missing_value = "")]
@@ -148,6 +154,7 @@ async fn serve(host: String, port: u16, auth: Option<Arc<AuthState>>) {
             axum::routing::put(auth::api_update_user).delete(auth::api_delete_user),
         )
         .route("/v1/shell", get(shell::ws_handler))
+        .route("/api/terms", get(shell::api_list_terms))
         .with_state(state);
 
     let app = match auth {
@@ -247,6 +254,30 @@ async fn main() {
     } else {
         None
     };
+
+    // Terminal history DB — shells are shared on purpose, so any visitor
+    // can reattach to them (same gate as the UI: login when --user/--pass).
+    // Pure `--no-serve` agents serve nothing locally, so they skip it.
+    if !cli.no_serve {
+        let raw = cli.db.trim().to_string();
+        if raw.is_empty() {
+            println!("Terminal history: OFF (--db empty)");
+        } else {
+            let path = std::path::PathBuf::from(&raw);
+            let loaded = db::init(Some(&path));
+            if db::enabled() {
+                println!(
+                    "Terminal history: {} session(s) in {} (--db to move it)",
+                    loaded,
+                    path.display()
+                );
+                let restored = shell::load_persisted().await;
+                if restored > 0 {
+                    println!("Terminal history: {restored} session(s) restored for reattach");
+                }
+            }
+        }
+    }
 
     match (cli.no_serve, token) {
         // Pure agent: no open port, only outbound WSS.
