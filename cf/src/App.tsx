@@ -8,7 +8,7 @@ import {
   type EncEnvelope,
 } from './e2e'
 
-type PageId = 'home' | 'ssh' | 'installation' | 'settings'
+type PageId = 'home' | 'ssh' | 'session' | 'installation' | 'settings'
 
 type NavItem = { id: PageId; label: string; hash: string }
 
@@ -64,8 +64,25 @@ function writeJSON(key: string, value: unknown) {
 /** Map a location hash to a page, or null when it is not a page route. */
 function hashToPage(hash: string): PageId | null {
   const clean = hash.replace(/^#\/?/, '')
+  // Session deep links like #/session/ABCDE render the session page.
+  if (clean === 'session' || clean.startsWith('session/')) return 'session'
   const found = NAV.find((p) => p.hash.replace(/^#\/?/, '') === clean)
   return found ? found.id : null
+}
+
+/** Extract a 5-char token from #/session/ABCDE or ?token=ABCDE. */
+function hashToSessionToken(hash: string): string | null {
+  // Supports `#/session/ABCDE` and `#/session/ABCDE#k=...` (fragment key
+  // ignored here; use parseFragmentKey() for `k` — never query/fetch).
+  const m = hash.match(/^#\/session\/([A-Za-z0-9]{0,5})/)
+  if (m?.[1] && /^[A-Za-z0-9]{5}$/.test(m[1])) return m[1].toUpperCase()
+  try {
+    const q = new URLSearchParams(window.location.search).get('token')
+    if (q && /^[A-Za-z0-9]{5}$/.test(q)) return q.toUpperCase()
+  } catch {
+    // URL parsing unavailable — ignore.
+  }
+  return null
 }
 
 function useIsMobile(breakpoint = 768): boolean {

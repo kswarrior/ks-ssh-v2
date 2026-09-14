@@ -360,7 +360,7 @@ pub async fn api_delete_file(
 }
 
 /// POST /api/files/rename {"from": "...", "to": "..."} — rename/move inside HOME.
-pub async fn api_rename_file(Json(b): Json<RenameBody>) -> Response {
+pub async fn api_rename_file(opt_ctx: Option<Extension<auth::AuthContext>>, headers: HeaderMap, Json(b): Json<RenameBody>) -> Response {
     let (home, from) = match resolve_inside_home(Some(&b.from)) {
         Ok(v) => v,
         Err((code, msg)) => return (code, msg).into_response(),
@@ -460,7 +460,7 @@ fn copy_recursive(from: &std::path::Path, to: &std::path::Path) -> std::io::Resu
 }
 
 /// POST /api/files/copy {"from": "...", "to": "..."} — copy a file or folder inside HOME.
-pub async fn api_copy_file(Json(b): Json<CopyBody>) -> Response {
+pub async fn api_copy_file(opt_ctx: Option<Extension<auth::AuthContext>>, headers: HeaderMap, Json(b): Json<CopyBody>) -> Response {
     let (home, from) = match resolve_inside_home(Some(&b.from)) {
         Ok(v) => v,
         Err((code, msg)) => return (code, msg).into_response(),
@@ -535,7 +535,7 @@ pub async fn api_copy_file(Json(b): Json<CopyBody>) -> Response {
 }
 
 /// POST /api/files/chmod {"path": "...", "mode": 493} — set unix permission bits.
-pub async fn api_chmod(Json(b): Json<ChmodBody>) -> Response {
+pub async fn api_chmod(opt_ctx: Option<Extension<auth::AuthContext>>, headers: HeaderMap, Json(b): Json<ChmodBody>) -> Response {
     let (_, target) = match resolve_inside_home(Some(&b.path)) {
         Ok(v) => v,
         Err((code, msg)) => return (code, msg).into_response(),
@@ -643,7 +643,7 @@ pub async fn api_read_content(Query(q): Query<DownloadQuery>) -> Response {
 }
 
 /// PUT /api/files/content {"path","content"} — save a text file inside HOME.
-pub async fn api_save_content(Json(b): Json<SaveBody>) -> Response {
+pub async fn api_save_content(opt_ctx: Option<Extension<auth::AuthContext>>, headers: HeaderMap, Json(b): Json<SaveBody>) -> Response {
     let (_, target) = match resolve_inside_home(Some(&b.path)) {
         Ok(v) => v,
         Err((code, msg)) => return (code, msg).into_response(),
@@ -694,7 +694,7 @@ pub async fn api_save_content(Json(b): Json<SaveBody>) -> Response {
     }
 }
 /// POST /api/files/mkdir {"path": "..."} — create a folder inside HOME.
-pub async fn api_mkdir(Json(b): Json<MkdirBody>) -> Response {
+pub async fn api_mkdir(opt_ctx: Option<Extension<auth::AuthContext>>, headers: HeaderMap, Json(b): Json<MkdirBody>) -> Response {
     let (_, dir) = match resolve_inside_home(Some(&b.path)) {
         Ok(v) => v,
         Err((code, msg)) => return (code, msg).into_response(),
@@ -731,7 +731,7 @@ pub async fn api_mkdir(Json(b): Json<MkdirBody>) -> Response {
 }
 /// POST /api/files/upload?dir=<dir>&name=<file> — upload a local file.
 /// The request body is the raw file bytes (no multipart needed).
-pub async fn api_upload_file(Query(q): Query<UploadQuery>, body: Bytes) -> Response {
+pub async fn api_upload_file(opt_ctx: Option<Extension<auth::AuthContext>>, headers: HeaderMap, Query(q): Query<UploadQuery>, body: Bytes) -> Response {
     let (_, dir) = match resolve_inside_home(Some(&q.dir)) {
         Ok(v) => v,
         Err((code, msg)) => return (code, msg).into_response(),
@@ -806,7 +806,7 @@ fn valid_upload_url(url: &str) -> bool {
 
 /// POST /api/files/upload-url {"dir","url","name"?} — fetch a URL into HOME.
 /// Uses `curl` (or `wget` as fallback) on the host, so no extra crates needed.
-pub async fn api_upload_url(Json(b): Json<UploadUrlBody>) -> Response {
+pub async fn api_upload_url(opt_ctx: Option<Extension<auth::AuthContext>>, headers: HeaderMap, Json(b): Json<UploadUrlBody>) -> Response {
     let (_, dir) = match resolve_inside_home(Some(&b.dir)) {
         Ok(v) => v,
         Err((code, msg)) => return (code, msg).into_response(),
@@ -1239,7 +1239,7 @@ pub struct DownloadZipQuery {
     pub path: String,
 }
 
-pub async fn api_download_zip(Query(q): Query<DownloadZipQuery>) -> Response {
+pub async fn api_download_zip(opt_ctx: Option<Extension<auth::AuthContext>>, headers: HeaderMap, Query(q): Query<DownloadZipQuery>) -> Response {
     let (home, target) = match resolve_inside_home(Some(&q.path)) {
         Ok(v) => v,
         Err((code, msg)) => return (code, msg).into_response(),
@@ -1343,7 +1343,7 @@ fn normalize_zip_out(raw: Option<&str>, fallback: &str) -> Result<String, String
     }
 }
 
-pub async fn api_zip_many(Json(b): Json<ZipManyBody>) -> Response {
+pub async fn api_zip_many(opt_ctx: Option<Extension<auth::AuthContext>>, headers: HeaderMap, Json(b): Json<ZipManyBody>) -> Response {
     let (_, dir) = match resolve_inside_home(Some(&b.dir)) {
         Ok(v) => v,
         Err((code, msg)) => return (code, msg).into_response(),
@@ -1431,7 +1431,7 @@ pub struct UnzipBody {
     pub dest: Option<String>,
 }
 
-pub async fn api_unzip_file(Json(b): Json<UnzipBody>) -> Response {
+pub async fn api_unzip_file(opt_ctx: Option<Extension<auth::AuthContext>>, headers: HeaderMap, Json(b): Json<UnzipBody>) -> Response {
     let (_, file) = match resolve_inside_home(Some(&b.file)) {
         Ok(v) => v,
         Err((code, msg)) => return (code, msg).into_response(),
