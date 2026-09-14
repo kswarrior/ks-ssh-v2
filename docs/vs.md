@@ -23,8 +23,8 @@ Scores are opinionated but transparent, weighted for **this doc's scope**
 | G | Identity & audit (login, SSO/RBAC, recording) | 10 | Login gate → SSO/RBAC + session recording |
 | H | Self-host simplicity | 10 | One binary / one container = done; no cluster ops |
 
-Per-tool line format: `NAT · Web · Term · E2E · Panel · Collab · IdAudit · Self`
-in the same A–H order, so you can verify the total yourself.
+Every case below has its own indivisible-score table (A–H) plus the total,
+so you can verify each total yourself.
 Scores reflect the **latest codebase in this repo** (see "What KS SSH actually is")
 and the current public docs of each competitor (checked Sep 2026; `sshx` unchanged:
 canvas + E2E + Fly mesh, self-host still discouraged).
@@ -124,16 +124,22 @@ reachable hosts: mature keys/certs, multiplexing, `tmux`/`mosh` if you add them.
 - Security = SSH itself; identity = keys/certs you manage; no recording/audit
   out of the box.
 
-**Score: 43/100** — NAT 2/20 · Web 0/15 · Term 10/10 · E2E 12/15 · Panel 3/10 ·
-Collab 0/10 · IdAudit 6/10 · Self 10/10.
+| Criterion | Max | Score | Why |
+|---|---|---:|---|
+| A. NAT traversal / no open port | 20 | 2 | Needs reachable sshd; no relay (2 pts for reverse-`ssh -R` DIY) |
+| B. Browser + share link + mobile | 15 | 0 | Terminal client only, no link |
+| C. Terminal quality | 10 | 10 | The reference PTY: resize, multiplex, `tmux`/`mosh` |
+| D. E2E / transport security | 15 | 12 | SSH encryption; no relay to trust, minus host-key TOFU UX |
+| E. Files / ports / host panel | 10 | 3 | `scp`/`sftp` only, no dashboard |
+| F. Multi-user collaboration | 10 | 0 | None (`tmux` screen-share is DIY) |
+| G. Identity & audit | 10 | 6 | Keys/certs, no SSO/RBAC/recording out of the box |
+| H. Self-host simplicity | 10 | 10 | Preinstalled everywhere, zero infra |
+| **Total** | **100** | **43** | — |
 
 **KS SSH vs it:** keep OpenSSH for daily reachable-host work; use KS SSH when the
 box is behind NAT or the viewer only has a browser/phone.
 
 ### 1. sshx.io — the closest comparison
-
-**Score: 69/100** — NAT 19/20 · Web 14/15 · Term 9/10 · E2E 14/15 · Panel 0/10 ·
-Collab 10/10 · IdAudit 1/10 · Self 2/10.
 
 `curl -sSf https://sshx.io/get | sh` then `sshx` → shareable `https://sshx.io/s/...` link.
 
@@ -147,6 +153,18 @@ Collab 10/10 · IdAudit 1/10 · Self 2/10.
   discouraged (needs gRPC + TLS + Redis + mesh ops), Windows PTY still maturing,
   no recording/replay.
 
+| Criterion | Max | Score | Why |
+|---|---|---:|---|
+| A. NAT traversal / no open port | 20 | 19 | Outbound to global Fly mesh + auto-reconnect; −1 hosted-only |
+| B. Browser + share link + mobile | 15 | 14 | One link, canvas UI; −1 terminal-only view |
+| C. Terminal quality | 10 | 9 | Predictive echo, latency, panes; −1 ephemeral, Windows maturing |
+| D. E2E / transport security | 15 | 14 | Argon2+AES, fragment key; −1 mesh complexity |
+| E. Files / ports / host panel | 10 | 0 | Terminal only |
+| F. Multi-user collaboration | 10 | 10 | Canvas, cursors, chat — best in list |
+| G. Identity & audit | 10 | 1 | Bearer link only, no SSO/recording |
+| H. Self-host simplicity | 10 | 2 | Officially discouraged, gRPC+TLS+Redis+mesh ops |
+| **Total** | **100** | **69** | — |
+
 **KS SSH vs sshx:** pick sshx for multiplayer terminal collaboration
 (canvas, cursors, chat). Pick KS SSH when you want a personal server panel
 (files, ports, host health, editor, login gate + user management) plus a share
@@ -158,9 +176,6 @@ flip those weights and sshx wins.
 
 ### 2. tmate — the "just show someone" workhorse
 
-**Score: 54/100** — NAT 17/20 · Web 11/15 · Term 7/10 · E2E 2/15 · Panel 0/10 ·
-Collab 8/10 · IdAudit 2/10 · Self 7/10.
-
 `tmate` forks tmux, dials out to `tmate.io`, prints 4 endpoints:
 SSH read-write, SSH read-only, web read-write, web read-only.
 
@@ -169,27 +184,45 @@ SSH read-write, SSH read-only, web read-write, web read-only.
 - No E2E (relay can theoretically see plaintext), terminal only, no server
   health/file UI, links are bearer secrets.
 
+| Criterion | Max | Score | Why |
+|---|---|---:|---|
+| A. NAT traversal / no open port | 20 | 17 | Outbound SSH to tmate.io; −3 single-vendor relay |
+| B. Browser + share link + mobile | 15 | 11 | Web + SSH ro/rw links; basic web UI |
+| C. Terminal quality | 10 | 7 | tmux preserved; plain web terminal UX |
+| D. E2E / transport security | 15 | 2 | No E2E, relay sees plaintext |
+| E. Files / ports / host panel | 10 | 0 | Terminal only |
+| F. Multi-user collaboration | 10 | 8 | Shared tmux ro/rw; no cursors/chat canvas |
+| G. Identity & audit | 10 | 2 | Bearer links with ro/rw split only |
+| H. Self-host simplicity | 10 | 7 | `tmate-server` self-hostable, moderate ops |
+| **Total** | **100** | **54** | — |
+
 **KS SSH vs tmate:** tmate wins for instant ad-hoc pairing with tmux users.
 KS SSH wins when you need persistent local UI (reattachable tabs, file/port/host
 management, optional login) rather than a throwaway shared tmux.
 
 ### 3. upterm — SSH-only relay
 
-**Score: 50/100** — NAT 16/20 · Web 2/15 · Term 6/10 · E2E 10/15 · Panel 0/10 ·
-Collab 6/10 · IdAudit 3/10 · Self 7/10.
-
 `upterm host -- bash` shares over an SSH relay; viewers use `ssh`, no browser.
 
 - Smaller attack surface (no web renderer), scriptable, good for CI/RMA flows.
 - No browser viewer, no file/host dashboard.
 
+| Criterion | Max | Score | Why |
+|---|---|---:|---|
+| A. NAT traversal / no open port | 20 | 16 | Outbound SSH relay; −4 needs own server for privacy |
+| B. Browser + share link + mobile | 15 | 2 | SSH client required, no browser |
+| C. Terminal quality | 10 | 6 | Plain SSH session, no tabs/reattach UI |
+| D. E2E / transport security | 15 | 10 | SSH encryption end-to-end |
+| E. Files / ports / host panel | 10 | 0 | None |
+| F. Multi-user collaboration | 10 | 6 | Shared session, terminal-only |
+| G. Identity & audit | 10 | 3 | SSH keys, no SSO/recording |
+| H. Self-host simplicity | 10 | 7 | Single server binary, easy relay |
+| **Total** | **100** | **50** | — |
+
 **KS SSH vs upterm:** upterm if viewers live in terminals and you distrust web
 exposure. KS SSH if the viewer is a phone/browser.
 
 ### 4. ttyd — simplest self-hosted web shell
-
-**Score: 41/100** — NAT 2/20 · Web 11/15 · Term 7/10 · E2E 3/15 · Panel 2/10 ·
-Collab 2/10 · IdAudit 4/10 · Self 10/10.
 
 `ttyd -p 7681 bash` → `http://host:7681`. xterm.js, CJK/IME, SSL, basic auth,
 `-R` read-only, `-o` once, ZMODEM transfer.
@@ -199,14 +232,23 @@ Collab 2/10 · IdAudit 4/10 · Self 10/10.
   no NAT traversal, no link sharing, no collaboration cursors, no
   files/ports/host dashboard.
 
+| Criterion | Max | Score | Why |
+|---|---|---:|---|
+| A. NAT traversal / no open port | 20 | 2 | Needs ingress / reverse proxy / VPN |
+| B. Browser + share link + mobile | 15 | 11 | Good xterm + SSL/auth; no share link |
+| C. Terminal quality | 10 | 7 | Solid PTY, CJK/IME; no reattach tabs |
+| D. E2E / transport security | 15 | 3 | TLS via proxy only, no E2E story |
+| E. Files / ports / host panel | 10 | 2 | ZMODEM transfer only |
+| F. Multi-user collaboration | 10 | 2 | View-only mirror at best |
+| G. Identity & audit | 10 | 4 | Basic auth, `-R` read-only, `-o` once |
+| H. Self-host simplicity | 10 | 10 | One tiny C binary |
+| **Total** | **100** | **41** | — |
+
 **KS SSH vs ttyd:** ttyd if you already have ingress and only need a shell in a
 tab. KS SSH if the box is behind NAT/CGNAT/hotel Wi-Fi and you need outbound-only
 access plus management pages.
 
 ### 5. wetty / GoTTY — web login / SSH frontends
-
-**Score: 33/100** — NAT 2/20 · Web 10/15 · Term 6/10 · E2E 3/15 · Panel 0/10 ·
-Collab 0/10 · IdAudit 4/10 · Self 8/10.
 
 - **wetty** (Node): browser → `http(s)://host:3000` → `/bin/login` or `ssh
   [user@]localhost|remote`. Force-SSH, custom host/port/user flags. Put behind a
@@ -215,14 +257,23 @@ Collab 0/10 · IdAudit 4/10 · Self 8/10.
 
 Like ttyd: no relay, no E2E sharing story, terminal only.
 
+| Criterion | Max | Score | Why |
+|---|---|---:|---|
+| A. NAT traversal / no open port | 20 | 2 | Needs ingress / reverse proxy |
+| B. Browser + share link + mobile | 15 | 10 | Browser login/SSH; no share link |
+| C. Terminal quality | 10 | 6 | Thin login/SSH wrapper |
+| D. E2E / transport security | 15 | 3 | TLS via proxy only |
+| E. Files / ports / host panel | 10 | 0 | Terminal only |
+| F. Multi-user collaboration | 10 | 0 | None |
+| G. Identity & audit | 10 | 4 | Login / force-SSH flags, no SSO/recording |
+| H. Self-host simplicity | 10 | 8 | Container / single binary, needs proxy for TLS |
+| **Total** | **100** | **33** | — |
+
 **KS SSH vs them:** wetty/GoTTY are thinner (just expose login/SSH). KS SSH is a
 fuller homelab panel (persistent tabs + relay fallback + file/port/host APIs +
 optional multi-user login).
 
 ### 6. Sshwifty — browser SSH client (no agent)
-
-**Score: 46/100** — NAT 2/20 · Web 11/15 · Term 6/10 · E2E 10/15 · Panel 4/10 ·
-Collab 0/10 · IdAudit 5/10 · Self 8/10.
 
 Go + JS client at `sshwifty-demo.nirui.org` or self-hosted Docker. You type
 host/user/password-or-key and get SSH + SFTP in the browser. Telnet too.
@@ -232,13 +283,22 @@ host/user/password-or-key and get SSH + SFTP in the browser. Telnet too.
 - Server must already be **reachable** (public IP / port forward / VPN). No relay
   for NAT boxes, no share-by-link, no host-metrics page.
 
+| Criterion | Max | Score | Why |
+|---|---|---:|---|
+| A. NAT traversal / no open port | 20 | 2 | Target sshd must be reachable |
+| B. Browser + share link + mobile | 15 | 11 | SSH+SFTP in browser; no share link |
+| C. Terminal quality | 10 | 6 | Usable web SSH, not a daily PTY |
+| D. E2E / transport security | 15 | 10 | Real SSH to the target |
+| E. Files / ports / host panel | 10 | 4 | SFTP file browser only |
+| F. Multi-user collaboration | 10 | 0 | None |
+| G. Identity & audit | 10 | 5 | SSH creds per host, no SSO/recording |
+| H. Self-host simplicity | 10 | 8 | One Docker container |
+| **Total** | **100** | **46** | — |
+
 **KS SSH vs Sshwifty:** Sshwifty connects *to* any sshd from the browser.
 KS SSH installs *on* the box and gives it a link + dashboard.
 
 ### 7. Apache Guacamole — enterprise clientless gateway
-
-**Score: 44/100** — NAT 3/20 · Web 12/15 · Term 6/10 · E2E 4/15 · Panel 4/10 ·
-Collab 4/10 · IdAudit 8/10 · Self 3/10.
 
 Java + `guacd`, MySQL/LDAP/OIDC, RDP+VNC+SSH in HTML5, connection sharing,
 recording, SFTP file browser.
@@ -246,13 +306,22 @@ recording, SFTP file browser.
 - Powerful for fleets/VDI, but heavy: servlet container, DB, proxy, hardening.
 - Gateway itself needs ingress; not a NAT-traversal agent.
 
+| Criterion | Max | Score | Why |
+|---|---|---:|---|
+| A. NAT traversal / no open port | 20 | 3 | Gateway itself needs ingress |
+| B. Browser + share link + mobile | 15 | 12 | Full RDP/VNC/SSH in HTML5 |
+| C. Terminal quality | 10 | 6 | Gateway SSH, fine but indirect |
+| D. E2E / transport security | 15 | 4 | TLS to gateway; gateway decrypts |
+| E. Files / ports / host panel | 10 | 4 | SFTP browser, no host health |
+| F. Multi-user collaboration | 10 | 4 | Connection sharing, no canvas |
+| G. Identity & audit | 10 | 8 | LDAP/OIDC + perms + recording; heavy setup |
+| H. Self-host simplicity | 10 | 3 | Java + guacd + DB + proxy |
+| **Total** | **100** | **44** | — |
+
 **KS SSH vs Guacamole:** Guacamole for org-wide browser access to many hosts.
 KS SSH for one box, one binary, zero infra (at the cost of no SSO/fleet story).
 
 ### 8. Teleport — identity-aware access plane
-
-**Score: 75/100** — NAT 17/20 · Web 12/15 · Term 8/10 · E2E 13/15 · Panel 4/10 ·
-Collab 8/10 · IdAudit 10/10 · Self 3/10.
 
 SSO/OIDC + short-lived certs, RBAC, per-session MFA (`tsh`), joint sessions,
 full session recording, `scp`/SFTP, K8s/DB/app proxy, browser UI.
@@ -260,15 +329,24 @@ full session recording, `scp`/SFTP, K8s/DB/app proxy, browser UI.
 - Best audit story of the list. Cost: cluster ops (auth/proxy/nodes or Cloud),
   agents on every node.
 
+| Criterion | Max | Score | Why |
+|---|---|---:|---|
+| A. NAT traversal / no open port | 20 | 17 | Reverse tunnel, no ingress; −3 cluster setup |
+| B. Browser + share link + mobile | 15 | 12 | Browser UI + `tsh`; invite flow heavier than a link |
+| C. Terminal quality | 10 | 8 | Joint sessions, `scp`/SFTP; opinionated shell |
+| D. E2E / transport security | 15 | 13 | Short-lived certs + MFA; trusts cluster CA |
+| E. Files / ports / host panel | 10 | 4 | SSH/SFTP/modes, no host-health dashboard |
+| F. Multi-user collaboration | 10 | 8 | Joint sessions + recording; no canvas |
+| G. Identity & audit | 10 | 10 | SSO/RBAC/MFA/recording — best in list |
+| H. Self-host simplicity | 10 | 3 | Cluster ops or Cloud dependency |
+| **Total** | **100** | **75** | — |
+
 **KS SSH vs Teleport:** Teleport when compliance / team access reviews matter
 (ties KS SSH here on points, wins outright once audit weight rises).
 KS SSH when you want `curl … && ./ks-ssh` and done — plus a HOME-jailed
 file editor and host panel Teleport doesn't try to be.
 
 ### 9. Tailscale SSH / Cloudflare Tunnel / ZeroTier — private nets
-
-**Score: 63/100** — NAT 18/20 · Web 6/15 · Term 7/10 · E2E 14/15 · Panel 3/10 ·
-Collab 0/10 · IdAudit 9/10 · Self 6/10.
 
 - **Tailscale SSH:** WireGuard tailnet + IdP identity, ACLs, check-mode step-up,
   `tsrecorder` session recording, SFTP/SCP. No key juggling, no public ports —
@@ -278,14 +356,23 @@ Collab 0/10 · IdAudit 9/10 · Self 6/10.
   ingress-free sharing, tied to Cloudflare account/Zero Trust.
 - **ZeroTier / Netmaker / Pangolin:** same pattern — overlay net, then plain SSH.
 
+| Criterion | Max | Score | Why |
+|---|---|---:|---|
+| A. NAT traversal / no open port | 20 | 18 | Outbound WG/QUIC, NAT-proof; −2 enrolment friction |
+| B. Browser + share link + mobile | 15 | 6 | Via Serve/other; no public share link |
+| C. Terminal quality | 10 | 7 | Plain SSH over net, solid |
+| D. E2E / transport security | 15 | 14 | WireGuard / Zero Trust edge |
+| E. Files / ports / host panel | 10 | 3 | SFTP/SCP + policies, no dashboard |
+| F. Multi-user collaboration | 10 | 0 | None |
+| G. Identity & audit | 10 | 9 | IdP ACLs, check-mode, recording; −1 account lock-in |
+| H. Self-host simplicity | 10 | 6 | Account + enrol every node |
+| **Total** | **100** | **63** | — |
+
 **KS SSH vs them:** overlays win for a private fleet with identity policy.
 KS SSH wins for a public-style "send this link, open in any browser" flow with
 no client install and a built-in management UI.
 
 ### 10. Native apps + editor tunnels
-
-**Score: 76/100 (VS Code tunnels)** — NAT 18/20 · Web 13/15 · Term 8/10 ·
-E2E 12/15 · Panel 9/10 · Collab 7/10 · IdAudit 7/10 · Self 2/10.
 
 - **Termius / Blink / JuiceSSH / Mobile SSH:** mature keyboards, keys on device,
   Mosh support. Still need a reachable `sshd`.
@@ -294,6 +381,20 @@ E2E 12/15 · Panel 9/10 · Collab 7/10 · IdAudit 7/10 · Self 2/10.
 - **ShellHub / MeshCentral / RustDesk / Pangolin / bore / rathole:** device
   management or raw TCP exposure — pair with ttyd/wetty when you need ingress.
 
+Scored as **VS Code tunnels** (the strongest of the group):
+
+| Criterion | Max | Score | Why |
+|---|---|---:|---|
+| A. NAT traversal / no open port | 20 | 18 | Outbound to MS edge; −2 vendor cloud |
+| B. Browser + share link + mobile | 15 | 13 | `vscode.dev` in any browser; −2 MS login |
+| C. Terminal quality | 10 | 8 | Full terminal + editor shell |
+| D. E2E / transport security | 15 | 12 | Encrypted via MS; trusts vendor |
+| E. Files / ports / host panel | 10 | 9 | Full editor + files; −1 no ports/host view |
+| F. Multi-user collaboration | 10 | 7 | Live Share; −3 session-based, not canvas |
+| G. Identity & audit | 10 | 7 | MS/GitHub IdP; no Teleport-grade RBAC/audit |
+| H. Self-host simplicity | 10 | 2 | MS-hosted, not self-hostable |
+| **Total** | **100** | **76** | — |
+
 **KS SSH vs them:** keep your native SSH app for daily driving reachable hosts;
 use KS SSH relay links for NAT boxes and phone-browser triage. VS Code tunnels
 top this table because "full editor + tunnel" covers the most criteria — at the
@@ -301,8 +402,17 @@ price of a Microsoft account and zero self-host points.
 
 ### KS SSH (this repo) — scored on the same rubric
 
-**Score: 75/100** — NAT 18/20 · Web 14/15 · Term 8/10 · E2E 12/15 · Panel 10/10 ·
-Collab 0/10 · IdAudit 4/10 · Self 9/10.
+| Criterion | Max | Score | Why |
+|---|---|---:|---|
+| A. NAT traversal / no open port | 20 | 18 | Outbound WSS + reconnect + UI push; −2 single Worker relay, thin relay view is pairing-only |
+| B. Browser + share link + mobile | 15 | 14 | Local UI + `/v/TOKEN` fullscreen + mobile; −1 thin SSH view isn't a full shell |
+| C. Terminal quality | 10 | 8 | Real PTY, multi-tab, reattach ring, resize; −2 no predictive echo/canvas |
+| D. E2E / transport security | 15 | 12 | AES-256-GCM `enc`, fragment-only `k`, HKDF/AAD/seq, `?k=` reject; −3 UI bundle plaintext by design + `--no-e2e` escape hatch |
+| E. Files / ports / host panel | 10 | 10 | Files + Ports + Host + editor with caps and jails — best panel in list |
+| F. Multi-user collaboration | 10 | 0 | None by design |
+| G. Identity & audit | 10 | 4 | `--user/--pass` + Users page + session cookie; no SSO/RBAC/recording, relay link unaffected |
+| H. Self-host simplicity | 10 | 9 | One static binary + one Worker; −1 CF account for relay |
+| **Total** | **100** | **75** | — |
 
 Where the points come from: outbound WSS with reconnect + single-file UI push
 (A); local UI + `/v/TOKEN` fullscreen + mobile (B); real PTY with reattach ring

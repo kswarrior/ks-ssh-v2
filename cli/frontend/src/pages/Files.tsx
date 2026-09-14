@@ -51,33 +51,6 @@ function isZipName(name: string): boolean {
   return extOf(name) === 'zip'
 }
 
-type PreviewKind = 'image' | 'video' | 'audio' | 'pdf'
-
-function previewKind(name: string): PreviewKind | null {
-  const ext = extOf(name)
-  if (ext === 'pdf') return 'pdf'
-  if (IMAGE_EXT.has(ext)) return 'image'
-  if (VIDEO_EXT.has(ext)) return 'video'
-  if (AUDIO_EXT.has(ext)) return 'audio'
-  return null
-}
-
-/** `photo.png` → `photo copy.png`, `photo copy.png` → `photo copy 2.png`. */
-function duplicateName(name: string): string {
-  const dot = name.lastIndexOf('.')
-  const stem = dot > 0 ? name.slice(0, dot) : name
-  const ext = dot > 0 ? name.slice(dot) : ''
-  const m = /^(.*) copy(?: (\d+))?$/.exec(stem)
-  if (m) {
-    const n = m[2] ? parseInt(m[2], 10) + 1 : 2
-    return `${m[1]} copy ${n}${ext}`
-  }
-  return `${stem} copy${ext}`
-}
-
-type SortKey = 'name' | 'size' | 'modified'
-type SortDir = 'asc' | 'desc'
-
 type StatResponse = {
   path: string
   name: string
@@ -584,25 +557,10 @@ export default function FilesPage() {
   const [showHidden, setShowHidden] = useState(true)
   const [query, setQuery] = useState('')
   const [typeFilter, setTypeFilter] = useState<FileTypeFilter>('all')
-  const [sortKey, setSortKey] = useState<SortKey>('name')
-  const [sortDir, setSortDir] = useState<SortDir>('asc')
-  // Multi-select for batch delete / zip.
-  const [selected, setSelected] = useState<string[]>([])
   const [bulkBusy, setBulkBusy] = useState(false)
   const [confirmBulkDelete, setConfirmBulkDelete] = useState(false)
-  // Copy / move dialog: { entry, mode } + destination folder.
-  const [copyMove, setCopyMove] = useState<{ entry: FileEntry; mode: 'copy' | 'move' } | null>(null)
-  const [destFolder, setDestFolder] = useState('')
-  const [copyMoveBusy, setCopyMoveBusy] = useState(false)
-  const [copyMoveError, setCopyMoveError] = useState<string | null>(null)
-  // Media preview modal.
-  const [preview, setPreview] = useState<FileEntry | null>(null)
   // Deep (recursive) search results; null = browse mode.
   const [deep, setDeep] = useState<{ query: string; results: SearchHit[]; truncated: boolean; loading: boolean; error: string | null } | null>(null)
-  // Properties (stat + chmod) dialog.
-  const [props, setProps] = useState<{ entry: FileEntry; stat: StatResponse | null; loading: boolean; error: string | null; chmod: string; saving: boolean } | null>(null)
-  const [sortKey, setSortKey] = useState<SortKey>('name')
-  const [sortDir, setSortDir] = useState<SortDir>('asc')
   const [view, setView] = useState<ViewMode>('grid')
   const [selected, setSelected] = useState<string[]>([])
   const [previewing, setPreviewing] = useState<FileEntry | null>(null)
