@@ -243,6 +243,7 @@ struct PendingRpc {
     path: String,
     headers: HashMap<String, String>,
     body_len: usize,
+    chunks: usize,
     parts: Vec<Option<String>>,
 }
 
@@ -853,6 +854,161 @@ struct RpcBeginMsg {
     chunks: usize,
 }
 
+/// Sealed inner `rpc-*` (decrypted `enc` payload): same validation as the
+/// plaintext path, responses sealed via `enc` (strict).
+async fn handle_inner_rpc(
+    out_tx: &OutTx,
+    http_client: &reqwest::Client,
+    local_base: &str,
+    pending_rpc: &mut HashMap<String, PendingRpc>,
+    inner: &serde_json::Value,
+    token: &str,
+    shared: SharedE2e,
+    peer: SharedPeer,
+    e2e_on: bool,
+) {
+    match inner.get("type").and_then(|t| t.as_str()) {
+        Some("rpc-begin") => {
+            let parsed: Result<RpcBeginMsg, _> = serde_json::from_value(inner.clone());
+            let req = match parsed {
+                Ok(r) => r,
+                Err(_) => return,
+            };
+            if req.id.is_empty() || req.id.len() > 64 || !valid_rpc_path(&req.path) {
+                rpc_error_shared(out_tx, &shared, &peer, e2e_on, token, &req.id, 400, "bad rpc request").await;
+                return;
+            }
+            if req.chunks > MAX_RPC_CHUNKS || req.body_len > MAX_RPC_BYTES {
+                rpc_error_shared(out_tx, &shared, &peer, e2e_on, token, &req.id, 413, "request too large for relay (32MB cap)").await;
+                return;
+            }
+            if req.chunks == 0 {
+                let out = out_tx.clone();
+                let client = http_client.clone();
+                let base = local_base.to_string();
+                let tok = token.to_string();
+                tokio::spawn(async move {
+                    proxy_rpc(&out, &shared, &peer, e2e_on, &client, &base, &tok, req.id, req.method, req.path, req.headers, Vec::new()).await;
+                });
+            } else {
+                if pending_rpc.contains_key(&req.id) {
+                    rpc_error_shared(out_tx, &shared, &peer, e2e_on, token, &req.id, 400, "duplicate rpc id").await;
+                    return;
+                }
+                let mut parts = Vec::new();
+                parts.resize_with(req.chunks.min(MAX_RPC_CHUNKS), || None);
+                pending_rpc.insert(
+                    req.id.clone(),
+                    PendingRpc {
+                        method: req.method,
+                        path: req.path,
+                        headers: req.headers,
+                        body_len: req.body_len,
+                        chunks: req.chunks.min(MAX_RPC_CHUNKS),
+                        parts,
+                    },
+                );
+            }
+        }
+        Some("rpc-chunk") => {
+            let id = inner.get("id").and_then(|v| v.as_str()).unwrap_or("");
+            let i = inner.get("i").and_then(|v| v.as_u64()).unwrap_or(u64::MAX) as usize;
+            let data = inner.get("data").and_then(|v| v.as_str()).unwrap_or("");
+            if let Some(pending) = pending_rpc.get_mut(id) {
+                if i < pending.parts.len() && data.len() <= 128 * 1024 && !data.is_empty() {
+                    pending.parts[i] = Some(data.to_string());
+                }
+            }
+        }
+        Some("rpc-end") => {
+            let id = inner.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            if let Some(pending) = pending_rpc.remove(&id) {
+                if pending.parts.iter().any(|p| p.is_none()) {
+                    rpc_error_shared(out_tx, &shared, &peer, e2e_on, token, &id, 400, "incomplete rpc upload").await;
+                    return;
+                }
+                let mut raw = Vec::with_capacity(pending.body_len.min(MAX_RPC_BYTES));
+                for part in pending.parts.iter().flatten() {
+                    match b64_decode(part) {
+                        Some(bytes) => raw.extend_from_slice(&bytes),
+                        None => {
+                            rpc_error_shared(out_tx, &shared, &peer, e2e_on, token, &id, 400, "bad rpc chunk encoding").await;
+                            return;
+                        }
+                    }
+                    if raw.len() > MAX_RPC_BYTES {
+                        rpc_error_shared(out_tx, &shared, &peer, e2e_on, token, &id, 413, "request too large for relay (32MB cap)").await;
+                        return;
+                    }
+                }
+                let out = out_tx.clone();
+                let sh = shared.clone();
+                let pr = peer.clone();
+                let client = http_client.clone();
+                let base = local_base.to_string();
+                let tok = token.to_string();
+                tokio::spawn(async move {
+                    proxy_rpc(&out, &sh, &pr, e2e_on, &client, &base, &tok, id, pending.method, pending.path, pending.headers, raw).await;
+                });
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Sealed inner `shell-*` (decrypted `enc` payload): same bridge as the
+/// plaintext path, PTY bytes sealed via `enc` on the way back.
+async fn handle_inner_shell(
+    out_tx: &OutTx,
+    shells: Arc<Mutex<HashMap<String, ShellBridge>>>,
+    inner: &serde_json::Value,
+    local_base: &str,
+    token: &str,
+    shared: SharedE2e,
+    peer: SharedPeer,
+    e2e_on: bool,
+) {
+    match inner.get("type").and_then(|t| t.as_str()) {
+        Some("shell-open") => {
+            let id = inner.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            if id.is_empty() || id.len() > 64 {
+                return;
+            }
+            if shells.lock().await.contains_key(&id) {
+                return;
+            }
+            let sid = inner.get("sid").and_then(|v| v.as_str()).map(|s| s.to_string());
+            let v = inner.get("v").and_then(|v| v.as_u64()).unwrap_or(2).min(2) as u8;
+            let from = inner.get("from").and_then(|v| v.as_u64()).unwrap_or(0);
+            let cookie = inner.get("cookie").and_then(|v| v.as_str()).map(|s| s.to_string());
+            let out = out_tx.clone();
+            let shells_clone = shells.clone();
+            let base = local_base.to_string();
+            let tok = token.to_string();
+            tokio::spawn(async move {
+                spawn_shell_bridge(out, shared, peer, e2e_on, shells_clone, base, tok, id, sid, v, from, cookie).await;
+            });
+        }
+        Some("shell-send") => {
+            let id = inner.get("id").and_then(|v| v.as_str()).unwrap_or("");
+            let is_text = inner.get("is_text").and_then(|v| v.as_bool()).unwrap_or(true);
+            let data = inner.get("data").and_then(|v| v.as_str()).unwrap_or("");
+            if let Some(bridge) = shells.lock().await.get(id) {
+                if let Some(bytes) = b64_decode(data) {
+                    let _ = bridge.to_local.send(ShellLocalIn::Send { is_text, data: bytes });
+                }
+            }
+        }
+        Some("shell-close") => {
+            let id = inner.get("id").and_then(|v| v.as_str()).unwrap_or("");
+            if let Some(bridge) = shells.lock().await.get(id) {
+                let _ = bridge.to_local.send(ShellLocalIn::Close);
+            }
+        }
+        _ => {}
+    }
+}
+
 async fn on_text(
     out_tx: &OutTx,
     http_client: &reqwest::Client,
@@ -1072,12 +1228,19 @@ async fn on_text(
             send_out(out_tx, &serde_json::json!({"type":"ack"}));
         }
         // ---- Full-function relay: HTTP `/api/*` over WSS ----
+        // Strict: plaintext rpc is refused when E2E is on (no downgrade).
         Some("rpc-begin") => {
             if relay_pin.is_some() && !*viewer_ok {
                 let id = msg.get("id").and_then(|v| v.as_str()).unwrap_or("");
                 eprintln!("relay viewer PIN required before rpc bridge");
                 crate::db::audit("-", "local", "relay-rpc", token, "deny");
-                rpc_error(out_tx, id, 403, "viewer PIN required");
+                rpc_error_shared(out_tx, &shared, &peer, e2e_on, token, id, 403, "viewer PIN required").await;
+                return Ok(());
+            }
+            if e2e_on && !strict_peer_ok(e2e_on, peer_e2e_now(&peer)) {
+                let id = msg.get("id").and_then(|v| v.as_str()).unwrap_or("");
+                eprintln!("{E2E_ERROR_MSG} (rpc-begin {id})");
+                crate::db::audit("-", "local", "relay-downgrade", token, "deny");
                 return Ok(());
             }
             let parsed: Result<RpcBeginMsg, _> = serde_json::from_value(msg.clone());
@@ -1086,46 +1249,48 @@ async fn on_text(
                 Err(_) => return Ok(()),
             };
             if req.id.is_empty() || req.id.len() > 64 || !valid_rpc_path(&req.path) {
-                rpc_error(out_tx, &req.id, 400, "bad rpc request");
+                rpc_error_shared(out_tx, &shared, &peer, e2e_on, token, &req.id, 400, "bad rpc request").await;
                 return Ok(());
             }
             if req.chunks > MAX_RPC_CHUNKS || req.body_len > MAX_RPC_BYTES {
-                rpc_error(out_tx, &req.id, 413, "request too large for relay (32MB cap)");
+                rpc_error_shared(out_tx, &shared, &peer, e2e_on, token, &req.id, 413, "request too large for relay (32MB cap)").await;
                 return Ok(());
-            }
-            if e2e.is_some() && !*peer_e2e {
-                eprintln!("relay rpc plaintext (relay-visible) — peer without E2E");
             }
             if req.chunks == 0 {
                 // No body — proxy immediately.
                 let out = out_tx.clone();
+                let sh = shared.clone();
+                let pr = peer.clone();
                 let client = http_client.clone();
                 let base = local_base.to_string();
                 let tok = token.to_string();
                 tokio::spawn(async move {
-                    proxy_rpc(&out, &client, &base, &tok, req.id, req.method, req.path, req.headers, Vec::new()).await;
+                    proxy_rpc(&out, &sh, &pr, e2e_on, &client, &base, &tok, req.id, req.method, req.path, req.headers, Vec::new()).await;
                 });
             } else {
                 // Chunked body — reassemble, then proxy on rpc-end.
                 if pending_rpc.contains_key(&req.id) {
-                    rpc_error(out_tx, &req.id, 400, "duplicate rpc id");
+                    rpc_error_shared(out_tx, &shared, &peer, e2e_on, token, &req.id, 400, "duplicate rpc id").await;
                     return Ok(());
                 }
                 let mut parts = Vec::new();
                 parts.resize_with(req.chunks.min(MAX_RPC_CHUNKS), || None);
-                pending_rpc.insert(
-                    req.id.clone(),
-                    PendingRpc {
-                        method: req.method,
-                        path: req.path,
-                        headers: req.headers,
-                        body_len: req.body_len,
-                        parts,
-                    },
-                );
+                let pending = PendingRpc {
+                    method: req.method,
+                    path: req.path,
+                    headers: req.headers,
+                    body_len: req.body_len,
+                    chunks: req.chunks.min(MAX_RPC_CHUNKS),
+                    parts,
+                };
+                let _ = pending.chunks;
+                pending_rpc.insert(req.id.clone(), pending);
             }
         }
         Some("rpc-chunk") => {
+            if e2e_on && !strict_peer_ok(e2e_on, peer_e2e_now(&peer)) {
+                return Ok(());
+            }
             let id = msg.get("id").and_then(|v| v.as_str()).unwrap_or("");
             let i = msg.get("i").and_then(|v| v.as_u64()).unwrap_or(u64::MAX) as usize;
             let data = msg.get("data").and_then(|v| v.as_str()).unwrap_or("");
@@ -1136,10 +1301,13 @@ async fn on_text(
             }
         }
         Some("rpc-end") => {
+            if e2e_on && !strict_peer_ok(e2e_on, peer_e2e_now(&peer)) {
+                return Ok(());
+            }
             let id = msg.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
             if let Some(pending) = pending_rpc.remove(&id) {
                 if pending.parts.iter().any(|p| p.is_none()) {
-                    rpc_error(out_tx, &id, 400, "incomplete rpc upload");
+                    rpc_error_shared(out_tx, &shared, &peer, e2e_on, token, &id, 400, "incomplete rpc upload").await;
                     return Ok(());
                 }
                 let mut raw = Vec::with_capacity(pending.body_len.min(MAX_RPC_BYTES));
@@ -1147,21 +1315,23 @@ async fn on_text(
                     match b64_decode(part) {
                         Some(bytes) => raw.extend_from_slice(&bytes),
                         None => {
-                            rpc_error(out_tx, &id, 400, "bad rpc chunk encoding");
+                            rpc_error_shared(out_tx, &shared, &peer, e2e_on, token, &id, 400, "bad rpc chunk encoding").await;
                             return Ok(());
                         }
                     }
                     if raw.len() > MAX_RPC_BYTES {
-                        rpc_error(out_tx, &id, 413, "request too large for relay (32MB cap)");
+                        rpc_error_shared(out_tx, &shared, &peer, e2e_on, token, &id, 413, "request too large for relay (32MB cap)").await;
                         return Ok(());
                     }
                 }
                 let out = out_tx.clone();
+                let sh = shared.clone();
+                let pr = peer.clone();
                 let client = http_client.clone();
                 let base = local_base.to_string();
                 let tok = token.to_string();
                 tokio::spawn(async move {
-                    proxy_rpc(&out, &client, &base, &tok, id, pending.method, pending.path, pending.headers, raw).await;
+                    proxy_rpc(&out, &sh, &pr, e2e_on, &client, &base, &tok, id, pending.method, pending.path, pending.headers, raw).await;
                 });
             }
         }
@@ -1171,7 +1341,16 @@ async fn on_text(
                 let id = msg.get("id").and_then(|v| v.as_str()).unwrap_or("");
                 eprintln!("relay viewer PIN required before shell bridge");
                 crate::db::audit("-", "local", "relay-shell", token, "deny");
-                send_out(out_tx, &serde_json::json!({"type":"shell-closed","id":id,"code":4403,"reason":"viewer PIN required"}));
+                let v = serde_json::json!({"type":"shell-closed","id":id,"code":4403,"reason":"viewer PIN required"});
+                if !send_strict(out_tx, &shared, &peer, e2e_on, &v).await {
+                    crate::db::audit("-", "local", "relay-downgrade", token, "deny");
+                }
+                return Ok(());
+            }
+            if e2e_on && !strict_peer_ok(e2e_on, peer_e2e_now(&peer)) {
+                let id = msg.get("id").and_then(|v| v.as_str()).unwrap_or("");
+                eprintln!("{E2E_ERROR_MSG} (shell-open {id})");
+                crate::db::audit("-", "local", "relay-downgrade", token, "deny");
                 return Ok(());
             }
             let id = msg.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
@@ -1185,18 +1364,23 @@ async fn on_text(
             let v = msg.get("v").and_then(|v| v.as_u64()).unwrap_or(2).min(2) as u8;
             let from = msg.get("from").and_then(|v| v.as_u64()).unwrap_or(0);
             let cookie = msg.get("cookie").and_then(|v| v.as_str()).map(|s| s.to_string());
-            if e2e.is_some() && !*peer_e2e {
-                eprintln!("relay shell plaintext (relay-visible) — peer without E2E");
-            }
             let out = out_tx.clone();
+            let sh = shared.clone();
+            let pr = peer.clone();
             let shells_clone = shells.clone();
             let base = local_base.to_string();
             let tok = token.to_string();
             tokio::spawn(async move {
-                spawn_shell_bridge(out, shells_clone, base, tok, id, sid, v, from, cookie).await;
+                spawn_shell_bridge(out, sh, pr, e2e_on, shells_clone, base, tok, id, sid, v, from, cookie).await;
             });
         }
         Some("shell-send") => {
+            if e2e_on && !strict_peer_ok(e2e_on, peer_e2e_now(&peer)) {
+                return Ok(());
+            }
+            if relay_pin.is_some() && !*viewer_ok {
+                return Ok(());
+            }
             let id = msg.get("id").and_then(|v| v.as_str()).unwrap_or("");
             let is_text = msg.get("is_text").and_then(|v| v.as_bool()).unwrap_or(true);
             let data = msg.get("data").and_then(|v| v.as_str()).unwrap_or("");
@@ -1207,6 +1391,9 @@ async fn on_text(
             }
         }
         Some("shell-close") => {
+            if e2e_on && !strict_peer_ok(e2e_on, peer_e2e_now(&peer)) {
+                return Ok(());
+            }
             let id = msg.get("id").and_then(|v| v.as_str()).unwrap_or("");
             if let Some(bridge) = shells.lock().await.get(id) {
                 let _ = bridge.to_local.send(ShellLocalIn::Close);
