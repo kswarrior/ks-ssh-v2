@@ -1740,7 +1740,7 @@ export default function FilesPage() {
                   <button
                     type="button"
                     className="btn btn-sm"
-                    disabled={busy || selectedEntries.filter((x) => !x.is_dir).length === 0}
+                    disabled={busy || bulkBusy || selectedEntries.filter((x) => !x.is_dir).length === 0}
                     onClick={submitBulkDownload}
                     title="Download selected files (folders are skipped)"
                   >
@@ -1753,23 +1753,47 @@ export default function FilesPage() {
                   </button>
                   <button
                     type="button"
+                    className="btn btn-sm"
+                    disabled={busy || bulkBusy || selectedEntries.length === 0}
+                    onClick={() => void submitBulkZip()}
+                    title="Zip the selection and download it as one archive"
+                  >
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <rect x="2" y="3" width="20" height="5" rx="1" />
+                      <path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8" />
+                      <path d="M10 12h4" />
+                    </svg>
+                    <span className="btn-label">{bulkBusy ? 'Zipping…' : 'Zip'}</span>
+                  </button>
+                  <button
+                    type="button"
                     className="btn btn-sm btn-danger"
-                    disabled={busy}
-                    onClick={() => void submitBulkDelete()}
-                    title={`Delete ${selected.length} selected item(s)`}
+                    disabled={busy || bulkBusy}
+                    onClick={() => {
+                      if (confirmBulkDelete) {
+                        setConfirmBulkDelete(false)
+                        void submitBulkDelete()
+                      } else {
+                        setConfirmBulkDelete(true)
+                      }
+                    }}
+                    title={confirmBulkDelete ? `Click again to delete ${selected.length} selected item(s)` : `Delete ${selected.length} selected item(s)`}
                   >
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                       <path d="M3 6h18" />
                       <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
                       <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" />
                     </svg>
-                    <span className="btn-label">{busy ? 'Deleting…' : 'Delete'}</span>
+                    <span className="btn-label">{busy ? 'Deleting…' : confirmBulkDelete ? `Confirm (${selected.length})` : 'Delete'}</span>
                   </button>
                   <button
                     type="button"
                     className="btn btn-sm"
-                    disabled={busy}
-                    onClick={() => setSelected([])}
+                    disabled={busy || bulkBusy}
+                    onClick={() => {
+                      setSelected([])
+                      setConfirmBulkDelete(false)
+                    }}
                     title="Clear selection"
                   >
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -1949,17 +1973,6 @@ export default function FilesPage() {
                                 </button>
                               )}
                             </>
-                          )}
-                          {!e.is_dir && isZipName(e.name) && (
-                            <button
-                              type="button"
-                              role="menuitem"
-                              className="file-menu-item"
-                              onClick={() => void submitExtract(e)}
-                              title={`Extract ${e.name} into this folder`}
-                            >
-                              Extract here
-                            </button>
                           )}
                           {e.is_dir && (
                             <a
@@ -2148,14 +2161,14 @@ export default function FilesPage() {
               {previewKindOf(previewing.name) === 'image' && (
                 <img
                   className="preview-media"
-                  src={downloadUrl(previewing.path)}
+                  src={previewUrl(previewing.path)}
                   alt={previewing.name}
                 />
               )}
               {previewKindOf(previewing.name) === 'video' && (
                 <video
                   className="preview-media"
-                  src={downloadUrl(previewing.path)}
+                  src={previewUrl(previewing.path)}
                   controls
                   preload="metadata"
                 />
@@ -2163,7 +2176,7 @@ export default function FilesPage() {
               {previewKindOf(previewing.name) === 'audio' && (
                 <audio
                   className="preview-audio"
-                  src={downloadUrl(previewing.path)}
+                  src={previewUrl(previewing.path)}
                   controls
                   preload="metadata"
                 />
@@ -2171,7 +2184,7 @@ export default function FilesPage() {
               {previewKindOf(previewing.name) === 'pdf' && (
                 <iframe
                   className="preview-frame"
-                  src={downloadUrl(previewing.path)}
+                  src={previewUrl(previewing.path)}
                   title={previewing.name}
                 />
               )}
@@ -2477,6 +2490,86 @@ export default function FilesPage() {
                       ? 'Copy'
                       : 'Move'}
                 </span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {deep && (
+        <div
+          className="editor-overlay"
+          role="dialog"
+          aria-modal="true"
+          aria-label={`Deep search results for ${deep.query}`}
+          onClick={() => {
+            if (!deep.loading) setDeep(null)
+          }}
+        >
+          <div
+            className="editor-window create-window"
+            onClick={(ev) => ev.stopPropagation()}
+          >
+            <div className="editor-head">
+              <div className="editor-title">
+                <strong>Deep search: “{deep.query}”</strong>
+                <code title={data?.path}>{data?.path} + subfolders</code>
+              </div>
+              <button
+                type="button"
+                className="icon-btn editor-close"
+                aria-label="Close deep search"
+                title="Close"
+                disabled={deep.loading}
+                onClick={() => setDeep(null)}
+              >
+                ×
+              </button>
+            </div>
+
+            {deep.loading ? (
+              <p className="files-sub" role="status">Searching subfolders…</p>
+            ) : deep.error ? (
+              <div className="banner-error" role="alert">
+                <p>{deep.error}</p>
+              </div>
+            ) : deep.results.length === 0 ? (
+              <p className="files-sub">No file names match “{deep.query}” under this folder.</p>
+            ) : (
+              <>
+                <p className="files-sub" aria-live="polite">
+                  {deep.results.length} match{deep.results.length === 1 ? '' : 'es'}
+                  {deep.truncated ? ' (more may exist — narrow the query)' : ''}
+                </p>
+                <ul className="upload-list" aria-label="Deep search results">
+                  {deep.results.map((h) => (
+                    <li key={h.path} className="upload-row">
+                      <button
+                        type="button"
+                        className="file-name file-link upload-name"
+                        onClick={() => openDeepHit(h)}
+                        title={h.is_dir ? `Open folder ${h.path}` : `Open ${h.path}`}
+                      >
+                        {h.is_dir ? '📁 ' : '📄 '}{h.name}
+                      </button>
+                      <span className="upload-size" title={h.path}>
+                        {h.is_dir ? 'folder' : formatSize(h.size)}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </>
+            )}
+
+            <div className="row-actions editor-actions">
+              <button
+                type="button"
+                className="btn btn-sm"
+                disabled={deep.loading}
+                onClick={() => setDeep(null)}
+                title="Back to browsing"
+              >
+                <span className="btn-label">Back to browse</span>
               </button>
             </div>
           </div>
