@@ -84,12 +84,60 @@ function copyText(text: string): void {
 
 const EXIT_SENTINEL = '{"type":"exit"}'
 
+/** Actions a tab's ⋮ menu can invoke on its live emulator session. */
+type TermHandle = {
+  clear: () => void
+  stop: () => void
+  reconnect: () => void
+  copy: () => void
+}
+
+/**
+ * Tab label: the running process, or "terminal" when idle.
+ * Capped at 8 chars + "..." so long names never stretch the tab bar.
+ */
+function tabLabel(proc: string | null): string {
+  const base = proc && proc.trim() ? proc.trim() : 'terminal'
+  return base.length > 8 ? `${base.slice(0, 8)}...` : base
+}
+
+/**
+ * Best-effort foreground process from a submitted shell line:
+ * first program word (`sudo apt update` → `apt`, `./serve.sh` → `serve.sh`).
+ * Returns null for empty lines.
+ */
+function procFromLine(line: string): string | null {
+  const segment = line.split(/[;&|]+/)[0]?.trim() ?? ''
+  if (!segment) return null
+  const skip = new Set([
+    'sudo',
+    'command',
+    'builtin',
+    'exec',
+    'nohup',
+    'time',
+    'env',
+  ])
+  for (const raw of segment.split(/\s+/)) {
+    const tok = raw.replace(/^['"]+|['"]+$/g, '')
+    if (!tok || skip.has(tok) || /^[A-Za-z_][A-Za-z0-9_]*=/.test(tok)) {
+      continue
+    }
+    const prog = tok.split('/').pop() ?? ''
+    if (!prog || prog === '.' || prog === '..' || prog === '-') continue
+    return prog
+  }
+  return null
+}
+
 function ShellSession({
   id,
   active,
   sid,
   onStatus,
   onReady,
+  onProc,
+  onHandle,
 }: {
   id: string
   active: boolean
@@ -97,6 +145,8 @@ function ShellSession({
   sid: string | null
   onStatus: (id: string, s: TermStatus) => void
   onReady: (id: string, sid: string | null) => void
+  onProc: (id: string, proc: string | null) => void
+  onHandle: (id: string, h: TermHandle | null) => void
 }) {
   const [status, setStatus] = useState<TermStatus>('offline')
   // "↓ latest" pill when the user scrolled up to read older output.
@@ -119,6 +169,54 @@ function ShellSession({
   // Backend session id for this tab — survives refresh via localStorage
   // (parent prop on mount) and reconnects reattach to the same shell.
   const sidRef = useRef<string | null>(sid)
+  // Current input line (not yet submitted) + running process guess for the
+  // tab label. Refs so the xterm listeners (mounted once) always see them.
+  const lineRef = useRef('')
+  const procRef = useRef<string | null>(null)
+  const idRef = useRef(id)
+  idRef.current = id
+  const onProcRef = useRef(onProc)
+  onProcRef.current = onProc
+
+  const reportProc = (proc: string | null) => {
+    if (procRef.current === proc) return
+    procRef.current = proc
+    onProcRef.current(idRef.current, proc)
+  }
+
+  /**
+   * Watch keystrokes for the tab label: submitting a line sets the label to
+   * its program (`python app.py` → `python`), Ctrl+C clears it back to
+   * "terminal". Best effort per page view — a refresh resets to "terminal"
+   * even if the reattached shell is still busy.
+   */
+  const trackInput = (data: string) => {
+    for (const ch of data) {
+      if (ch === '\x03') {
+        // Ctrl+C — foreground process stopped.
+        lineRef.current = ''
+        reportProc(null)
+      } else if (ch === '\r' || ch === '\n') {
+        const proc = procFromLine(lineRef.current)
+        lineRef.current = ''
+        // Empty Enter leaves the label alone (it may be input to a running
+        // program, not a new idle prompt).
+        if (proc) reportProc(proc)
+      } else if (ch === '\x7f' || ch === '\b') {
+        lineRef.current = lineRef.current.slice(0, -1)
+      } else if (ch === '\x15') {
+        // Ctrl+U — line cleared.
+        lineRef.current = ''
+      } else if (ch >= ' ' || ch === '\t') {
+        lineRef.current += ch
+        if (lineRef.current.length > 256) {
+          lineRef.current = lineRef.current.slice(-256)
+        }
+      }
+      // Other control chars (arrows, etc.) are ignored — they edit the line
+      // mid-buffer, which a linear tracker can't follow exactly.
+    }
+  }
 
   const focusKeys = () => {
     setTimeout(() => termRef.current?.focus(), 30)
@@ -215,7 +313,10 @@ function ShellSession({
       }
       return true
     })
-    const onData = term.onData((data) => send(data))
+    const onData = term.onData((data) => {
+      trackInput(data)
+      send(data)
+    })
     // xterm owns its scroll viewport — watch it for the "↓ latest" pill.
     const vp = container.querySelector('.xterm-viewport')
     const onVpScroll = () => {
@@ -298,6 +399,7 @@ function ShellSession({
         // flip the tab offline — only the backend close does that.
         if (d.trim() === EXIT_SENTINEL) {
           gotExitRef.current = true
+          reportProc(null)
           term.write('\r\n[shell exited]\r\n')
           return
         }
@@ -324,6 +426,9 @@ function ShellSession({
       wsRef.current = null
       // Always go offline — a failed connect must not stick on amber.
       setStatus('offline')
+      // A real exit means nothing is running anymore; a plain disconnect
+      // keeps the label (the detached shell may still be busy).
+      if (gotExitRef.current) reportProc(null)
       if (e.code === 4000) {
         // Same session attached elsewhere (another page/tab) — say so
         // instead of a generic "disconnected".
@@ -390,9 +495,28 @@ function ShellSession({
     }
     gotExitRef.current = false
     sizeRef.current = null
+    lineRef.current = ''
+    reportProc(null)
     setStuck(true)
     setStatus('connecting')
     setGen((g) => g + 1)
+    focusKeys()
+  }
+
+  const clearTerm = () => {
+    try {
+      termRef.current?.clear()
+    } catch {
+      // Emulator gone — ignore.
+    }
+    focusKeys()
+  }
+
+  const stopProc = () => {
+    // SIGINT to the foreground process; the label drops back to "terminal".
+    lineRef.current = ''
+    reportProc(null)
+    send('\x03')
     focusKeys()
   }
 
@@ -410,6 +534,29 @@ function ShellSession({
     }
     focusKeys()
   }
+
+  // Latest actions for the parent tab ⋮ menu — a stable proxy registered
+  // once, forwarding to the current implementations above.
+  const actionsRef = useRef<TermHandle | null>(null)
+  actionsRef.current = {
+    clear: clearTerm,
+    stop: stopProc,
+    reconnect,
+    copy: copyAll,
+  }
+  useEffect(() => {
+    const proxy: TermHandle = {
+      clear: () => actionsRef.current?.clear(),
+      stop: () => actionsRef.current?.stop(),
+      reconnect: () => actionsRef.current?.reconnect(),
+      copy: () => actionsRef.current?.copy(),
+    }
+    onHandle(id, proxy)
+    return () => {
+      onHandle(id, null)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id])
 
   return (
     <div className="term-window" onClick={focusKeys}>

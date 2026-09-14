@@ -6,6 +6,8 @@ type FileEntry = {
   is_dir: boolean
   size: number
   modified: number | null
+  mode?: number | null
+  is_symlink?: boolean
 }
 
 type ListResponse = {
@@ -59,6 +61,47 @@ function buildCrumbs(home: string, path: string): Crumb[] {
 type ContentKind = 'text' | 'binary' | 'too-large'
 
 type FileTypeFilter = 'all' | 'dirs' | 'files'
+
+type SortKey = 'name' | 'size' | 'modified'
+type SortDir = 'asc' | 'desc'
+type ViewMode = 'grid' | 'list'
+type TransferMode = 'copy' | 'move'
+type PreviewKind = 'image' | 'video' | 'audio' | 'pdf' | null
+
+function formatMode(mode: number | null | undefined): string {
+  if (mode == null) return '—'
+  const chars = ['r', 'w', 'x']
+  let out = ''
+  for (let i = 8; i >= 0; i--) {
+    out += mode & (1 << i) ? chars[(8 - i) % 3] : '-'
+  }
+  return `${out} (${mode.toString(8).padStart(3, '0')})`
+}
+
+/** Media preview kind for a file name, or null when not previewable. */
+function previewKindOf(name: string): PreviewKind {
+  const base = name.split('/').pop() ?? name
+  const dot = base.lastIndexOf('.')
+  const ext = dot > 0 ? base.slice(dot + 1).toLowerCase() : ''
+  if (!ext) return null
+  if (ext === 'pdf') return 'pdf'
+  if (['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp', 'ico', 'avif'].includes(ext)) return 'image'
+  if (['mp4', 'webm', 'mov', 'm4v', 'ogv'].includes(ext)) return 'video'
+  if (['mp3', 'wav', 'ogg', 'oga', 'opus', 'flac', 'm4a', 'aac'].includes(ext)) return 'audio'
+  return null
+}
+
+/** Suggest `name copy.ext`, `name copy 2.ext`, … that doesn't collide (exact match). */
+function suggestCopyName(name: string, taken: Set<string>): string {
+  const dot = name.lastIndexOf('.')
+  const stem = dot > 0 ? name.slice(0, dot) : name
+  const ext = dot > 0 ? name.slice(dot) : ''
+  let candidate = `${stem} copy${ext}`
+  for (let i = 2; taken.has(candidate); i++) {
+    candidate = `${stem} copy ${i}${ext}`
+  }
+  return candidate
+}
 
 /* ---------- File categories: a distinct icon + color per kind ---------- */
 

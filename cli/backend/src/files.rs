@@ -1149,8 +1149,6 @@ pub async fn api_stat_file(Query(q): Query<StatQuery>) -> Response {
         readonly: meta.permissions().readonly(),
     };
     // uid/gid are unix-only fields; keep the struct honest on all targets.
-    let _ = uid;
-    let _ = gid;
     (StatusCode::OK, Json(res)).into_response()
 }
 
@@ -1533,7 +1531,7 @@ pub async fn api_zip_many(Json(b): Json<ZipManyBody>) -> Response {
         if !valid_file_name(n.trim()) {
             return (StatusCode::BAD_REQUEST, format!("invalid name: {n}")).into_response();
         }
-        if dir.join(n.trim()).exists() == false {
+        if !dir.join(n.trim()).exists() {
             return (
                 StatusCode::NOT_FOUND,
                 format!("not found: {n}"),
