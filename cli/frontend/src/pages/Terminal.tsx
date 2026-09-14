@@ -289,9 +289,11 @@ function newSid(): string {
  */
 function HostTerms({
   sessions,
+  splits,
   onAttach,
 }: {
   sessions: TermSession[]
+  splits: Record<string, TermSession>
   onAttach: (sid: string) => void
 }) {
   const [host, setHost] = useState<HostTerm[] | null>(null)
@@ -369,7 +371,10 @@ function HostTerms({
   }, [])
 
   const attached = new Set(
-    sessions.map((t) => t.sid).filter((s): s is string => !!s),
+    [
+      ...sessions.map((t) => t.sid),
+      ...Object.values(splits).map((t) => t.sid),
+    ].filter((s): s is string => !!s),
   )
   // Hide your own open tabs — only show *other* host sessions. This is the
   // fix for "I didn't open these": previously your own tabs appeared here
@@ -1701,13 +1706,18 @@ export default function TerminalPage({
     setActiveId(t.id)
   }
 
-  // Attach a shared host terminal (from On-this-host): reuse the local tab
-  // when it is already attached, otherwise open a new tab on its session id
-  // (the socket reattaches + replays, like after a refresh).
+  // Attach a shared host terminal (from Other-sessions): reuse the local tab
+  // or split pane when it already holds this sid, otherwise open a new tab
+  // on its session id (the socket reattaches + replays, like after refresh).
   const attachHost = (sid: string) => {
     const existing = sessions.find((t) => t.sid === sid)
     if (existing) {
       setActiveId(existing.id)
+      return
+    }
+    const splitOwner = Object.keys(splits).find((tabId) => splits[tabId]?.sid === sid)
+    if (splitOwner) {
+      setActiveId(splitOwner)
       return
     }
     const t = { ...nextTerm(), sid }
@@ -1745,6 +1755,8 @@ export default function TerminalPage({
     const doomed = sessions.find((t) => t.id === id)
     // Kill the backend PTY now — closing a tab must not leave a live
     // detached shell that keeps showing up under "Other sessions".
+    // DELETE is idempotent (404 = already gone), so a stale `splits`
+    // closure is harmless; the updater below kills authoritatively.
     if (doomed?.sid) void killHostTerm(doomed.sid)
     const splitDoomed = splits[id]
     if (splitDoomed?.sid) void killHostTerm(splitDoomed.sid)
@@ -1758,7 +1770,9 @@ export default function TerminalPage({
     handlesRef.current.delete(id)
     setSplits((prev) => {
       if (!(id in prev)) return prev
-      handlesRef.current.delete(prev[id].id)
+      const doomedSplit = prev[id]
+      if (doomedSplit.sid) void killHostTerm(doomedSplit.sid)
+      handlesRef.current.delete(doomedSplit.id)
       const next = { ...prev }
       delete next[id]
       return next
@@ -1805,10 +1819,25 @@ export default function TerminalPage({
   }, [])
 
   // Child reports its backend session id so tabs reattach after refresh.
+  // Splits are keyed by tabId (`splits[tabId].id === shellId`), so update
+  // whichever store owns this shell id.
   const handleReady = useCallback((id: string, sid: string | null) => {
     setSessions((prev) =>
       prev.map((t) => (t.id === id && t.sid !== sid ? { ...t, sid } : t)),
     )
+    setSplits((prev) => {
+      let changed = false
+      const next: Record<string, TermSession> = {}
+      for (const [tabId, pane] of Object.entries(prev)) {
+        if (pane.id === id && pane.sid !== sid) {
+          next[tabId] = { ...pane, sid }
+          changed = true
+        } else {
+          next[tabId] = pane
+        }
+      }
+      return changed ? next : prev
+    })
   }, [])
 
   // Child reports its running process so the tab shows it (null = idle).
@@ -1823,6 +1852,7 @@ export default function TerminalPage({
   }, [])
 
   // Child persists its v2 resume watermark (throttled) — tabs and splits.
+  // NB: splits are keyed by *tab* id, so match split panes by `pane.id`.
   const handleOffset = useCallback((id: string, off: number) => {
     setSessions((prev) => {
       const i = prev.findIndex((t) => t.id === id)
@@ -1832,9 +1862,17 @@ export default function TerminalPage({
       return next
     })
     setSplits((prev) => {
-      const cur = prev[id]
-      if (!cur || cur.off === off) return prev
-      return { ...prev, [id]: { ...cur, off } }
+      let changed = false
+      const next: Record<string, TermSession> = {}
+      for (const [tabId, pane] of Object.entries(prev)) {
+        if (pane.id === id && pane.off !== off) {
+          next[tabId] = { ...pane, off }
+          changed = true
+        } else {
+          next[tabId] = pane
+        }
+      }
+      return changed ? next : prev
     })
   }, [])
 
