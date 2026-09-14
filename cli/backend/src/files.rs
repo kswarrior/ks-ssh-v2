@@ -1725,6 +1725,138 @@ mod tests {
     }
 
     #[test]
+    fn stat_search_zip_helpers() {
+        // inline flag parsing (query-string friendly).
+        let yes = DownloadQuery { path: "x".to_string(), inline: Some("1".to_string()) };
+        let no = DownloadQuery { path: "x".to_string(), inline: None };
+        assert!(inline_requested(&yes));
+        assert!(!inline_requested(&no));
+        // zip output naming.
+        assert_eq!(normalize_zip_out(None, "selection.zip").expect("d"), "selection.zip");
+        assert_eq!(normalize_zip_out(Some("a"), "d").expect("d"), "a.zip");
+        assert_eq!(normalize_zip_out(Some("a.ZIP"), "d").expect("d"), "a.ZIP");
+        assert!(normalize_zip_out(Some("a/b"), "d").is_err());
+        assert_eq!(normalize_zip_out(Some(""), "fallback.zip").expect("d"), "fallback.zip");
+        // unzip -l total parsing.
+        let listing = "Archive:  /home/u/a.zip\n  Length      Date    Time    Name\n  ------      ----    ----    ----\n     123  2026-01-01 00:00   a.txt\n     456  2026-01-01 00:00   b.txt\n     ---                            -------\n     579                            2 files\n";
+        assert_eq!(parse_unzip_list_total(listing), Some(579));
+        assert_eq!(parse_unzip_list_total("garbage"), None);
+    }
+
+    #[test]
+    fn search_finds_nested_files() {
+        let home = home_dir();
+        let dir = home.join(format!(".ks-ssh-test-search-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("sub")).expect("test dir");
+        std::fs::write(dir.join("needle-report.txt"), "x").expect("write");
+        std::fs::write(dir.join("sub").join("needle-deep.log"), "y").expect("write");
+        std::fs::write(dir.join("sub").join("other.txt"), "z").expect("write");
+        let (entries, truncated) = run_search(&dir, "needle", 100);
+        assert!(!truncated);
+        assert_eq!(entries.len(), 2);
+        assert!(entries.iter().any(|e| e.name == "needle-deep.log"));
+        // No match, and query is substring + case-insensitive.
+        let (entries2, _) = run_search(&dir, "NEEDLE-REP", 100);
+        assert_eq!(entries2.len(), 1);
+        let (entries3, _) = run_search(&dir, "zzz-nope", 100);
+        assert!(entries3.is_empty());
+        // max caps results and reports truncation.
+        let (entries4, trunc4) = run_search(&dir, "needle", 1);
+        assert_eq!(entries4.len(), 1);
+        assert!(trunc4);
+        std::fs::remove_dir_all(&dir).expect("cleanup");
+    }
+
+    #[tokio::test]
+    async fn stat_and_guards_roundtrip() {
+        let home = home_dir();
+        let dir = home.join(format!(".ks-ssh-test-stat-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("test dir");
+        let f = dir.join("s.txt");
+        std::fs::write(&f, "hi").expect("write");
+        let res = api_stat_file(Query(StatQuery { path: f.to_string_lossy().to_string() }))
+            .await
+            .into_response();
+        assert_eq!(res.status(), StatusCode::OK);
+        // Missing path → 404.
+        let res2 = api_stat_file(Query(StatQuery {
+            path: dir.join("nope.txt").to_string_lossy().to_string(),
+        }))
+        .await
+        .into_response();
+        assert_eq!(res2.status(), StatusCode::NOT_FOUND);
+        // Escaping HOME → 403.
+        let res3 = api_stat_file(Query(StatQuery { path: "/etc/passwd".to_string() }))
+            .await
+            .into_response();
+        assert_eq!(res3.status(), StatusCode::FORBIDDEN);
+        // Empty search query → 400; zipping HOME itself → 400.
+        let res4 = api_search_files(Query(SearchQuery { root: None, q: "  ".to_string(), max: None }))
+            .await
+            .into_response();
+        assert_eq!(res4.status(), StatusCode::BAD_REQUEST);
+        let home_s = home.to_string_lossy().to_string();
+        let res5 = api_download_zip(Query(DownloadZipQuery { path: home_s }))
+            .await
+            .into_response();
+        assert_eq!(res5.status(), StatusCode::BAD_REQUEST);
+        // Non-zip file → 400 on unzip; missing zip → 404.
+        let res6 = api_unzip_file(Json(UnzipBody { file: f.to_string_lossy().to_string(), dest: None }))
+            .await
+            .into_response();
+        assert_eq!(res6.status(), StatusCode::BAD_REQUEST);
+        let res7 = api_unzip_file(Json(UnzipBody {
+            file: dir.join("missing.zip").to_string_lossy().to_string(),
+            dest: None,
+        }))
+        .await
+        .into_response();
+        assert_eq!(res7.status(), StatusCode::NOT_FOUND);
+        std::fs::remove_dir_all(&dir).expect("cleanup");
+    }
+
+    #[tokio::test]
+    async fn zip_unzip_roundtrip_inside_home() {
+        let home = home_dir();
+        let dir = home.join(format!(".ks-ssh-test-zip-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("pack")).expect("test dir");
+        std::fs::write(dir.join("pack").join("hello.txt"), "zip me").expect("write");
+        // zip-many a selection, then unzip it elsewhere.
+        let res = api_zip_many(Json(ZipManyBody {
+            dir: dir.to_string_lossy().to_string(),
+            names: vec!["pack".to_string()],
+            out: Some("sel.zip".to_string()),
+        }))
+        .await
+        .into_response();
+        assert_eq!(res.status(), StatusCode::OK);
+        assert!(dir.join("sel.zip").is_file());
+        let outdir = dir.join("out");
+        let res2 = api_unzip_file(Json(UnzipBody {
+            file: dir.join("sel.zip").to_string_lossy().to_string(),
+            dest: Some(outdir.to_string_lossy().to_string()),
+        }))
+        .await
+        .into_response();
+        assert_eq!(res2.status(), StatusCode::OK);
+        assert_eq!(
+            std::fs::read(outdir.join("pack").join("hello.txt")).expect("extracted"),
+            b"zip me"
+        );
+        // download-zip streams bytes for a single entry.
+        let res3 = api_download_zip(Query(DownloadZipQuery {
+            path: dir.join("pack").to_string_lossy().to_string(),
+        }))
+        .await
+        .into_response();
+        assert_eq!(res3.status(), StatusCode::OK);
+        std::fs::remove_dir_all(&dir).expect("cleanup");
+    }
+
+    #[test]
     fn rename_and_delete_roundtrip_inside_home() {
         let home = home_dir();
         let dir = home.join(format!(".ks-ssh-test-{}", std::process::id()));

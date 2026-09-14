@@ -3604,6 +3604,62 @@ a.file-link {
   width: 100%;
 }
 
+/* ---------- App boot loader (auth-status gate on open/refresh) ---------- */
+
+.app-boot {
+  width: min(360px, 100%);
+  align-items: center;
+  text-align: center;
+  padding: 32px 24px;
+  gap: 12px;
+}
+
+.app-boot-orb {
+  position: relative;
+  width: 64px;
+  height: 64px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.app-boot-orb svg {
+  width: 64px;
+  height: 64px;
+  display: block;
+  filter: drop-shadow(0 4px 10px var(--accent-shadow));
+  animation: host-orb-pulse 1.8s ease-in-out infinite;
+}
+
+.app-boot-ring {
+  position: absolute;
+  inset: -8px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  border-top-color: var(--accent-strong);
+  animation: host-spin 0.9s linear infinite;
+  pointer-events: none;
+}
+
+.app-boot-title {
+  font-weight: 750;
+  font-size: 17px;
+  letter-spacing: -0.01em;
+  color: var(--text-h);
+}
+
+.app-boot-sub {
+  font-size: 13px;
+  color: var(--text);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app-boot-orb svg,
+  .app-boot-ring {
+    animation: none;
+  }
+}
+
 /* ---------- Users management (Settings → Users) ---------- */
 
 .tag-main {

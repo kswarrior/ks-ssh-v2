@@ -67,10 +67,27 @@ async fn api_hello() -> &'static str {
 async fn serve_ui(uri: axum::http::Uri) -> Response {
     let path = uri.path().trim_start_matches('/');
     let file = if path.is_empty() { "index.html" } else { path };
+    // Hashed Vite output under assets/ is immutable; everything else
+    // (index.html, SPA fallback, icons) must never be cached — otherwise a
+    // refresh can keep serving a stale bundle whose old asset hashes fall
+    // back to HTML and the app sticks on a loading screen forever.
+    let immutable = file.starts_with("assets/");
     match Ui::get(file).or_else(|| Ui::get("index.html")) {
         Some(content) => {
             let mime = mime_guess::from_path(file).first_or_octet_stream();
-            ([(header::CONTENT_TYPE, mime.as_ref())], content.data).into_response()
+            let cache = if immutable {
+                "public, max-age=31536000, immutable"
+            } else {
+                "no-store"
+            };
+            (
+                [
+                    (header::CONTENT_TYPE, mime.as_ref()),
+                    (header::CACHE_CONTROL, cache),
+                ],
+                content.data,
+            )
+                .into_response()
         }
         None => (StatusCode::NOT_FOUND, "not found").into_response(),
     }

@@ -1577,22 +1577,83 @@ export default function FilesPage() {
             <p>Empty folder.</p>
           )
         ) : (
-          <ul className="file-grid" aria-label={`Files in ${data?.path}`}>
+          <>
+            {selected.length > 0 && (
+              <div className="bulk-bar" role="toolbar" aria-label={`${selected.length} selected`}>
+                <span className="bulk-count" aria-live="polite">
+                  {selected.length} selected
+                </span>
+                <div className="bulk-actions">
+                  <button
+                    type="button"
+                    className="btn btn-sm"
+                    disabled={busy || selectedEntries.filter((x) => !x.is_dir).length === 0}
+                    onClick={submitBulkDownload}
+                    title="Download selected files (folders are skipped)"
+                  >
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                      <path d="m7 10 5 5 5-5" />
+                      <path d="M12 15V3" />
+                    </svg>
+                    <span className="btn-label">Get</span>
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-sm btn-danger"
+                    disabled={busy}
+                    onClick={() => void submitBulkDelete()}
+                    title={`Delete ${selected.length} selected item(s)`}
+                  >
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <path d="M3 6h18" />
+                      <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                      <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" />
+                    </svg>
+                    <span className="btn-label">{busy ? 'Deleting…' : 'Delete'}</span>
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-sm"
+                    disabled={busy}
+                    onClick={() => setSelected([])}
+                    title="Clear selection"
+                  >
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <path d="M18 6 6 18M6 6l12 12" />
+                    </svg>
+                    <span className="btn-label">Clear</span>
+                  </button>
+                </div>
+              </div>
+            )}
+          <ul className={view === 'grid' ? 'file-grid' : 'file-list'} aria-label={`Files in ${data?.path}`}>
             {visible.map((e) => {
               const isMenu = menuOpen === e.path
               const isRenaming = renaming === e.path
               const isConfirm = confirmDelete === e.path
+              const isChecked = selected.includes(e.path)
+              const previewKind = !e.is_dir && !e.is_symlink ? previewKindOf(e.name) : null
               const cat: FileCat = e.is_dir ? 'dir' : fileCat(e.name, false)
               return (
                 <li
                   key={e.path}
-                  className="file-card"
+                  className={`file-card${isChecked ? ' selected' : ''}`}
                   onClick={() => openEntry(e)}
-                  title={e.is_dir ? `Open ${e.path}` : `Edit ${e.path}`}
+                  title={e.is_dir ? `Open ${e.path}` : previewKind ? `Preview ${e.path}` : `Edit ${e.path}`}
                 >
                   <div
                     className={`file-card-top${e.is_dir ? ' is-dir' : ''}`}
                   >
+                    <input
+                      type="checkbox"
+                      className="files-select-checkbox"
+                      checked={isChecked}
+                      onChange={() => toggleSelect(e.path)}
+                      onClick={(ev) => ev.stopPropagation()}
+                      aria-label={`Select ${e.name}`}
+                      title={`Select ${e.name}`}
+                    />
                     <span
                       className="file-icon"
                       aria-hidden="true"
@@ -1638,9 +1699,10 @@ export default function FilesPage() {
                         className="file-name file-link"
                         onClick={(ev) => {
                           ev.stopPropagation()
-                          void openEditor(e)
+                          if (previewKind) setPreviewing(e)
+                          else void openEditor(e)
                         }}
-                        title={`Edit ${e.path}`}
+                        title={previewKind ? `Preview ${e.path}` : `Edit ${e.path}`}
                       >
                         {e.name}
                       </button>
@@ -1681,6 +1743,19 @@ export default function FilesPage() {
                             </button>
                           ) : (
                             <>
+                              {previewKind && (
+                                <button
+                                  type="button"
+                                  role="menuitem"
+                                  className="file-menu-item"
+                                  onClick={() => {
+                                    setMenuOpen(null)
+                                    setPreviewing(e)
+                                  }}
+                                >
+                                  Preview
+                                </button>
+                              )}
                               <button
                                 type="button"
                                 role="menuitem"
@@ -1713,6 +1788,38 @@ export default function FilesPage() {
                           <button
                             type="button"
                             role="menuitem"
+                            className="file-menu-item"
+                            onClick={() => void submitDuplicate(e)}
+                          >
+                            Duplicate
+                          </button>
+                          <button
+                            type="button"
+                            role="menuitem"
+                            className="file-menu-item"
+                            onClick={() => openTransfer(e, 'copy')}
+                          >
+                            Copy to…
+                          </button>
+                          <button
+                            type="button"
+                            role="menuitem"
+                            className="file-menu-item"
+                            onClick={() => openTransfer(e, 'move')}
+                          >
+                            Move to…
+                          </button>
+                          <button
+                            type="button"
+                            role="menuitem"
+                            className="file-menu-item"
+                            onClick={() => openProps(e)}
+                          >
+                            Properties
+                          </button>
+                          <button
+                            type="button"
+                            role="menuitem"
                             className="file-menu-item danger"
                             onClick={() => setConfirmDelete(e.path)}
                           >
@@ -1725,6 +1832,7 @@ export default function FilesPage() {
                   <div className="file-meta">
                     {e.is_dir ? 'folder' : formatSize(e.size)} ·{' '}
                     {formatDate(e.modified)}
+                    {e.is_symlink ? ' · link' : ''}
                   </div>
 
                   {isRenaming && (
@@ -1810,8 +1918,375 @@ export default function FilesPage() {
               )
             })}
           </ul>
+          </>
         )}
       </div>
+
+      {previewing && (
+        <div
+          className="editor-overlay"
+          role="dialog"
+          aria-modal="true"
+          aria-label={`Preview ${previewing.name}`}
+          onClick={() => setPreviewing(null)}
+        >
+          <div
+            className="editor-window preview-window"
+            onClick={(ev) => ev.stopPropagation()}
+          >
+            <div className="editor-head">
+              <div className="editor-title">
+                <strong>{previewing.name}</strong>
+                <code title={previewing.path}>{previewing.path}</code>
+              </div>
+              <button
+                type="button"
+                className="icon-btn editor-close"
+                aria-label="Close preview"
+                title="Close"
+                onClick={() => setPreviewing(null)}
+              >
+                ×
+              </button>
+            </div>
+            <div className="preview-body">
+              {previewKindOf(previewing.name) === 'image' && (
+                <img
+                  className="preview-media"
+                  src={downloadUrl(previewing.path)}
+                  alt={previewing.name}
+                />
+              )}
+              {previewKindOf(previewing.name) === 'video' && (
+                <video
+                  className="preview-media"
+                  src={downloadUrl(previewing.path)}
+                  controls
+                  preload="metadata"
+                />
+              )}
+              {previewKindOf(previewing.name) === 'audio' && (
+                <audio
+                  className="preview-audio"
+                  src={downloadUrl(previewing.path)}
+                  controls
+                  preload="metadata"
+                />
+              )}
+              {previewKindOf(previewing.name) === 'pdf' && (
+                <iframe
+                  className="preview-frame"
+                  src={downloadUrl(previewing.path)}
+                  title={previewing.name}
+                />
+              )}
+            </div>
+            <div className="row-actions editor-actions">
+              <a
+                className="btn btn-sm btn-primary"
+                href={downloadUrl(previewing.path)}
+                download={previewing.name}
+                title={`Download ${previewing.name}`}
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                  <path d="m7 10 5 5 5-5" />
+                  <path d="M12 15V3" />
+                </svg>
+                <span className="btn-label">Download</span>
+              </a>
+              <button
+                type="button"
+                className="btn btn-sm"
+                onClick={() => {
+                  const p = previewing
+                  setPreviewing(null)
+                  void openEditor(p)
+                }}
+                title="Open in editor"
+              >
+                <span className="btn-label">Editor</span>
+              </button>
+              <button
+                type="button"
+                className="btn btn-sm"
+                onClick={() => setPreviewing(null)}
+                title="Close preview"
+              >
+                <span className="btn-label">Close</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {propsEntry && (
+        <div
+          className="editor-overlay"
+          role="dialog"
+          aria-modal="true"
+          aria-label={`Properties of ${propsEntry.name}`}
+          onClick={() => {
+            if (!propsBusy) {
+              setPropsEntry(null)
+              setPropsError(null)
+            }
+          }}
+        >
+          <div
+            className="editor-window create-window"
+            onClick={(ev) => ev.stopPropagation()}
+          >
+            <div className="editor-head">
+              <div className="editor-title">
+                <strong>Properties</strong>
+                <code title={propsEntry.path}>{propsEntry.path}</code>
+              </div>
+              <button
+                type="button"
+                className="icon-btn editor-close"
+                aria-label="Close properties"
+                title="Close"
+                disabled={propsBusy}
+                onClick={() => {
+                  setPropsEntry(null)
+                  setPropsError(null)
+                }}
+              >
+                ×
+              </button>
+            </div>
+            <dl className="props-table">
+              <div>
+                <dt>Name</dt>
+                <dd title={propsEntry.name}>{propsEntry.name}</dd>
+              </div>
+              <div>
+                <dt>Type</dt>
+                <dd>{propsEntry.is_dir ? 'Folder' : 'File'}</dd>
+              </div>
+              <div>
+                <dt>Size</dt>
+                <dd>{propsEntry.is_dir ? '—' : `${formatSize(propsEntry.size)} (${propsEntry.size} B)`}</dd>
+              </div>
+              <div>
+                <dt>Modified</dt>
+                <dd>{formatDate(propsEntry.modified)}</dd>
+              </div>
+              <div>
+                <dt>Link</dt>
+                <dd>{propsEntry.is_symlink ? 'Symbolic link' : 'No'}</dd>
+              </div>
+              <div>
+                <dt>Permissions</dt>
+                <dd>{formatMode(propsEntry.mode)}</dd>
+              </div>
+            </dl>
+            {propsEntry.mode != null ? (
+              <form
+                onSubmit={(ev) => {
+                  ev.preventDefault()
+                  void submitChmod()
+                }}
+              >
+                <div className="perm-grid" role="group" aria-label="Permissions">
+                  {(['Owner', 'Group', 'Other'] as const).map((who, wi) => (
+                    <div key={who} className="perm-row">
+                      <span className="perm-who">{who}</span>
+                      {(['r', 'w', 'x'] as const).map((p, pi) => {
+                        const bit = 1 << (8 - (wi * 3 + pi))
+                        const cur = Number.parseInt(propsMode.trim(), 8)
+                        const checked = Number.isInteger(cur) && (cur & bit) !== 0
+                        return (
+                          <label key={p} className="perm-check">
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              disabled={propsBusy || !Number.isInteger(cur)}
+                              onChange={() => {
+                                const base = Number.isInteger(cur) ? cur : (propsEntry.mode ?? 0)
+                                const next = checked ? base & ~bit : base | bit
+                                setPropsMode(next.toString(8))
+                                setPropsError(null)
+                              }}
+                            />
+                            {p}
+                          </label>
+                        )
+                      })}
+                    </div>
+                  ))}
+                </div>
+                <label className="create-field">
+                  Octal mode
+                  <input
+                    className="file-rename-input"
+                    type="text"
+                    value={propsMode}
+                    onChange={(ev) => {
+                      setPropsMode(ev.target.value)
+                      setPropsError(null)
+                    }}
+                    placeholder="644"
+                    maxLength={4}
+                    disabled={propsBusy}
+                    autoComplete="off"
+                    spellCheck={false}
+                    inputMode="numeric"
+                  />
+                </label>
+              </form>
+            ) : (
+              <p className="files-sub">Permissions are only available on unix hosts.</p>
+            )}
+            {propsError && (
+              <div className="banner-error" role="alert">
+                <p>{propsError}</p>
+              </div>
+            )}
+            <div className="row-actions editor-actions">
+              <button
+                type="button"
+                className="btn btn-sm"
+                disabled={propsBusy}
+                onClick={() => {
+                  setPropsEntry(null)
+                  setPropsError(null)
+                }}
+                title="Close properties"
+              >
+                <span className="btn-label">Close</span>
+              </button>
+              {propsEntry.mode != null && (
+                <button
+                  type="button"
+                  className="btn btn-sm btn-primary"
+                  disabled={propsBusy || !propsMode.trim()}
+                  onClick={() => void submitChmod()}
+                  title="Apply permissions"
+                >
+                  <span className="btn-label">{propsBusy ? 'Applying…' : 'Apply'}</span>
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {transfer && (
+        <div
+          className="editor-overlay"
+          role="dialog"
+          aria-modal="true"
+          aria-label={`${transfer.mode === 'copy' ? 'Copy' : 'Move'} ${transfer.entry.name}`}
+          onClick={() => {
+            if (!transferBusy) {
+              setTransfer(null)
+              setTransferError(null)
+            }
+          }}
+        >
+          <div
+            className="editor-window create-window"
+            onClick={(ev) => ev.stopPropagation()}
+          >
+            <div className="editor-head">
+              <div className="editor-title">
+                <strong>{transfer.mode === 'copy' ? 'Copy' : 'Move'} “{transfer.entry.name}”</strong>
+                <code title={transfer.entry.path}>{transfer.entry.path}</code>
+              </div>
+              <button
+                type="button"
+                className="icon-btn editor-close"
+                aria-label="Close transfer dialog"
+                title="Close"
+                disabled={transferBusy}
+                onClick={() => {
+                  setTransfer(null)
+                  setTransferError(null)
+                }}
+              >
+                ×
+              </button>
+            </div>
+            <form
+              onSubmit={(ev) => {
+                ev.preventDefault()
+                void submitTransfer()
+              }}
+            >
+              <label className="create-field">
+                Destination folder
+                <input
+                  className="file-rename-input"
+                  type="text"
+                  value={transferDir}
+                  onChange={(ev) => {
+                    setTransferDir(ev.target.value)
+                    setTransferError(null)
+                  }}
+                  placeholder={data?.path ?? '~'}
+                  disabled={transferBusy}
+                  autoComplete="off"
+                  spellCheck={false}
+                />
+              </label>
+              <label className="create-field">
+                Name
+                <input
+                  className="file-rename-input"
+                  type="text"
+                  value={transferName}
+                  onChange={(ev) => {
+                    setTransferName(ev.target.value)
+                    setTransferError(null)
+                  }}
+                  maxLength={255}
+                  disabled={transferBusy}
+                  autoComplete="off"
+                  spellCheck={false}
+                />
+              </label>
+            </form>
+            {transferError && (
+              <div className="banner-error" role="alert">
+                <p>{transferError}</p>
+              </div>
+            )}
+            <div className="row-actions editor-actions">
+              <button
+                type="button"
+                className="btn btn-sm"
+                disabled={transferBusy}
+                onClick={() => {
+                  setTransfer(null)
+                  setTransferError(null)
+                }}
+                title="Cancel"
+              >
+                <span className="btn-label">Cancel</span>
+              </button>
+              <button
+                type="button"
+                className="btn btn-sm btn-primary"
+                disabled={!transferValid || transferBusy}
+                onClick={() => void submitTransfer()}
+                title={transfer.mode === 'copy' ? 'Copy here' : 'Move here'}
+              >
+                <span className="btn-label">
+                  {transferBusy
+                    ? transfer.mode === 'copy'
+                      ? 'Copying…'
+                      : 'Moving…'
+                    : transfer.mode === 'copy'
+                      ? 'Copy'
+                      : 'Move'}
+                </span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {editing && (
         <div

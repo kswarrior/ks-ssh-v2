@@ -791,7 +791,7 @@ export default function TerminalPage({
     const r = anchor.getBoundingClientRect()
     setMenuId(t.id)
     setMenuAnchor({
-      top: Math.min(r.bottom + 6, window.innerHeight - 240),
+      top: Math.max(8, Math.min(r.bottom + 6, window.innerHeight - 240)),
       right: Math.max(8, window.innerWidth - r.right),
     })
   }

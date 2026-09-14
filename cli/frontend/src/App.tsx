@@ -330,7 +330,39 @@ export default function App() {
     return (
       <div className="app-shell">
         <main className="content login-content" id="main">
-          <p className="lead">Loading…</p>
+          <div className="card app-boot" role="status" aria-label="Starting KS SSH">
+            <span className="app-boot-orb" aria-hidden="true">
+              <svg viewBox="0 0 32 32">
+                <defs>
+                  <linearGradient id="ks-boot-g" x1="0" y1="0" x2="1" y2="1">
+                    <stop offset="0" style={{ stopColor: 'var(--accent-hi)' }} />
+                    <stop offset="0.6" style={{ stopColor: 'var(--accent-lo)' }} />
+                    <stop offset="1" style={{ stopColor: 'var(--accent-glow)' }} />
+                  </linearGradient>
+                </defs>
+                <rect
+                  x="1"
+                  y="1"
+                  width="30"
+                  height="30"
+                  rx="8"
+                  fill="url(#ks-boot-g)"
+                  stroke="rgba(255,255,255,0.25)"
+                />
+                <path
+                  d="M10 12l5 4-5 4M17 20h6"
+                  stroke="#fff"
+                  strokeWidth="2.2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  fill="none"
+                />
+              </svg>
+              <span className="app-boot-ring" />
+            </span>
+            <span className="app-boot-title">Starting KS SSH…</span>
+            <span className="app-boot-sub">Checking login status…</span>
+          </div>
         </main>
       </div>
     )
