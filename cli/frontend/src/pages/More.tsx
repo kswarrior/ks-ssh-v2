@@ -20,6 +20,41 @@ function UsersIcon() {
   )
 }
 
+function AuditIcon() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+      <path d="M14 2v6h6" />
+      <path d="M9 13h6M9 17h6" />
+    </svg>
+  )
+}
+
+function RecIcon() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <rect x="2" y="4" width="20" height="16" rx="2" />
+      <path d="m10 9 5 3-5 3z" />
+    </svg>
+  )
+}
+
 function ChevronIcon() {
   return (
     <svg
@@ -40,6 +75,12 @@ export default function MorePage({ authProtected }: { authProtected: boolean }) 
   const openUsers = () => {
     window.location.hash = '#/users'
   }
+  const openAudit = () => {
+    window.location.hash = '#/audit'
+  }
+  const openRecordings = () => {
+    window.location.hash = '#/recordings'
+  }
 
   return (
     <section className="page settings-page" aria-labelledby="page-title-more">
@@ -57,7 +98,7 @@ export default function MorePage({ authProtected }: { authProtected: boolean }) 
               <div className="server-name">Users</div>
               <div className="users-created">
                 {authProtected
-                  ? 'Manage who can log in to this server'
+                  ? 'Roles (admin/operator/viewer), 2FA, sessions — admin manages accounts'
                   : 'Needs the login gate (--user and --pass)'}
               </div>
             </div>
@@ -72,8 +113,81 @@ export default function MorePage({ authProtected }: { authProtected: boolean }) 
             </div>
           </li>
 
+          <li className="server-row">
+            <span className="ssh-icon" aria-hidden="true">
+              <AuditIcon />
+            </span>
+            <div className="server-info">
+              <div className="server-name">Audit log</div>
+              <div className="users-created">
+                {authProtected
+                  ? 'Logins, user changes, kills, file writes, shell attach — admin only, JSON/CSV export'
+                  : 'Needs the login gate (--user and --pass)'}
+              </div>
+            </div>
+            <div className="row-actions">
+              {authProtected ? (
+                <button type="button" className="btn btn-sm btn-primary" onClick={openAudit}>
+                  Open <ChevronIcon />
+                </button>
+              ) : (
+                <span className="tag offline">Disabled</span>
+              )}
+            </div>
+          </li>
+
+          <li className="server-row">
+            <span className="ssh-icon" aria-hidden="true">
+              <RecIcon />
+            </span>
+            <div className="server-info">
+              <div className="server-name">Recordings</div>
+              <div className="users-created">
+                Session replay (play/pause/speed/scrub, read-only) — viewer+ plays, admin deletes
+              </div>
+            </div>
+            <div className="row-actions">
+              <button type="button" className="btn btn-sm btn-primary" onClick={openRecordings}>
+                Open <ChevronIcon />
+              </button>
+            </div>
+          </li>
+
           {/* Add more entries later — copy the <li> above, change icon/title/hash. */}
         </ul>
+      </div>
+
+      <div className="card">
+        <h2>Identity &amp; audit</h2>
+        <p className="lead">
+          Least-privilege roles: <code>viewer</code> reads (files/host/ports, watch
+          terminals, play recordings); <code>operator</code> adds shell writes, uploads
+          and mkdir; <code>admin</code> adds kill, delete, chmod, user management, audit
+          and recording deletes. The main <code>--user</code> account is always admin;
+          older accounts without a role default to <code>operator</code>.
+        </p>
+        <p className="lead">
+          Sessions: 12h absolute + 30min idle expiry, cookie is HttpOnly + Secure +
+          SameSite=Lax and rotates on privilege change. 5 bad logins lock the IP+user
+          for 5 minutes (audited). Optional TOTP 2FA per account (Users page) and SSO
+          via <code>--oidc-issuer</code> + <code>--oidc-client-id</code> (new SSO
+          accounts start as <code>viewer</code>, optional{' '}
+          <code>--oidc-allow-domain</code> whitelist).
+        </p>
+        <h2>Retention</h2>
+        <p className="lead">
+          Audit rows: <code>--audit-retain-days</code> (default 90, 0 = keep forever).
+          Session recordings: <code>--record-max-mb</code> per session (default 10,
+          oldest frames drop first); recording is ON by default when auth is on (
+          <code>--record</code> forces on, <code>--no-record</code> forces off).
+        </p>
+        <h2>Relay links</h2>
+        <p className="lead">
+          The relay share link (<code>/v/TOKEN</code>) stays bearer-open by default.
+          Restart with <code>--relay-auth</code> to require a one-time viewer PIN
+          (printed once at startup; authed users can mint fresh ones). The PIN and the
+          E2E key <code>k</code> never travel in query strings or logs.
+        </p>
       </div>
     </section>
   )

@@ -604,7 +604,7 @@ export default function App() {
         </header>
 
         <main
-          className={`content${tab === 'terminal' ? ' content-term' : tab === 'files' ? ' content-files' : tab === 'host' ? ' content-host' : tab === 'more' || tab === 'users' ? ' content-settings' : ''}`}
+          className={`content${tab === 'terminal' ? ' content-term' : tab === 'files' ? ' content-files' : tab === 'host' ? ' content-host' : tab === 'more' || tab === 'users' || tab === 'audit' || tab === 'recordings' ? ' content-settings' : ''}`}
           id="main"
           tabIndex={-1}
         >
@@ -625,6 +625,12 @@ export default function App() {
           </div>
           <div hidden={tab !== 'users'} className="tab-panel">
             <UsersPage />
+          </div>
+          <div hidden={tab !== 'audit'} className="tab-panel">
+            <AuditPage />
+          </div>
+          <div hidden={tab !== 'recordings'} className="tab-panel">
+            <RecordingsPage />
           </div>
         </main>
 

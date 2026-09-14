@@ -6,6 +6,7 @@ import { SearchAddon } from '@xterm/addon-search'
 import { WebLinksAddon } from '@xterm/addon-web-links'
 import { Unicode11Addon } from '@xterm/addon-unicode11'
 import { SerializeAddon } from '@xterm/addon-serialize'
+import { requestReplay } from './Recordings'
 import 'xterm/css/xterm.css'
 
 export type SshEntry = {
@@ -218,6 +219,40 @@ function timeAgo(idle: number): string {
 }
 
 /**
+ * Recording consent banner (case 9): shown while session recording is on
+ * (`GET /api/record/status`). Sessions capture timestamped input+output
+ * frames for read-only replay under Recordings.
+ */
+function RecordBanner() {
+  const [on, setOn] = useState<boolean | null>(null)
+
+  useEffect(() => {
+    let alive = true
+    fetch('/api/record/status', { cache: 'no-store', credentials: 'same-origin' })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (alive) setOn(d && typeof d.recording === 'boolean' ? d.recording : null)
+      })
+      .catch(() => {
+        if (alive) setOn(null)
+      })
+    return () => {
+      alive = false
+    }
+  }, [])
+
+  if (on !== true) return null
+  return (
+    <div className="rec-banner" role="status">
+      <span>● Session recording is ON — input + output are stored for replay.</span>
+      <a className="btn btn-sm" href="#/recordings">
+        View recordings
+      </a>
+    </div>
+  )
+}
+
+/**
  * Terminals living on the host (SQLite `--db`, shared on purpose).
  * Any visitor sees them here and can attach — live shells reattach,
  * ended ones replay their saved output. Hidden when the backend has no
@@ -298,6 +333,14 @@ function HostTerms({
             <span className="host-term-meta">
               {h.alive ? 'live' : 'ended'} · {timeAgo(h.idle_secs)}
             </span>
+            <button
+              type="button"
+              className="btn btn-sm"
+              onClick={() => requestReplay(h.id)}
+              title="Read-only replay of this session's recording"
+            >
+              Replay
+            </button>
             <button
               type="button"
               className="btn btn-sm"
@@ -1748,6 +1791,7 @@ export default function TerminalPage({
         <h1 id="page-title-terminal" className="sr-only">
           Terminal
         </h1>
+        <RecordBanner />
         <button
           type="button"
           className="btn btn-primary terminal-add-btn"
@@ -1856,6 +1900,7 @@ export default function TerminalPage({
       <h1 id="page-title-terminal" className="sr-only">
         Terminal
       </h1>
+      <RecordBanner />
       <HostTerms sessions={sessions} onAttach={attachHost} />
       <div className="term-bar" role="tablist" aria-label="Terminals">
         {sessions.map((t, i) => {
@@ -2059,6 +2104,21 @@ export default function TerminalPage({
             >
               Export log (.txt)
             </button>
+            {menuTerm.sid && (
+              <button
+                type="button"
+                role="menuitem"
+                className="term-tab-menu-item"
+                title="Read-only replay of this session's recording"
+                onClick={() => {
+                  const sid = menuTerm.sid
+                  closeMenu()
+                  if (sid) requestReplay(sid)
+                }}
+              >
+                Replay recording
+              </button>
+            )}
             <div className="term-tab-menu-sep" aria-hidden="true" />
             <button
               type="button"
