@@ -724,7 +724,7 @@ function SSHPage({
                             className="btn btn-sm btn-primary"
                             href={`#/session/${e.token.trim().toUpperCase()}`}
                             aria-label={`Visit ${e.name}`}
-                            title="Visit"
+                            title="Visit — open the full CLI frontend (Terminal, Files, Ports, Host) for this machine"
                           >
                             <svg
                               viewBox="0 0 24 24"
@@ -739,6 +739,7 @@ function SSHPage({
                               <polyline points="15 3 21 3 21 9" />
                               <line x1="10" y1="14" x2="21" y2="3" />
                             </svg>
+                            <span>Visit</span>
                           </a>
                         <button
                           type="button"
