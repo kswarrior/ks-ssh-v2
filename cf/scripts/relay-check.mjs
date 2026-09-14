@@ -91,7 +91,23 @@ function check(cond, label) {
   check(room.includes('4408'), 'per-socket flood guard closes with 4408')
   check(room.includes('authGated') && room.includes('gated'), 'PIN gating advertised (gated) without exposing PIN')
   check(room.includes('lastAgentHello'), 'agent hello caps replayed to late joiners')
+  check(room.includes("'status'") && room.includes('agentOnline'), 'room serves live status (agentOnline/hasUi/gated)')
+  check(index.includes('/api/ssh/status') && index.includes('/api/relay/'), 'live relay-status API (no 501 stub)')
   check(!room.includes('pin') || room.includes('PIN never appears') || !/verify\(|hash_pin/.test(room), 'relay never verifies PIN (agent-side only)')
+  check(noFakeStub(index), 'no fake/demo/example stubs in worker routes')
+}
+
+function noFakeStub(s) {
+  // The worker must not ship demo/fake/sample stubs — every route is live.
+  const low = s.toLowerCase()
+  return !low.includes('demo') && !low.includes('fake') && !low.includes('example') && !low.includes('not connected') && !low.includes('not wired')
+}
+
+{
+  const app = src('src/App.tsx')
+  check(!/your screenshot here/i.test(app), 'home has no screenshot placeholder')
+  check(!/defaultUser|defaultPort/i.test(app), 'no unused demo settings fields')
+  check(app.includes('/api/ssh/status') || app.includes('/api/health'), 'frontend uses live status API')
 }
 
 // ---- Agent source evidence (strict + PIN-inside-enc + hello reply) ----
