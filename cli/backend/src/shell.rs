@@ -521,6 +521,8 @@ pub async fn api_list_terms() -> impl IntoResponse {
                     "alive": !s.dead.load(Ordering::SeqCst),
                     "idle_secs": idle_secs.min(9_999_999_999),
                     "bytes": bytes,
+                    "seq": s.offset.load(Ordering::SeqCst),
+                    "acked": s.acked.load(Ordering::SeqCst),
                 })
             })
             .collect()
@@ -588,15 +590,22 @@ pub fn spawn_reaper() {
     });
 }
 
-async fn handle_socket(socket: WebSocket, req_id: Option<String>) {
+async fn handle_socket(socket: WebSocket, q: ShellQuery) {
     let (mut ws_tx, mut ws_rx) = socket.split();
 
-    let session = get_or_create_session(req_id).await;
+    // v2 is opt-in (`?v=2`); everything else stays on the v1 shapes.
+    let v2 = q.v == Some(PROTO_V2);
+    let from = q.from.unwrap_or(0);
+
+    let session = get_or_create_session(q.id).await;
     if let Ok(mut t) = session.last_active.lock() {
         *t = Instant::now();
     }
     let my_epoch = session.epoch.fetch_add(1, Ordering::SeqCst) + 1;
     let (sub_tx, mut sub_rx) = tokio::sync::mpsc::channel::<Out>(256);
+    // v2 control replies (pong) ride back through the send task, which owns
+    // the socket sink.
+    let (pong_tx, mut pong_rx) = tokio::sync::mpsc::channel::<String>(8);
     // Take over: boot the previous subscriber, if any.
     if let Ok(mut slot) = session.sub.lock()
         && let Some(old) = slot.replace(sub_tx)
@@ -605,20 +614,54 @@ async fn handle_socket(socket: WebSocket, req_id: Option<String>) {
     }
 
     // Tell the tab which session it holds (new tabs learn their id here).
-    let ready = serde_json::json!({"type": "ready", "id": session.id}).to_string();
+    // v2 also learns the stream head so it can resume gap-free.
+    // Replay window: v1 always gets the whole ring; v2 gets only the tail
+    // after `?from=` (or the whole ring when the offset was evicted).
+    let (replay_base, backlog, behind): (u64, Vec<u8>, bool) = {
+        let ring: Vec<u8> = session
+            .ring
+            .lock()
+            .map(|r| r.iter().copied().collect())
+            .unwrap_or_default();
+        let rbase = session.ring_base.lock().ok().map(|b| *b).unwrap_or(0);
+        if !v2 || from <= rbase {
+            (rbase, ring, v2 && from < rbase)
+        } else {
+            let skip = (from - rbase) as usize;
+            if skip >= ring.len() {
+                (from, Vec::new(), false)
+            } else {
+                (from, ring[skip..].to_vec(), false)
+            }
+        }
+    };
+    let ready = if v2 {
+        serde_json::json!({
+            "type": "ready",
+            "id": session.id,
+            "v": PROTO_V2,
+            "seq": session.offset.load(Ordering::SeqCst),
+            "behind": behind,
+        })
+        .to_string()
+    } else {
+        serde_json::json!({"type": "ready", "id": session.id}).to_string()
+    };
     if ws_tx.send(Message::Text(ready.into())).await.is_err() {
         release(&session, my_epoch);
         return;
     }
     // Replay the scrollback ring so a refreshed page sees what it missed.
-    let backlog: Vec<u8> = session
-        .ring
-        .lock()
-        .map(|r| r.iter().copied().collect())
-        .unwrap_or_default();
-    if !backlog.is_empty() && ws_tx.send(Message::Binary(backlog.into())).await.is_err() {
-        release(&session, my_epoch);
-        return;
+    if !backlog.is_empty() {
+        let frame = if v2 {
+            encode_frame(replay_base, &backlog)
+        } else {
+            backlog
+        };
+        if ws_tx.send(Message::Binary(frame.into())).await.is_err() {
+            release(&session, my_epoch);
+            return;
+        }
     }
     if session.dead.load(Ordering::SeqCst) {
         // Shell already gone — show the tail, announce, close.
@@ -656,19 +699,35 @@ async fn handle_socket(socket: WebSocket, req_id: Option<String>) {
                 send_takeover(&mut ws_tx).await;
                 break;
             }
-            match sub_rx.recv().await {
-                Some(Out::Data(bytes)) => {
-                    if ws_tx.send(Message::Binary(bytes.into())).await.is_err() {
-                        break;
+            tokio::select! {
+                out = sub_rx.recv() => {
+                    match out {
+                        Some(Out::Data { base, bytes }) => {
+                            let frame = if v2 { encode_frame(base, &bytes) } else { bytes };
+                            if ws_tx.send(Message::Binary(frame.into())).await.is_err() {
+                                break;
+                            }
+                        }
+                        Some(Out::Eof) => {
+                            send_exit(&mut ws_tx).await;
+                            break;
+                        }
+                        Some(Out::Takeover) | None => {
+                            send_takeover(&mut ws_tx).await;
+                            break;
+                        }
                     }
                 }
-                Some(Out::Eof) => {
-                    send_exit(&mut ws_tx).await;
-                    break;
-                }
-                Some(Out::Takeover) | None => {
-                    send_takeover(&mut ws_tx).await;
-                    break;
+                pong = pong_rx.recv() => {
+                    match pong {
+                        Some(text) => {
+                            if ws_tx.send(Message::Text(text.into())).await.is_err() {
+                                break;
+                            }
+                        }
+                        // Replier gone — the socket is going down anyway.
+                        None => break,
+                    }
                 }
             }
         }
@@ -690,6 +749,23 @@ async fn handle_socket(socket: WebSocket, req_id: Option<String>) {
             match msg {
                 Message::Text(text) => {
                     let s = text.as_str();
+                    // v2 control frames (exact shapes only) — everything
+                    // else, even typed JSON, is shell input as in v1.
+                    if v2
+                        && let Ok(v) = serde_json::from_str::<serde_json::Value>(s)
+                    {
+                        if let Some(t) = parse_ping(&v) {
+                            let pong = serde_json::json!({"type":"pong","t":t}).to_string();
+                            if pong_tx.send(pong).await.is_err() {
+                                break;
+                            }
+                            continue;
+                        }
+                        if let Some(seq) = parse_ack(&v) {
+                            recv_session.acked.fetch_max(seq, Ordering::SeqCst);
+                            continue;
+                        }
+                    }
                     // Only the exact resize shape is control traffic —
                     // anything else (even typed JSON) is shell input.
                     if let Ok(v) = serde_json::from_str::<serde_json::Value>(s) {
@@ -754,12 +830,75 @@ mod tests {
     #[test]
     fn ring_keeps_tail() {
         let mut ring = VecDeque::new();
-        push_ring(&mut ring, b"hello ");
-        push_ring(&mut ring, b"world");
+        let mut base = 0u64;
+        push_ring(&mut ring, &mut base, b"hello ");
+        push_ring(&mut ring, &mut base, b"world");
         assert_eq!(ring.iter().copied().collect::<Vec<u8>>(), b"hello world");
+        assert_eq!(base, 0);
         // A burst bigger than the cap keeps exactly the tail.
-        push_ring(&mut ring, &vec![b'z'; RING_CAP + 10]);
+        push_ring(&mut ring, &mut base, &vec![b'z'; RING_CAP + 10]);
         assert_eq!(ring.len(), RING_CAP);
         assert!(ring.iter().all(|&b| b == b'z'));
+        // Evicted bytes advance the base: offset == base + len.
+        assert_eq!(base, 11 + 10);
+    }
+
+    #[test]
+    fn frame_roundtrip() {
+        let (base, bytes) = decode_frame(&encode_frame(12345, b"hi")).unwrap();
+        assert_eq!(base, 12345);
+        assert_eq!(bytes, b"hi");
+        // Empty payload still carries its offset.
+        let (base, bytes) = decode_frame(&encode_frame(0, b"")).unwrap();
+        assert_eq!((base, bytes), (0, b"".as_slice()));
+        // Short frames are rejected, never misread as PTY bytes.
+        assert!(decode_frame(b"").is_none());
+        assert!(decode_frame(b"1234567").is_none());
+    }
+
+    #[test]
+    fn query_ignores_unknown_fields() {
+        // Old servers must ignore `v`/`from` (and anything else) and keep
+        // speaking v1 — serde derive skips unknown fields by default.
+        let q: ShellQuery = serde_json::from_value(
+            serde_json::json!({"id": "abc", "v": 2, "from": 7, "zzz": 1}),
+        )
+        .unwrap();
+        assert_eq!(q.id.as_deref(), Some("abc"));
+        assert_eq!(q.v, Some(2));
+        assert_eq!(q.from, Some(7));
+        let bare: ShellQuery = serde_json::from_value(serde_json::json!({})).unwrap();
+        assert_eq!(bare.id, None);
+        assert_eq!(bare.v, None);
+        assert_eq!(bare.from, None);
+    }
+
+    #[test]
+    fn control_shapes_are_exact() {
+        // ping/ack need their numeric field; lookalikes stay shell input.
+        assert_eq!(
+            parse_ping(&serde_json::json!({"type": "ping", "t": 42})),
+            Some(42)
+        );
+        assert_eq!(parse_ping(&serde_json::json!({"type": "ping"})), None);
+        assert_eq!(
+            parse_ping(&serde_json::json!({"type": "ping", "t": "x"})),
+            None
+        );
+        assert_eq!(parse_ping(&serde_json::json!({"type": "pong", "t": 1})), None);
+        assert_eq!(
+            parse_ack(&serde_json::json!({"type": "ack", "seq": 9})),
+            Some(9)
+        );
+        assert_eq!(parse_ack(&serde_json::json!({"type": "ack"})), None);
+        assert_eq!(
+            parse_ack(&serde_json::json!({"type": "resize", "cols": 1, "rows": 1})),
+            None
+        );
+        // Typed JSON that merely resembles control traffic is untouched.
+        assert_eq!(
+            parse_ping(&serde_json::json!({"type": "exit"})),
+            None
+        );
     }
 }
