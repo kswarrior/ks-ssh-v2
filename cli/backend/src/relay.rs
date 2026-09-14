@@ -146,7 +146,7 @@ pub async fn run_agent(
         println!("E2E: ON (AES-256-GCM, {E2E_ALG}) — relay sees only ciphertext sizes.");
         println!("Share link (contains secret — send directly, do not log):");
         println!("  {http}/v/{token}#k={secret}");
-        println!("  {http}/#/view/{token}#k={secret}");
+        println!("  {http}/#/session/{token}#k={secret}");
         // Drop the display copy immediately (the key itself stays in memory).
     } else {
         println!("E2E: OFF (legacy --no-e2e) — relay can see plaintext.");

@@ -14,7 +14,7 @@ sshx.io · **tmate** · **upterm** · **ttyd** · **wetty** = wetty/GoTTY ·
 |  | KS SSH | SSH | sshx | tmate | upterm | ttyd | wetty | Sshw | Guac | Tele | Tail | VSCode |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
 | Stack | Rust axum + portable-pty + React/xterm.js + CF Worker/DO (`cli/backend/src/*.rs`, `cf/worker/room.ts`) | C OpenBSD client, 30y mature | Rust + SvelteKit + Fly.io/Redis mesh (7.6k★, 2022+) | C tmux fork + tmate.io relay (BSD) | Go SSH relay (OSS) | C + xterm.js (mature) | Node/Go + xterm (wetty/GoTTY) | Go + JS web client (OSS) | Java + guacd + MySQL/LDAP/OIDC (10y+ enterprise) | Go + Web UI, cluster (mature, OSS+Cloud) | WireGuard/QUIC + IdP (tailnet/Zero Trust) | TS/Rust CLI + MS cloud (`code tunnel`) |
-| Transport / relay | Outbound WSS agent, 5-char token, single-file UI push (`ui-begin/chunk/end`), `/v/TOKEN` | Direct TCP, needs reachable sshd (`-R` DIY) | Outbound to global mesh, `sshx.io/s/…` link | Outbound SSH, 4 endpoints (SSH ro/rw + web ro/rw) | Outbound SSH, viewers use `ssh` | Needs ingress (port/proxy/VPN) | Needs ingress (reverse proxy) | Needs reachable sshd | Gateway needs ingress | Reverse tunnel (no ingress) | Outbound WG/QUIC (no ingress) | Outbound to MS edge |
+| Transport / relay | Outbound WSS agent, 5-char token, single-file UI push (`ui-begin/chunk/end`), `/v/TOKEN`, full `rpc-*`/`shell-*` bridge to a loopback server with the same auth/RBAC | Direct TCP, needs reachable sshd (`-R` DIY) | Outbound to global mesh, `sshx.io/s/…` link | Outbound SSH, 4 endpoints (SSH ro/rw + web ro/rw) | Outbound SSH, viewers use `ssh` | Needs ingress (port/proxy/VPN) | Needs ingress (reverse proxy) | Needs reachable sshd | Gateway needs ingress | Reverse tunnel (no ingress) | Outbound WG/QUIC (no ingress) | Outbound to MS edge |
 | Crypto | AES-256-GCM `enc`, HKDF `ks-ssh-e2e-v1`, AAD=token, seq, `#k=` fragment only, `?k=` → 400 | SSH (host-key TOFU) | Argon2+AES, fragment key, relay sees ciphertext | None (relay sees plaintext) | SSH | TLS via proxy only | TLS via proxy only | SSH to target | TLS to gateway (gw decrypts) | Short-lived certs + MFA | WireGuard / Zero Trust | Encrypted via MS (trusts vendor) |
 | Terminal | Real PTY, multi-tab + vertical split, v2 seq/ack gap-free resume + ping RTT, predictive echo, CJK/IME + search + export, touch bar, bell/unread/latency (`shell.rs`, `Terminal.tsx`) | Reference PTY + `tmux`/`mosh` | Canvas panes, cursors, predictive echo, ephemeral | tmux preserved | Plain shared session | Solid PTY, CJK/IME | Login/SSH wrapper | Web SSH | Gateway SSH | Joint sessions | Plain SSH over net | Full terminal + editor |
 | Files / ports / host | HOME-jailed files/editor (1/5/100MB caps) + `/proc` ports + kill + host metrics (`files.rs`, `ports.rs`, `host.rs`) | `scp`/`sftp` only | None | None | None | ZMODEM only | None | SFTP browser | SFTP browser | `scp`/SFTP, no health dash | SFTP/SCP | Full editor + port-fwd, no host dash |
@@ -52,11 +52,12 @@ sshx.io · **tmate** · **upterm** · **ttyd** · **wetty** = wetty/GoTTY ·
   (timestamped in/out frames, `shell.rs:158`, `GET /api/terms/:id/recording`,
   replay player with play/pause/speed/scrub in Recordings + Terminal pages,
   `--record-max-mb` default 10, consent banner via `GET /api/record/status`).
-- **Limits:** relay `data` acked not PTY-bridged yet; token guessable (routing
-  only, `k` seals); UI bundle plaintext by design; no collab; one
-  Worker/DO relay, not a mesh. Relay link stays bearer-open by default —
-  `--relay-auth` closes it with a one-time viewer PIN (`auth.rs:1550`,
-  `relay.rs` viewer-PIN gate, never in query/logs).
+- **Limits:** token guessable (routing only, `k` seals); UI bundle + relay
+  `rpc`/`shell` plaintext by design (same-trust loopback proxy); one
+  Worker/DO relay, not a mesh; no collab (joint sessions). Token addressing stays bearer-routed by
+  default — `--relay-auth` adds a one-time viewer PIN checked before any
+  `data`/`rpc`/`shell` bridge (`auth.rs:1550`, `relay.rs:678,788,882`,
+  never in query/logs).
 
 ## Scored Matrix (/100 per case)
 
@@ -138,14 +139,19 @@ scale). Evidence per rubric item:
   (`db.rs:485`, `GET /api/terms/:id/recording`, `shell.rs:739`), read-only
   replay player with play/pause/speed/scrub (`RecordingPlayer.tsx`, embedded in
   Recordings + reachable from Terminal), consent banner when enabled
-  (`GET /api/record/status`, `shell.rs:652`), default ON when auth is on
-  (`main.rs:93-101`); playback respects RBAC (viewer plays, only admin
+   (`GET /api/record/status`, `shell.rs:652`), default ON when auth is on
+   (`main.rs:94-103`); playback respects RBAC (viewer plays, only admin
   deletes, `shell.rs:750`). Covered by recording roundtrip + cap tests.
 - **Relay identity (honest close):** `--relay-auth` requires a one-time viewer
-  PIN in client hello before bridging data (`auth.rs:1550`, `relay.rs`
-  viewer-PIN gate + `relay-viewer-auth` audit); authed local users mint fresh
-  PINs (`POST /api/relay/pin`, `auth.rs:2625`); default stays bearer-open and
-  is documented as such (startup note + More page).
+  PIN in client hello before any `data`/`rpc`/`shell` bridge (`auth.rs:1550`,
+  `relay.rs:678,788,882` + `relay-viewer-auth` audit); authed local users mint
+  fresh PINs (`POST /api/relay/pin`, `auth.rs:2625`). And with auth on, the
+  relay is login-gated anyway: rpc/shell proxy to a loopback server running
+  the same router, forwarding the viewer's cookie (`main.rs:289`,
+  `relay.rs:418,542`) — same RBAC, same audit (`relay-rpc`,
+  `relay-shell-open`/`relay-shell-close`, token only, never `k`/PIN). Token
+  addressing stays bearer-routed by default (documented in the startup note +
+  More page).
 
 Case 3 re-scored 2026-09-14: KS 80 → **100** (OpenSSH parity in browser).
 Evidence per rubric item (real PTY + instant feel + resilient reconnect +
@@ -238,7 +244,8 @@ curl -sSfL https://raw.githubusercontent.com/kswarrior/ks-ssh-v2/refs/heads/main
 ```
 
 Security: rotate guessable tokens via fresh `--token=`; `k` is the secret
-(fragment only). `--user/--pass` protects the local UI only; the relay share
-link stays bearer-open unless `--relay-auth` adds the one-time viewer PIN.
-Prefer `--host 127.0.0.1`; Files jailed to `$HOME`, Ports kill PID-scoped (no PID
+(fragment only). Token addressing is bearer-routed, but with `--user/--pass`
+the relay is login-gated too (same loopback router/RBAC/audit); add
+`--relay-auth` for the one-time viewer PIN on top. Prefer
+`--host 127.0.0.1`; Files jailed to `$HOME`, Ports kill PID-scoped (no PID
 1/self). Don't bind `0.0.0.0` on untrusted nets without proxy auth.

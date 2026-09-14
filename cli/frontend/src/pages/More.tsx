@@ -183,10 +183,14 @@ export default function MorePage({ authProtected }: { authProtected: boolean }) 
         </p>
         <h2>Relay links</h2>
         <p className="lead">
-          The relay share link (<code>/v/TOKEN</code>) stays bearer-open by default.
-          Restart with <code>--relay-auth</code> to require a one-time viewer PIN
-          (printed once at startup; authed users can mint fresh ones). The PIN and the
-          E2E key <code>k</code> never travel in query strings or logs.
+          The relay share link (<code>/v/TOKEN</code>) is token-addressed and now
+          full-function: HTTP <code>/api/*</code> rides <code>rpc-*</code> and the
+          PTY rides <code>shell-*</code> to a loopback server running the same
+          router — so login, RBAC and audit apply over relay exactly as locally
+          (your session cookie is forwarded). Restart with <code>--relay-auth</code>{' '}
+          to additionally require a one-time viewer PIN (printed once at startup;
+          authed users can mint fresh ones) before any bridge opens. The PIN and
+          the E2E key <code>k</code> never travel in query strings or logs.
         </p>
       </div>
     </section>

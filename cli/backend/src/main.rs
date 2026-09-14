@@ -45,7 +45,8 @@ struct Cli {
     /// still works (backward compat) with a startup warning.
     #[arg(long, alias = "password")]
     pass: Option<String>,
-    /// Skip the local web UI (no open port at all).
+    /// Skip the local web UI (no open port at all — Visit-over-WSS still
+    /// serves the full UI via an internal loopback-only server).
     #[arg(long)]
     no_serve: bool,
     /// SQLite file for terminal session history (`./ks-ssh.db` by default).
@@ -56,6 +57,9 @@ struct Cli {
     db: String,
     /// Relay via the Worker instead of opening a port.
     /// Give a token to reuse it, or pass `--token=` for a random one.
+    /// Visit-over-WSS is fully functional (same Terminal/Files/Ports/Host
+    /// as `--port`): the agent proxies relay `rpc-*`/`shell-*` to a
+    /// loopback-only server in this process.
     #[arg(long, num_args(0..=1), require_equals(true), default_missing_value = "")]
     token: Option<String>,
     /// Relay base URL (https/wss).

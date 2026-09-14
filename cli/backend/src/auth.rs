@@ -1548,11 +1548,17 @@ impl OidcState {
 /// One-time viewer PINs for the relay share link (`--relay-auth`).
 /// Only the SHA-256 hash is kept; the plaintext PIN is printed once by the
 /// agent (or minted via `POST /api/relay/pin`) and never logged or put in a
-/// query string.
+/// query string. The PIN travels ONLY inside `enc`
+/// (`{"type":"auth","pin":"..."}`) — never plaintext `hello` when both
+/// sides do E2E. Each mint invalidates the previous PIN (one-time) and
+/// PINs expire after [`RELAY_PIN_TTL_SECS`].
 pub struct RelayPinState {
     hash: Mutex<Option<[u8; 32]>>,
     created_at: Mutex<i64>,
 }
+
+/// Viewer PIN lifetime: 15 minutes from mint. Expired PINs fail closed.
+pub const RELAY_PIN_TTL_SECS: i64 = 15 * 60;
 
 impl RelayPinState {
     pub fn new() -> Self {
@@ -1582,15 +1588,29 @@ impl RelayPinState {
     }
 
     pub fn verify(&self, attempt: &str) -> bool {
+        if self.expired() {
+            return false;
+        }
         let g = self.hash.lock().unwrap_or_else(|e| e.into_inner());
         match *g {
+            // Constant-time compare — no early exit on first mismatch.
             Some(h) => ct_eq(&h, &Self::hash_pin(attempt)),
             None => false,
         }
     }
 
+    /// True when no PIN is armed or the armed PIN passed its TTL.
+    pub fn expired(&self) -> bool {
+        let created = *self.created_at.lock().unwrap_or_else(|e| e.into_inner());
+        let has = self.hash.lock().map(|g| g.is_some()).unwrap_or(false);
+        if !has {
+            return true;
+        }
+        now_secs().saturating_sub(created) > RELAY_PIN_TTL_SECS
+    }
+
     pub fn has_pin(&self) -> bool {
-        self.hash.lock().map(|g| g.is_some()).unwrap_or(false)
+        self.hash.lock().map(|g| g.is_some()).unwrap_or(false) && !self.expired()
     }
 
     pub fn created_at(&self) -> i64 {
