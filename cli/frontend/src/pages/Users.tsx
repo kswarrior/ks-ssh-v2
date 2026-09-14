@@ -158,8 +158,6 @@ export default function UsersPage() {
   // Self-service: own sessions.
   const [mySessions, setMySessions] = useState<SessionInfo[] | null>(null)
 
-  const isAdmin = me?.role === 'admin'
-
   const load = useCallback(async () => {
     setLoadError(null)
     setDisabled(false)

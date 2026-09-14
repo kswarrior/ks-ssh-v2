@@ -59,7 +59,7 @@ sshx.io · **tmate** · **upterm** · **ttyd** · **wetty** = wetty/GoTTY ·
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|
 | 1 | No-port / NAT traversal | 90 | 10 | **95** | 85 | 80 | 10 | 10 | 10 | 15 | 85 | 90 | 90 |
 | 2 | Browser + share link + mobile | **93** | 0 | **93** | 73 | 13 | 73 | 67 | 73 | 80 | 80 | 40 | 87 |
-| 3 | Terminal quality | 80 | **100** | 90 | 70 | 60 | 70 | 60 | 60 | 60 | 80 | 70 | 80 |
+| 3 | Terminal quality | **100** | **100** | 90 | 70 | 60 | 70 | 60 | 60 | 60 | 80 | 70 | 80 |
 | 4 | E2E / transport security | 80 | 80 | **93** | 13 | 67 | 20 | 20 | 67 | 27 | 87 | **93** | 80 |
 | 5 | File manager + editor | **100** | 30 | 0 | 0 | 0 | 20 | 0 | 40 | 40 | 40 | 30 | 90 |
 | 6 | Ports / process mgmt | **100** | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 10 | 0 | 10 |
@@ -72,7 +72,7 @@ sshx.io · **tmate** · **upterm** · **ttyd** · **wetty** = wetty/GoTTY ·
 
 | Rank | Tool | Sum | Final /100 |
 |---|---|---|---|
-| **1** | **KS SSH** | **833 / 1,000** | **83** |
+| **1** | **KS SSH** | **853 / 1,000** | **85** |
 | 2 | Teleport | 602 / 1,000 | 60 |
 | 3 | VS Code tunnels | 597 / 1,000 | 60 |
 | 4 | sshx | 501 / 1,000 | 50 |
@@ -169,8 +169,8 @@ Where KS SSH wins vs Teleport (matrix deltas, same scoring):
 - No licence/cloud dependency: KS is self-hosted OSS, unlimited boxes; Teleport
   depth costs cluster/Cloud commitment.
 - Teleport's only outright win over KS is case 8 (collab). Closest
-  gaps: NAT 90 vs 85, browser 93 vs 80, terminal 80 vs 80, E2E 80 vs 87 — all
-  within 13 points; identity is now tied 100/100.
+  gaps: NAT 90 vs 85, browser 93 vs 80, E2E 80 vs 87 — all
+  within 13 points; terminal now leads 100 vs 80; identity is tied 100/100.
 
 Verdict: pick Teleport if fleet/compliance at scale matters (cluster CA,
 joint sessions, K8s/DB proxy, Cloud). Pick KS SSH if you want one binary for
