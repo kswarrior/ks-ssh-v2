@@ -167,6 +167,7 @@ async fn serve(host: String, port: u16, auth: Option<Arc<AuthState>>) {
         .expect("bind port");
     println!("KS SSH serving at http://{addr}");
     shell::spawn_reaper();
+    shell::spawn_persister();
     axum::serve(listener, app.into_make_service())
         .await
         .expect("serve");

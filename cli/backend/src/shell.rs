@@ -174,6 +174,8 @@ fn spawn_session(id: String) -> anyhow::Result<Arc<Session>> {
         dead: AtomicBool::new(false),
         epoch: AtomicU64::new(0),
         last_active: StdMutex::new(Instant::now()),
+        created_at: db::now_secs(),
+        dirty: AtomicBool::new(false),
     });
 
     // PTY writer lives on its own blocking thread so big pastes never
@@ -203,6 +205,7 @@ fn spawn_session(id: String) -> anyhow::Result<Arc<Session>> {
                     if let Ok(mut ring) = reader_session.ring.lock() {
                         push_ring(&mut ring, bytes);
                     }
+                    reader_session.dirty.store(true, Ordering::SeqCst);
                     let tx = reader_session.sub.lock().ok().and_then(|g| g.clone());
                     if let Some(tx) = tx {
                         // Detached (or taken over) — ring keeps the bytes.
@@ -213,6 +216,8 @@ fn spawn_session(id: String) -> anyhow::Result<Arc<Session>> {
             }
         }
         reader_session.dead.store(true, Ordering::SeqCst);
+        // Shell over — flush the final output + dead flag to SQLite now.
+        persist_session(&reader_session);
         if let Some(tx) = reader_session.sub.lock().ok().and_then(|g| g.clone()) {
             let _ = tx.try_send(Out::Eof);
         }
@@ -281,12 +286,17 @@ async fn get_or_create_session(want: Option<String>) -> Arc<Session> {
                 dead: AtomicBool::new(true),
                 epoch: AtomicU64::new(0),
                 last_active: StdMutex::new(Instant::now()),
+                created_at: db::now_secs(),
+                dirty: AtomicBool::new(false),
             });
             // Don't even store it — nothing to reattach to.
             return s;
         }
     };
     map.insert(id, session.clone());
+    // Mirror the new shell into SQLite so visitors (and restarts) see it.
+    // (Only the DB lock is taken — brief, no SESSIONS recursion.)
+    persist_session(&session);
     // Enforce the cap outside the lock (reaping blocks).
     let victims: Vec<Arc<Session>> = if map.len() > MAX_SESSIONS {
         let mut cands: Vec<(Instant, bool, Arc<Session>)> = map
@@ -319,8 +329,123 @@ async fn get_or_create_session(want: Option<String>) -> Arc<Session> {
     drop(map);
     for s in victims {
         reap_child(&s);
+        db::delete(&s.id);
     }
     session
+}
+
+/// Snapshot one session's ring into SQLite (no-op when `--db` is off).
+fn persist_session(session: &Session) {
+    if !db::enabled() {
+        return;
+    }
+    let bytes: Vec<u8> = session
+        .ring
+        .lock()
+        .map(|r| r.iter().copied().collect())
+        .unwrap_or_default();
+    db::upsert(
+        &session.id,
+        session.created_at,
+        db::now_secs(),
+        session.dead.load(Ordering::SeqCst),
+        &bytes,
+    );
+    session.dirty.store(false, Ordering::SeqCst);
+}
+
+/// Flush dirty scrollback rings into SQLite every few seconds.
+/// Spawn once from `serve()` alongside the reaper.
+pub fn spawn_persister() {
+    tokio::spawn(async move {
+        loop {
+            tokio::time::sleep(Duration::from_secs(5)).await;
+            if !db::enabled() {
+                continue;
+            }
+            let sessions: Vec<Arc<Session>> = SESSIONS.lock().await.values().cloned().collect();
+            for s in sessions {
+                if s.dirty.load(Ordering::SeqCst) {
+                    persist_session(&s);
+                }
+            }
+        }
+    });
+}
+
+/// Rebuild history placeholders from SQLite at startup. No PTY is spawned —
+/// the OS child is gone, so these replay their saved scrollback and then
+/// report `exit` through the normal dead-session path in `handle_socket`.
+/// Returns the number of sessions restored.
+pub async fn load_persisted() -> usize {
+    if !db::enabled() {
+        return 0;
+    }
+    let rows = db::load_all();
+    if rows.is_empty() {
+        return 0;
+    }
+    let mut map = SESSIONS.lock().await;
+    let mut n = 0;
+    for row in rows {
+        if map.contains_key(&row.id) || !valid_session_id(&row.id) {
+            continue;
+        }
+        if !row.dead {
+            // Was live at shutdown — the shell itself is gone for good.
+            db::mark_dead(&row.id, db::now_secs());
+        }
+        let (writer_tx, _) = tokio::sync::mpsc::channel::<Vec<u8>>(1);
+        let session = Arc::new(Session {
+            id: row.id.clone(),
+            master: StdMutex::new(None),
+            child: StdMutex::new(None),
+            writer_tx,
+            sub: StdMutex::new(None),
+            ring: StdMutex::new(row.scrollback.into_iter().collect()),
+            dead: AtomicBool::new(true),
+            epoch: AtomicU64::new(0),
+            last_active: StdMutex::new(Instant::now()),
+            created_at: row.created_at,
+            dirty: AtomicBool::new(false),
+        });
+        map.insert(row.id, session);
+        n += 1;
+    }
+    n
+}
+
+/// GET /api/terms — host-wide terminal list so any visitor can see and
+/// reattach to the shared shells. Behind `require_auth` like `/v1/shell`.
+pub async fn api_list_terms() -> impl IntoResponse {
+    let mut sessions: Vec<serde_json::Value> = {
+        let map = SESSIONS.lock().await;
+        map.values()
+            .map(|s| {
+                let bytes = s.ring.lock().map(|r| r.len()).unwrap_or(0);
+                let idle_secs = s
+                    .last_active
+                    .lock()
+                    .ok()
+                    .map(|t| t.elapsed().as_secs())
+                    .unwrap_or(u64::MAX);
+                serde_json::json!({
+                    "id": s.id,
+                    "alive": !s.dead.load(Ordering::SeqCst),
+                    "idle_secs": idle_secs.min(9_999_999_999),
+                    "bytes": bytes,
+                })
+            })
+            .collect()
+    };
+    // Live shells first, then most recently active.
+    sessions.sort_by_key(|v| {
+        (
+            !v.get("alive").and_then(|a| a.as_bool()).unwrap_or(false),
+            v.get("idle_secs").and_then(|i| i.as_u64()).unwrap_or(u64::MAX),
+        )
+    });
+    axum::Json(serde_json::json!({ "sessions": sessions }))
 }
 
 /// Detach bookkeeping when a socket goes away — the shell keeps running.
@@ -333,6 +458,8 @@ fn release(session: &Session, my_epoch: u64) {
     if let Ok(mut t) = session.last_active.lock() {
         *t = Instant::now();
     }
+    // Flush the latest output promptly so other visitors see it.
+    session.dirty.store(true, Ordering::SeqCst);
 }
 
 /// Reap detached sessions past their TTL. Spawn once from `serve()`.
@@ -366,7 +493,10 @@ pub fn spawn_reaper() {
             };
             for s in victims {
                 reap_child(&s);
+                db::delete(&s.id);
             }
+            // Drop ancient history rows even for sessions already gone.
+            db::prune_expired();
         }
     });
 }
