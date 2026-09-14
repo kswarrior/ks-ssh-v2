@@ -50,6 +50,13 @@ static MEM_AUDIT: LazyLock<StdMutex<Vec<AuditRow>>> =
     LazyLock::new(|| StdMutex::new(Vec::new()));
 static MEM_AUDIT_ID: AtomicU64 = AtomicU64::new(1);
 const MEM_AUDIT_CAP: usize = 2000;
+/// In-memory chat fallback when `--db` is off (bounded ring).
+static MEM_CHAT: LazyLock<StdMutex<Vec<ChatMessage>>> =
+    LazyLock::new(|| StdMutex::new(Vec::new()));
+static MEM_CHAT_ID: AtomicU64 = AtomicU64::new(1);
+const MEM_CHAT_CAP: usize = 500;
+/// Max chat messages kept in SQLite (oldest pruned).
+pub const MAX_CHAT_MESSAGES: i64 = 1000;
 
 static DB: LazyLock<StdMutex<Option<rusqlite::Connection>>> =
     LazyLock::new(|| StdMutex::new(None));

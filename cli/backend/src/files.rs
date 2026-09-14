@@ -1647,7 +1647,7 @@ mod tests {
             dir: dir.to_string_lossy().to_string(),
             name: "up.txt".to_string(),
         };
-        let res = api_upload_file(Query(q), Bytes::from("hello upload")).await;
+        let res = api_upload_file(None, HeaderMap::new(), Query(q), Bytes::from("hello upload")).await;
         // 200 OK — easiest assertion without draining the body type.
         let res = res.into_response();
         assert_eq!(res.status(), StatusCode::OK);
@@ -1660,7 +1660,7 @@ mod tests {
             dir: dir.to_string_lossy().to_string(),
             name: "up.txt".to_string(),
         };
-        let res2 = api_upload_file(Query(q2), Bytes::from("again"))
+        let res2 = api_upload_file(None, HeaderMap::new(), Query(q2), Bytes::from("again"))
             .await
             .into_response();
         assert_eq!(res2.status(), StatusCode::CONFLICT);
@@ -1690,7 +1690,7 @@ mod tests {
         std::fs::create_dir_all(dir.join("sub")).expect("test dir");
         std::fs::write(dir.join("sub").join("a.txt"), "copy me").expect("write a");
         // Copy a single file.
-        let res = api_copy_file(Json(CopyBody {
+        let res = api_copy_file(None, HeaderMap::new(), Json(CopyBody {
             from: dir.join("sub").join("a.txt").to_string_lossy().to_string(),
             to: dir.join("b.txt").to_string_lossy().to_string(),
         }))
@@ -1702,7 +1702,7 @@ mod tests {
             b"copy me"
         );
         // Duplicate name is refused.
-        let res2 = api_copy_file(Json(CopyBody {
+        let res2 = api_copy_file(None, HeaderMap::new(), Json(CopyBody {
             from: dir.join("sub").join("a.txt").to_string_lossy().to_string(),
             to: dir.join("b.txt").to_string_lossy().to_string(),
         }))
@@ -1710,7 +1710,7 @@ mod tests {
         .into_response();
         assert_eq!(res2.status(), StatusCode::CONFLICT);
         // Recursive dir copy.
-        let res3 = api_copy_file(Json(CopyBody {
+        let res3 = api_copy_file(None, HeaderMap::new(), Json(CopyBody {
             from: dir.join("sub").to_string_lossy().to_string(),
             to: dir.join("sub2").to_string_lossy().to_string(),
         }))
@@ -1722,7 +1722,7 @@ mod tests {
             b"copy me"
         );
         // Copying a folder into itself is refused.
-        let res4 = api_copy_file(Json(CopyBody {
+        let res4 = api_copy_file(None, HeaderMap::new(), Json(CopyBody {
             from: dir.join("sub").to_string_lossy().to_string(),
             to: dir.join("sub").join("inner").to_string_lossy().to_string(),
         }))
@@ -1730,7 +1730,7 @@ mod tests {
         .into_response();
         assert_eq!(res4.status(), StatusCode::BAD_REQUEST);
         // Escaping HOME is refused.
-        let res5 = api_copy_file(Json(CopyBody {
+        let res5 = api_copy_file(None, HeaderMap::new(), Json(CopyBody {
             from: dir.join("b.txt").to_string_lossy().to_string(),
             to: "/tmp/ks-ssh-evil-copy".to_string(),
         }))
@@ -1748,7 +1748,7 @@ mod tests {
         std::fs::create_dir_all(&dir).expect("test dir");
         let f = dir.join("c.txt");
         std::fs::write(&f, "x").expect("write");
-        let res = api_chmod(Json(ChmodBody {
+        let res = api_chmod(None, HeaderMap::new(), Json(ChmodBody {
             path: f.to_string_lossy().to_string(),
             mode: 0o600,
         }))
@@ -1768,7 +1768,7 @@ mod tests {
             assert_eq!(res.status(), StatusCode::NOT_IMPLEMENTED);
         }
         // Bad mode is rejected everywhere.
-        let res2 = api_chmod(Json(ChmodBody {
+        let res2 = api_chmod(None, HeaderMap::new(), Json(ChmodBody {
             path: f.to_string_lossy().to_string(),
             mode: 0o10000,
         }))
@@ -1852,16 +1852,16 @@ mod tests {
             .into_response();
         assert_eq!(res4.status(), StatusCode::BAD_REQUEST);
         let home_s = home.to_string_lossy().to_string();
-        let res5 = api_download_zip(Query(DownloadZipQuery { path: home_s }))
+        let res5 = api_download_zip(None, HeaderMap::new(), Query(DownloadZipQuery { path: home_s }))
             .await
             .into_response();
         assert_eq!(res5.status(), StatusCode::BAD_REQUEST);
         // Non-zip file → 400 on unzip; missing zip → 404.
-        let res6 = api_unzip_file(Json(UnzipBody { file: f.to_string_lossy().to_string(), dest: None }))
+        let res6 = api_unzip_file(None, HeaderMap::new(), Json(UnzipBody { file: f.to_string_lossy().to_string(), dest: None }))
             .await
             .into_response();
         assert_eq!(res6.status(), StatusCode::BAD_REQUEST);
-        let res7 = api_unzip_file(Json(UnzipBody {
+        let res7 = api_unzip_file(None, HeaderMap::new(), Json(UnzipBody {
             file: dir.join("missing.zip").to_string_lossy().to_string(),
             dest: None,
         }))
@@ -1879,7 +1879,7 @@ mod tests {
         std::fs::create_dir_all(dir.join("pack")).expect("test dir");
         std::fs::write(dir.join("pack").join("hello.txt"), "zip me").expect("write");
         // zip-many a selection, then unzip it elsewhere.
-        let res = api_zip_many(Json(ZipManyBody {
+        let res = api_zip_many(None, HeaderMap::new(), Json(ZipManyBody {
             dir: dir.to_string_lossy().to_string(),
             names: vec!["pack".to_string()],
             out: Some("sel.zip".to_string()),
@@ -1889,7 +1889,7 @@ mod tests {
         assert_eq!(res.status(), StatusCode::OK);
         assert!(dir.join("sel.zip").is_file());
         let outdir = dir.join("out");
-        let res2 = api_unzip_file(Json(UnzipBody {
+        let res2 = api_unzip_file(None, HeaderMap::new(), Json(UnzipBody {
             file: dir.join("sel.zip").to_string_lossy().to_string(),
             dest: Some(outdir.to_string_lossy().to_string()),
         }))
@@ -1901,7 +1901,7 @@ mod tests {
             b"zip me"
         );
         // download-zip streams bytes for a single entry.
-        let res3 = api_download_zip(Query(DownloadZipQuery {
+        let res3 = api_download_zip(None, HeaderMap::new(), Query(DownloadZipQuery {
             path: dir.join("pack").to_string_lossy().to_string(),
         }))
         .await

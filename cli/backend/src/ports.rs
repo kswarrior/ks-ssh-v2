@@ -5,13 +5,28 @@
 //! when `/proc/net` is unavailable (non-Linux / containers).
 
 use axum::{
-    Json,
-    http::StatusCode,
+    Extension, Json,
+    http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::net::{Ipv4Addr, Ipv6Addr};
+
+use crate::{auth, db};
+
+fn audit_kill(
+    ctx: &Option<Extension<auth::AuthContext>>,
+    headers: &HeaderMap,
+    target: &str,
+    ok: bool,
+) {
+    let actor = ctx
+        .as_ref()
+        .map(|Extension(c)| c.username.as_str())
+        .unwrap_or("-");
+    db::audit(actor, &auth::client_ip(headers), "ports-kill", target, if ok { "ok" } else { "deny" });
+}
 
 #[derive(Serialize, Clone)]
 pub struct PortEntry {
@@ -372,8 +387,15 @@ fn run_kill(pid: u32, signal: Option<&str>) -> Result<(), String> {
 
 /// POST /api/ports/kill — kill the process holding a port (by pid).
 /// Sends SIGTERM, waits briefly, then escalates to SIGKILL if needed.
-pub async fn api_kill_port(Json(req): Json<KillRequest>) -> Response {
+/// Admin only (RBAC). Audited.
+pub async fn api_kill_port(
+    opt_ctx: Option<Extension<auth::AuthContext>>,
+    headers: HeaderMap,
+    Json(req): Json<KillRequest>,
+) -> Response {
+    let target = req.pid.to_string();
     if req.pid <= 1 {
+        audit_kill(&opt_ctx, &headers, &target, false);
         return (
             StatusCode::BAD_REQUEST,
             format!("refusing to kill pid {}", req.pid),
@@ -381,9 +403,11 @@ pub async fn api_kill_port(Json(req): Json<KillRequest>) -> Response {
             .into_response();
     }
     if req.pid == std::process::id() {
+        audit_kill(&opt_ctx, &headers, &target, false);
         return (StatusCode::FORBIDDEN, "refusing to kill ks-ssh itself").into_response();
     }
     if !pid_alive(req.pid) {
+        audit_kill(&opt_ctx, &headers, &target, false);
         return (
             StatusCode::NOT_FOUND,
             format!("no such process (pid {})", req.pid),
@@ -391,6 +415,7 @@ pub async fn api_kill_port(Json(req): Json<KillRequest>) -> Response {
             .into_response();
     }
     if let Err(e) = run_kill(req.pid, Some("TERM")) {
+        audit_kill(&opt_ctx, &headers, &target, false);
         return (StatusCode::INTERNAL_SERVER_ERROR, e).into_response();
     }
     // Give it up to ~1.5s to exit after SIGTERM.
@@ -404,6 +429,7 @@ pub async fn api_kill_port(Json(req): Json<KillRequest>) -> Response {
     if pid_alive(req.pid)
         && let Err(e) = run_kill(req.pid, Some("KILL"))
     {
+        audit_kill(&opt_ctx, &headers, &target, false);
         return (StatusCode::INTERNAL_SERVER_ERROR, e).into_response();
     }
     for _ in 0..10 {
@@ -413,12 +439,14 @@ pub async fn api_kill_port(Json(req): Json<KillRequest>) -> Response {
         std::thread::sleep(std::time::Duration::from_millis(100));
     }
     if pid_alive(req.pid) {
+        audit_kill(&opt_ctx, &headers, &target, false);
         return (
             StatusCode::INTERNAL_SERVER_ERROR,
             format!("process {} did not exit", req.pid),
         )
             .into_response();
     }
+    audit_kill(&opt_ctx, &headers, &target, true);
     (
         StatusCode::OK,
         Json(KillResponse {

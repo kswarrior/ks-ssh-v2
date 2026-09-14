@@ -845,10 +845,14 @@ function ShellSession({
     if (!term) return
     gotExitRef.current = false
     sizeRef.current = null
+    v2Ref.current = false
     const scheme = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+    // v2 frames carry stream offsets; `from` resumes exactly where this tab
+    // left off (persisted per tab) — no duplication, no loss.
+    const base = `${scheme}//${window.location.host}/v1/shell`
     const url = sidRef.current
-      ? `${scheme}//${window.location.host}/v1/shell?id=${encodeURIComponent(sidRef.current)}`
-      : `${scheme}//${window.location.host}/v1/shell`
+      ? `${base}?id=${encodeURIComponent(sidRef.current)}&v=2&from=${offRef.current}`
+      : `${base}?v=2&from=${offRef.current}`
     const ws = new WebSocket(url)
     wsRef.current = ws
     try {
@@ -859,9 +863,30 @@ function ShellSession({
     setStatus('connecting')
     // No "connecting…" line in the terminal — the tab-bar dot already
     // shows connecting (yellow) / online (green) / offline (red).
+    lastMsgRef.current = 0
+
+    const scheduleRetry = () => {
+      if (attemptRef.current >= MAX_RETRIES) {
+        setRetryAttempt(0)
+        setStatus('offline')
+        return
+      }
+      const wait = backoffMs(attemptRef.current)
+      attemptRef.current += 1
+      setRetryAttempt(attemptRef.current)
+      // Yellow dot while backing off (status stays 'connecting').
+      setStatus('connecting')
+      backoffTimerRef.current = window.setTimeout(() => {
+        backoffTimerRef.current = undefined
+        setGen((g) => g + 1)
+      }, wait)
+    }
 
     ws.onopen = () => {
+      attemptRef.current = 0
+      setRetryAttempt(0)
       setStatus('online')
+      lastMsgRef.current = Date.now()
       for (const p of pendingRef.current.splice(0)) {
         if (ws.readyState === WebSocket.OPEN) ws.send(p)
       }
