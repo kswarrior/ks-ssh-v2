@@ -1214,6 +1214,23 @@ async fn on_text(
                     crate::db::audit("-", "local", "relay-viewer-auth", token, "deny");
                 }
             }
+            // Answer every client `hello` with our own (plaintext control, no
+            // secrets — `fp` is public identity). Late joiners miss the
+            // connect-time hello (the room only replays the UI bundle), so
+            // without this reply the viewer would never learn
+            // `sess`/`epoch`/`fp`/`relay_auth` and could not seal `enc`.
+            // The room relays this to all clients (v1: single viewer).
+            let reply = serde_json::json!({
+                "type": "hello",
+                "role": "agent",
+                "token": token,
+                "e2e": if e2e_on { Some(E2E_ALG) } else { None },
+                "sess": if e2e_on && !sess.is_empty() { Some(sess.as_str()) } else { None },
+                "epoch": if e2e_on { Some(epoch) } else { None },
+                "fp": local_fp.as_deref(),
+                "relay_auth": if relay_pin.is_some() { Some(true) } else { None },
+            });
+            send_out(out_tx, &reply);
         }
         Some("paired") => println!("web client connected via relay"),
         Some("ping") => {

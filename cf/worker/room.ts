@@ -43,6 +43,12 @@ export class TunnelRoom implements DurableObject {
   private uiPending: (string | null)[] | null = null
   // `--relay-auth`: agent gates data behind a PIN-inside-`enc`.
   private authGated = false
+  // Last agent `hello` caps (whitelisted fields only, no secrets — `fp` is
+  // public identity). Replayed to late-joining clients so a viewer that
+  // connects after the agent still learns `e2e`/`sess`/`epoch`/`fp`/
+  // `relay_auth` without waiting for an agent reconnect. (The agent also
+  // answers every client `hello` with its own — belt and suspenders.)
+  private lastAgentHello: Record<string, unknown> | null = null
   // Per-socket flood guard.
   private msgCount = new Map<WebSocket, { n: number; reset: number }>()
 
@@ -128,6 +134,12 @@ export class TunnelRoom implements DurableObject {
     } else {
       this.clients.add(server)
       await this.ensureUiLoaded()
+      // Late joiners missed the agent's connect-time hello — replay its
+      // caps first (plaintext control, no secrets) so the viewer can seal
+      // `enc` immediately instead of waiting for an agent reconnect.
+      if (this.lastAgentHello) {
+        this.send(server, this.lastAgentHello)
+      }
       this.send(server, {
         type: 'paired',
         agent: this.agent !== null,
@@ -168,12 +180,17 @@ export class TunnelRoom implements DurableObject {
     // Agent capability advertisement (plaintext control, no secrets):
     // `{type:hello, role:agent, token, e2e?, sess?, epoch?, fp?, relay_auth?}`.
     // Records `--relay-auth` gating so viewers prompt for the PIN
-    // (enforcement stays agent-side; the PIN never appears here).
+    // (enforcement stays agent-side; the PIN never appears here). Caps are
+    // cached (whitelisted fields only) and replayed to late joiners.
     if (typeof message === 'string') {
       try {
         const hello = JSON.parse(message) as {
           type?: string
           role?: string
+          e2e?: string
+          sess?: string
+          epoch?: number
+          fp?: string
           relay_auth?: boolean
         }
         if (hello?.type === 'hello' && this.roleOf(ws) === 'agent') {
@@ -182,6 +199,22 @@ export class TunnelRoom implements DurableObject {
           } else if (hello.relay_auth !== true && this.authGated) {
             this.authGated = false
           }
+          const caps: Record<string, unknown> = {
+            type: 'hello',
+            role: 'agent',
+          }
+          if (hello.e2e === 'aes-gcm-v1') caps['e2e'] = 'aes-gcm-v1'
+          if (typeof hello.sess === 'string' && /^[0-9a-f]{32}$/.test(hello.sess)) {
+            caps['sess'] = hello.sess
+          }
+          if (Number.isInteger(hello.epoch) && (hello.epoch as number) >= 0) {
+            caps['epoch'] = hello.epoch
+          }
+          if (typeof hello.fp === 'string' && /^[0-9a-f]{16}$/.test(hello.fp)) {
+            caps['fp'] = hello.fp
+          }
+          if (hello.relay_auth === true) caps['relay_auth'] = true
+          this.lastAgentHello = caps
         }
       } catch {
         // Not hello-shaped — fall through to opaque relay below.
@@ -353,6 +386,10 @@ export class TunnelRoom implements DurableObject {
   private drop(ws: WebSocket) {
     if (this.agent === ws) {
       this.agent = null
+      // Stale caps would seal viewers to a dead (sess,epoch) — drop them;
+      // the next agent connect re-advertises fresh ones.
+      this.lastAgentHello = null
+      this.authGated = false
       this.broadcast({ type: 'agent', online: false })
     }
     this.clients.delete(ws)
