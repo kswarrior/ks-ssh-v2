@@ -28,16 +28,16 @@ sshx.io · **tmate** · **upterm** · **ttyd** · **wetty** = wetty/GoTTY ·
 - **Local:** `ks-ssh --port 8080` on `127.0.0.1`/`0.0.0.0`; PTY over `/v1/shell`
   with reattach/scrollback/resize; tabs persist (`ks-ssh:terms*`).
 - **Login gate:** `--user/--pass` → login page + `ks_ssh_auth` cookie (HttpOnly +
-  Secure + SameSite=Lax, 12h absolute + 30min idle, `auth.rs:44-46,2691`) +
-  Settings → Users (Argon2id, `0600`, main-password gate, `auth.rs:244`). Legacy
+  Secure + SameSite=Lax, 12h absolute + 30min idle, `auth.rs:46-48,2713`) +
+  Settings → Users (Argon2id, `0600`, main-password gate, `auth.rs:246`). Legacy
   unsalted SHA-256 `users.json` still logs in once, then upgrades to Argon2id
-  (`auth.rs:784`). Roles admin/operator/viewer enforced per route
-  (`auth.rs:65,105,192,2798`); TOTP 2FA + recovery codes (`auth.rs:370,1979`);
+  (`auth.rs:786`). Roles admin/operator/viewer enforced per route
+  (`auth.rs:67,107,194,2820`); TOTP 2FA + recovery codes (`auth.rs:372,2001`);
   optional OIDC SSO behind `--oidc-issuer/--oidc-client-id` (auto-provision as
-  viewer, `auth.rs:1475,2403,2434`); 5 fails → 5min lockout (`auth.rs:55`).
+  viewer, `auth.rs:1477,2425,2456`); 5 fails → 5min lockout (`auth.rs:55`).
   Enforced on the shared router, so login/RBAC/audit apply over the relay
   too (agent proxies to a loopback server with the same middleware,
-  forwarding the viewer's cookie, `main.rs:289,542`, `relay.rs:418,542`).
+  forwarding the viewer's cookie, `main.rs:293`, `relay.rs:560,719`).
 - **Relay:** `--no-serve --token=` → outbound WSS + UI bundle push → `/v/TOKEN`,
   `#/view/TOKEN`; `--e2e-key=` reuses `k`, `--no-ui` skips push, `--no-e2e` =
   legacy plaintext. The pushed bundle is full-function: HTTP `/api/*` rides
@@ -47,7 +47,7 @@ sshx.io · **tmate** · **upterm** · **ttyd** · **wetty** = wetty/GoTTY ·
 - **Panel:** Files + Ports + Host are served by `/api/*` — locally and, via
   the `rpc-*` bridge, over relay with the same login/RBAC.
 - **Audit + recording:** append-only SQLite audit (`db.rs:335`, `GET /api/audit`,
-  `GET /api/audit/export`, `auth.rs:2312,2342`, Audit page with filter +
+  `GET /api/audit/export`, `auth.rs:2334,2364`, Audit page with filter +
   JSON/CSV export, `--audit-retain-days` default 90) and per-shell recording
   (timestamped in/out frames, `shell.rs:158`, `GET /api/terms/:id/recording`,
   replay player with play/pause/speed/scrub in Recordings + Terminal pages,
@@ -104,13 +104,13 @@ that is why KS leads; flip the weight to collab/audit and sshx/Teleport win.
 
 Case 9 re-scored 2026-09-14: KS 40 → **100** (Teleport parity at homelab
 scale). Evidence per rubric item:
-- **Strong auth:** Argon2id per-user salts (`auth.rs:244`), legacy SHA-256
-  migrates on login (`auth.rs:784`); min-12 password policy + strength meter
-  (`auth.rs:50,2723`, `Users.tsx`); 5 fails → 5min lockout per IP+user with
-  audit (`auth.rs:55,670` + `lockout_after_five_fails` test); HttpOnly+Secure+
+- **Strong auth:** Argon2id per-user salts (`auth.rs:246`), legacy SHA-256
+  migrates on login (`auth.rs:786`); min-12 password policy + strength meter
+  (`auth.rs:52,2745`, `Users.tsx`); 5 fails → 5min lockout per IP+user with
+  audit (`auth.rs:57,672` + `lockout_after_five_fails` test); HttpOnly+Secure+
   SameSite=Lax cookie, 12h absolute + 30min sliding idle, rotated on privilege
-  change (`auth.rs:44-46,2691`, `change_own_password`/`totp_verify` session
-  rotation); self-service change-password (`auth.rs:1941`, `POST
+  change (`auth.rs:46-48,2713`, `change_own_password`/`totp_verify` session
+  rotation); self-service change-password (`auth.rs:1963`, `POST
   /api/auth/change-password`).
 - **Least-privilege RBAC:** admin/operator/viewer (`auth.rs:65`), per-route
   matrix (`auth.rs:105,192`) enforced in middleware with 403 + audit row
@@ -118,12 +118,12 @@ scale). Evidence per rubric item:
   (`shell.rs:855,1057`); operator = + shell write/upload/mkdir, no
   kill/delete/chmod/users; admin = all. Owner always admin, legacy users
   default operator. Role picker + lockout status + session revoke in `Users.tsx`
-  (admin only); `GET /api/auth/me` reports role + 2FA (`auth.rs:1816`).
+  (admin only); `GET /api/auth/me` reports role + 2FA (`auth.rs:1838`).
   Covered by the `rbac_matrix` unit test.
 - **SSO/2FA option:** TOTP enroll/verify with otpauth URI + single-use recovery
-  codes (`auth.rs:370,1979`, `totp_enroll_verify_roundtrip` test, Login 2FA
+  codes (`auth.rs:372,2001`, `totp_enroll_verify_roundtrip` test, Login 2FA
   field + Users self-service); OIDC authorization-code + PKCE behind
-  `--oidc-issuer/--oidc-client-id` (`main.rs:73-88`, `auth.rs:1475,2403,2434`),
+  `--oidc-issuer/--oidc-client-id` (`main.rs:73-88`, `auth.rs:1477,2425,2456`),
   auto-provision as viewer, `--oidc-allow-domain` whitelist, tokens never
   logged.
 - **Full audit trail:** append-only SQLite `(ts, actor, ip, action, target,
@@ -132,7 +132,7 @@ scale). Evidence per rubric item:
   shell attach/detach, recording playback/delete (`shell.rs:724,786`), relay
   register/push/data (`relay.rs`, token only, never `k`/PIN). `GET
   /api/audit?limit&since` + `GET /api/audit/export?format=json|csv` (admin
-  only, `auth.rs:2312,2342`); Audit page with filter + JSON/CSV export
+  only, `auth.rs:2334,2364`); Audit page with filter + JSON/CSV export
   (`Audit.tsx`); retention `--audit-retain-days` (`db.rs:79`). Covered by the
   `audit_write_and_list` test.
 - **Session recording/replay:** per-shell timestamped in/out frames capped at
@@ -148,7 +148,7 @@ scale). Evidence per rubric item:
   legacy plaintext `hello.pin` only for non-E2E peers (`relay.rs:1151`) —
   before any `data`/`rpc`/`shell` bridge (`relay.rs:1081,1232,1339` +
   `relay-viewer-auth` audits); authed local users mint fresh PINs
-  (`POST /api/relay/pin`, `auth.rs:2625`). Strict-by-default E2E refuses
+  (`POST /api/relay/pin`, `auth.rs:2647`). Strict-by-default E2E refuses
   plaintext/downgrade peers with `relay-downgrade` audits
   (`relay.rs:1218,1240`). And with auth on, the relay is login-gated anyway:
   rpc/shell proxy to a loopback server running the same router, forwarding
