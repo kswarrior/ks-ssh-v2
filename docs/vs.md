@@ -18,7 +18,7 @@ sshx.io · **tmate** · **upterm** · **ttyd** · **wetty** = wetty/GoTTY ·
 | Crypto | AES-256-GCM `enc`, HKDF `ks-ssh-e2e-v1`, AAD=token, seq, `#k=` fragment only, `?k=` → 400 | SSH (host-key TOFU) | Argon2+AES, fragment key, relay sees ciphertext | None (relay sees plaintext) | SSH | TLS via proxy only | TLS via proxy only | SSH to target | TLS to gateway (gw decrypts) | Short-lived certs + MFA | WireGuard / Zero Trust | Encrypted via MS (trusts vendor) |
 | Terminal | Real PTY, multi-tab, reattach id + 256KB ring, 30min TTL, 64 sess, resize (`shell.rs`, `Terminal.tsx`) | Reference PTY + `tmux`/`mosh` | Canvas panes, cursors, predictive echo, ephemeral | tmux preserved | Plain shared session | Solid PTY, CJK/IME | Login/SSH wrapper | Web SSH | Gateway SSH | Joint sessions | Plain SSH over net | Full terminal + editor |
 | Files / ports / host | HOME-jailed files/editor (1/5/100MB caps) + `/proc` ports + kill + host metrics (`files.rs`, `ports.rs`, `host.rs`) | `scp`/`sftp` only | None | None | None | ZMODEM only | None | SFTP browser | SFTP browser | `scp`/SFTP, no health dash | SFTP/SCP | Full editor + port-fwd, no host dash |
-| Auth / audit | Opt `--user/--pass` + Users page + cookie; no SSO/RBAC/recording; relay link bearer-open | Keys/certs, no SSO/rec | Bearer link only | Bearer ro/rw links | SSH keys | Basic auth, `-R`, `-o` once | Login flags | Per-host SSH creds | LDAP/OIDC + recording | SSO/RBAC/MFA + recording (best) | IdP ACLs + recorder | MS/GitHub IdP + Live Share |
+| Auth / audit | Argon2id + RBAC (admin/operator/viewer) + TOTP/SSO + audit log + recording + opt relay PIN (`auth.rs`, `db.rs`, `shell.rs`, Audit/Recordings pages) | Keys/certs, no SSO/rec | Bearer link only | Bearer ro/rw links | SSH keys | Basic auth, `-R`, `-o` once | Login flags | Per-host SSH creds | LDAP/OIDC + recording | SSO/RBAC/MFA + recording (best) | IdP ACLs + recorder | MS/GitHub IdP + Live Share |
 | Frontend | Embedded single-file bundle + CF SPA (Home/SSH/View/Install/Settings, `App.tsx`) | Terminal client | Web canvas + chat | Basic web + SSH | None (SSH client) | Web xterm | Web login | Web client | HTML5 RDP/VNC/SSH | Web + `tsh` | Admin console + Serve | `vscode.dev` |
 | Routes / API | `/api/files\|ports\|host\|auth/*`, `/v1/shell`, `/v1/agent\|client`, `/v/TOKEN`, `/api/ui/*` | `ssh`/`scp`/`sftp` CLI | `sshx` → link; `… \| sh -s run` in CI | `tmate` → 4 endpoints | `upterm host -- bash` | `ttyd -p 7681 bash` | `wetty --ssh-host` / `gotty -w` | Host/user/key form | Connection mgmt API | Cluster API | Tailnet / Access policy | `code tunnel` |
 | Build / install | One static binary (`cli/release/ks-ssh`) + `wrangler` Worker; `curl …/ks-ssh -o ks-ssh && ./ks-ssh` | OS preinstall | `curl -sSf https://sshx.io/get \| sh` (self-host discouraged) | Package install; `tmate-server` self-host | Binary / `go install` | Single C binary | npm / binary / Docker | Docker / demo site | Servlet + DB + proxy | Cluster ops / Cloud | Account + enrol nodes | MS account, not self-host |
@@ -27,16 +27,31 @@ sshx.io · **tmate** · **upterm** · **ttyd** · **wetty** = wetty/GoTTY ·
 
 - **Local:** `ks-ssh --port 8080` on `127.0.0.1`/`0.0.0.0`; PTY over `/v1/shell`
   with reattach/scrollback/resize; tabs persist (`ks-ssh:terms*`).
-- **Login gate:** `--user/--pass` → login page + `ks_ssh_auth` cookie + Settings →
-  Users (salted SHA-256, `0600`, main-password gate). Local-UI only.
+- **Login gate:** `--user/--pass` → login page + `ks_ssh_auth` cookie (HttpOnly +
+  Secure + SameSite=Lax, 12h absolute + 30min idle, `auth.rs:44-46,2691`) +
+  Settings → Users (Argon2id, `0600`, main-password gate, `auth.rs:244`). Legacy
+  unsalted SHA-256 `users.json` still logs in once, then upgrades to Argon2id
+  (`auth.rs:784`). Roles admin/operator/viewer enforced per route
+  (`auth.rs:65,105,192,2798`); TOTP 2FA + recovery codes (`auth.rs:370,1979`);
+  optional OIDC SSO behind `--oidc-issuer/--oidc-client-id` (auto-provision as
+  viewer, `auth.rs:1475,2403,2434`); 5 fails → 5min lockout (`auth.rs:55`).
+  Local-UI only.
 - **Relay:** `--no-serve --token=` → outbound WSS + UI bundle push → `/v/TOKEN`,
   `#/view/TOKEN`; `--e2e-key=` reuses `k`, `--no-ui` skips push, `--no-e2e` =
   legacy plaintext. Thin SSH-page view = pairing/status; full shell = `/v/TOKEN`.
 - **Panel:** Files + Ports + Host are **local** (`/api/*`) — over relay they show
   `Cannot reach the host …`.
+- **Audit + recording:** append-only SQLite audit (`db.rs:335`, `GET /api/audit`,
+  `GET /api/audit/export`, `auth.rs:2312,2342`, Audit page with filter +
+  JSON/CSV export, `--audit-retain-days` default 90) and per-shell recording
+  (timestamped in/out frames, `shell.rs:158`, `GET /api/terms/:id/recording`,
+  replay player with play/pause/speed/scrub in Recordings + Terminal pages,
+  `--record-max-mb` default 10, consent banner via `GET /api/record/status`).
 - **Limits:** relay `data` acked not PTY-bridged yet; token guessable (routing
-  only, `k` seals); UI bundle plaintext by design; no collab/recording/SSO; one
-  Worker/DO relay, not a mesh.
+  only, `k` seals); UI bundle plaintext by design; no collab; one
+  Worker/DO relay, not a mesh. Relay link stays bearer-open by default —
+  `--relay-auth` closes it with a one-time viewer PIN (`auth.rs:1550`,
+  `relay.rs` viewer-PIN gate, never in query/logs).
 
 ## Scored Matrix (/100 per case)
 

@@ -4432,3 +4432,206 @@ a.file-link {
     height: min(420px, calc(100svh - 220px));
   }
 }
+
+/* ---- Case 9: Identity & audit (RBAC, audit, recordings, 2FA) ---- */
+
+.notice {
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: var(--accent-soft, rgba(40, 200, 64, 0.12));
+  border: 1px solid var(--glass-border);
+  color: var(--text-h);
+}
+
+.wrap-anywhere {
+  overflow-wrap: anywhere;
+  word-break: break-all;
+}
+
+/* Recording consent banner (Terminal page). */
+.rec-banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 8px 14px;
+  margin-bottom: 10px;
+  border-radius: 10px;
+  background: rgba(255, 170, 0, 0.1);
+  border: 1px solid rgba(255, 170, 0, 0.45);
+  color: var(--text-h);
+  font-size: 13px;
+}
+
+/* Read-only replay player. */
+.rec-player {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.rec-player-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.rec-speed {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--text-h);
+}
+
+.rec-speed select,
+.audit-filters select,
+.dialog-form select {
+  font: inherit;
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--glass-border);
+  background: var(--field-bg);
+  color: var(--text-h);
+}
+
+.rec-input-toggle {
+  margin: 0;
+  font-size: 13px;
+}
+
+.rec-scrub {
+  width: 100%;
+  accent-color: var(--accent, #28c840);
+}
+
+.rec-meta {
+  font-size: 12px;
+  color: var(--text-m, #8b949e);
+}
+
+.rec-screen {
+  margin: 0;
+  padding: 12px;
+  min-height: 160px;
+  max-height: 480px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  border-radius: 10px;
+  background: #000;
+  color: #e6edf3;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+/* Audit page. */
+.audit-filters {
+  display: grid;
+  grid-template-columns: 2fr 1fr 1fr 1fr;
+  gap: 10px;
+  margin: 12px 0;
+}
+
+@media (max-width: 768px) {
+  .audit-filters {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+.table-wrap {
+  overflow-x: auto;
+  border-radius: 10px;
+  border: 1px solid var(--glass-border);
+}
+
+.audit-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  color: var(--text-h);
+}
+
+.audit-table th,
+.audit-table td {
+  text-align: left;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--glass-border);
+  vertical-align: top;
+}
+
+.audit-table thead th {
+  position: sticky;
+  top: 0;
+  background: var(--card-bg, rgba(255, 255, 255, 0.04));
+  white-space: nowrap;
+}
+
+.audit-table .nowrap {
+  white-space: nowrap;
+}
+
+/* Password strength meter (Users page). */
+.pw-meter {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  color: var(--text-m, #8b949e);
+}
+
+.pw-meter-bars {
+  display: inline-flex;
+  gap: 4px;
+}
+
+.pw-meter-bars span {
+  width: 28px;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--glass-border);
+}
+
+.pw-meter-bars span.on[data-level='1'] {
+  background: #f85149;
+}
+
+.pw-meter-bars span.on[data-level='2'] {
+  background: #d29922;
+}
+
+.pw-meter-bars span.on[data-level='3'] {
+  background: #a371f7;
+}
+
+.pw-meter-bars span.on[data-level='4'] {
+  background: #28c840;
+}
+
+/* Login: SSO divider. */
+.login-sso {
+  margin-top: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: stretch;
+  text-align: center;
+}
+
+.login-sso-sep {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--text-m, #8b949e);
+  font-size: 13px;
+}
+
+.login-sso-sep::before,
+.login-sso-sep::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--glass-border);
+}
