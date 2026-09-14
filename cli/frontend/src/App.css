@@ -1537,6 +1537,8 @@
   padding-top: 0;
   margin-left: auto;
   flex-shrink: 0;
+  width: 100%;
+  align-items: center;
 }
 
 .files-body {
@@ -2547,6 +2549,8 @@ a.file-link {
   display: flex;
   gap: 10px;
   align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   flex-shrink: 0;
   margin-left: auto;
 }

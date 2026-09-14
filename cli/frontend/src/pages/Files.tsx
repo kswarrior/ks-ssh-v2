@@ -949,72 +949,105 @@ export default function FilesPage() {
         <h1 id="page-title-files" className="sr-only">
           Files
         </h1>
-        <div className="row-actions files-actions">
-          <button
-            type="button"
-            className="btn btn-sm btn-primary"
-            onClick={openCreate}
-            disabled={loading || busy || !!error || !data}
-            title="Create a file or folder here"
-          >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-              <path d="M12 5v14M5 12h14" />
+        <div className="row-actions ports-actions files-actions">
+          <label className="ports-search">
+            <span className="sr-only">Search files in this folder</span>
+            <svg className="ports-search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <circle cx="11" cy="11" r="7" />
+              <path d="m21 21-4.3-4.3" />
             </svg>
-            <span className="btn-label">Create</span>
-          </button>
-          <button
-            type="button"
-            className="btn btn-sm"
-            onClick={openUpload}
-            disabled={loading || busy || !!error || !data}
-            title="Upload files or fetch a URL here"
-          >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-              <path d="m17 8-5-5-5 5" />
-              <path d="M12 3v12" />
-            </svg>
-            <span className="btn-label">Upload</span>
-          </button>
-          <button
-            type="button"
-            className="btn btn-sm"
-            onClick={() => void load(data?.home)}
-            disabled={loading || busy}
-            title="Go to HOME"
-          >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-              <path d="m3 10 9-7 9 7v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
-              <path d="M9 22V12h6v10" />
-            </svg>
-            <span className="btn-label">Home</span>
-          </button>
-          <button
-            type="button"
-            className="btn btn-sm"
-            onClick={() => data?.parent && void load(data.parent)}
-            disabled={loading || busy || !data?.parent}
-            title={data?.parent ?? 'Already at HOME'}
-          >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-              <path d="M12 19V5" />
-              <path d="m5 12 7-7 7 7" />
-            </svg>
-            <span className="btn-label">Up</span>
-          </button>
-          <button
-            type="button"
-            className="btn btn-sm"
-            onClick={() => void load(data?.path)}
-            disabled={loading || busy}
-            title="Refresh"
-          >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-              <path d="M21 12a9 9 0 1 1-2.64-6.36" />
-              <path d="M21 3v6h-6" />
-            </svg>
-            <span className="btn-label">Refresh</span>
-          </button>
+            <input
+              type="text"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search files…"
+              autoComplete="off"
+              spellCheck={false}
+            />
+          </label>
+          <div className="ports-right">
+            <label className="ports-select-wrap">
+              <span className="sr-only">File type filter</span>
+              <select
+                className="ports-select"
+                value={typeFilter}
+                onChange={(e) => setTypeFilter(e.target.value as FileTypeFilter)}
+                aria-label="File type filter"
+              >
+                <option value="all">All</option>
+                <option value="dirs">Folders</option>
+                <option value="files">Files</option>
+              </select>
+              <svg className="ports-select-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="m6 9 6 6 6-6" />
+              </svg>
+            </label>
+            <button
+              type="button"
+              className="btn btn-sm btn-primary"
+              onClick={openCreate}
+              disabled={loading || busy || !!error || !data}
+              title="Create a file or folder here"
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M12 5v14M5 12h14" />
+              </svg>
+              <span className="btn-label">Create</span>
+            </button>
+            <button
+              type="button"
+              className="btn btn-sm"
+              onClick={openUpload}
+              disabled={loading || busy || !!error || !data}
+              title="Upload files or fetch a URL here"
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                <path d="m17 8-5-5-5 5" />
+                <path d="M12 3v12" />
+              </svg>
+              <span className="btn-label">Upload</span>
+            </button>
+            <button
+              type="button"
+              className="btn btn-sm"
+              onClick={() => void load(data?.home)}
+              disabled={loading || busy}
+              title="Go to HOME"
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="m3 10 9-7 9 7v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+                <path d="M9 22V12h6v10" />
+              </svg>
+              <span className="btn-label">Home</span>
+            </button>
+            <button
+              type="button"
+              className="btn btn-sm"
+              onClick={() => data?.parent && void load(data.parent)}
+              disabled={loading || busy || !data?.parent}
+              title={data?.parent ?? 'Already at HOME'}
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M12 19V5" />
+                <path d="m5 12 7-7 7 7" />
+              </svg>
+              <span className="btn-label">Up</span>
+            </button>
+            <button
+              type="button"
+              className="btn btn-sm"
+              onClick={() => void load(data?.path)}
+              disabled={loading || busy}
+              title="Refresh"
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M21 12a9 9 0 1 1-2.64-6.36" />
+                <path d="M21 3v6h-6" />
+              </svg>
+              <span className="btn-label">Refresh</span>
+            </button>
+          </div>
         </div>
       </div>
 
@@ -1066,39 +1099,6 @@ export default function FilesPage() {
               onChange={(e) => setShowHidden(e.target.checked)}
             />
             Hidden
-          </label>
-        </div>
-        <div className="files-tools">
-          <label className="ports-search">
-            <span className="sr-only">Search files in this folder</span>
-            <svg className="ports-search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-              <circle cx="11" cy="11" r="7" />
-              <path d="m21 21-4.3-4.3" />
-            </svg>
-            <input
-              type="text"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search files…"
-              autoComplete="off"
-              spellCheck={false}
-            />
-          </label>
-          <label className="ports-select-wrap">
-            <span className="sr-only">File type filter</span>
-            <select
-              className="ports-select"
-              value={typeFilter}
-              onChange={(e) => setTypeFilter(e.target.value as FileTypeFilter)}
-              aria-label="File type filter"
-            >
-              <option value="all">All</option>
-              <option value="dirs">Folders</option>
-              <option value="files">Files</option>
-            </select>
-            <svg className="ports-select-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-              <path d="m6 9 6 6 6-6" />
-            </svg>
           </label>
         </div>
         <p className="files-sub">
