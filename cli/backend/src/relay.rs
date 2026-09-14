@@ -705,6 +705,8 @@ async fn spawn_shell_bridge(
     shells.lock().await.insert(id.clone(), ShellBridge { to_local: in_tx });
 
     let out_tx_fail = out_tx.clone();
+    let shared_fail = shared.clone();
+    let peer_fail = peer.clone();
     let id_fail = id.clone();
     let shells_fail = shells.clone();
     let run = async move {
@@ -814,12 +816,13 @@ async fn spawn_shell_bridge(
     if let Err(e) = run.await {
         eprintln!("relay shell bridge {id_fail} failed: {e:#}");
         let v = serde_json::json!({"type":"shell-closed","id":id_fail,"code":1011,"reason":"loopback unreachable"});
-        // `out_tx_fail` borrows force move-closure conflicts; use shared path.
-        let _ = v;
-        send_out(
-            &out_tx_fail,
-            &serde_json::json!({"type":"shell-closed","id":id_fail,"code":1011,"reason":"loopback unreachable"}),
-        );
+        if e2e_on {
+            if peer_fail.load(Ordering::SeqCst) {
+                let _ = send_enc_shared(&out_tx_fail, &shared_fail, &v).await;
+            }
+        } else {
+            send_out(&out_tx_fail, &v);
+        }
     }
     shells_fail.lock().await.remove(&id_fail);
 }
@@ -859,45 +862,98 @@ async fn on_text(
     text: &str,
     push_ui: bool,
     token: &str,
-    e2e: &mut Option<E2e>,
-    peer_e2e: &mut bool,
+    shared: SharedE2e,
+    peer: SharedPeer,
+    e2e_on: bool,
+    local_fp: Option<String>,
     relay_pin: &Option<std::sync::Arc<crate::auth::RelayPinState>>,
     viewer_ok: &mut bool,
 ) -> anyhow::Result<()> {
     // Fast path: `enc` envelopes (opaque to the relay, sealed for us).
     if let Some(env) = crate::e2e::parse_envelope(text) {
+        if !e2e_on {
+            // Legacy agent (`--no-e2e`) got sealed traffic it cannot read.
+            return Ok(());
+        }
+        let pt = {
+            let mut g = shared.lock().await;
+            let Some(state) = g.as_mut() else {
+                return Ok(());
+            };
+            match state.decrypt_next(&env) {
+                Ok(pt) => pt,
+                Err(_) => {
+                    // Wrong key / tampered / cross-session / replay — generic.
+                    eprintln!("E2E decrypt failed (wrong key or tampered message)");
+                    crate::db::audit("-", "local", "relay-e2e-error", token, "deny");
+                    return Ok(());
+                }
+            }
+        };
+        // Inner protocol is the existing JSON (auth, data, rpc-*, shell-*).
+        let inner: serde_json::Value = match serde_json::from_slice(&pt) {
+            Ok(v) => v,
+            Err(_) => return Ok(()),
+        };
+        // PIN inside enc takes precedence (never plaintext when E2E works).
+        if inner.get("type").and_then(|t| t.as_str()) == Some("auth") {
+            if let Some(pin_state) = relay_pin {
+                let attempt = inner.get("pin").and_then(|v| v.as_str()).unwrap_or("");
+                let ok = !attempt.is_empty() && pin_state.verify(attempt);
+                *viewer_ok = ok;
+                crate::db::audit(
+                    "-",
+                    "local",
+                    "relay-viewer-auth",
+                    token,
+                    if ok { "ok" } else { "deny" },
+                );
+                let resp = if ok {
+                    serde_json::json!({"type":"auth-ok"})
+                } else {
+                    eprintln!("relay viewer PIN rejected (inside E2E)");
+                    serde_json::json!({"type":"auth-fail"})
+                };
+                let _ = send_enc_shared(out_tx, &shared, &resp).await;
+            } else {
+                let _ = send_enc_shared(out_tx, &shared, &serde_json::json!({"type":"auth-ok"})).await;
+            }
+            return Ok(());
+        }
         // `--relay-auth`: refuse sealed data until the viewer PIN checked out.
-        // (Audit logs the token only, never key material.)
         if relay_pin.is_some() && !*viewer_ok {
             eprintln!("relay viewer PIN required before data bridge");
             crate::db::audit("-", "local", "relay-data", token, "deny");
+            let _ = send_enc_shared(out_tx, &shared, &serde_json::json!({"type":"auth-required"})).await;
             return Ok(());
         }
-        match e2e {
-            Some(state) => match state.decrypt_next(&env) {
-                Ok(pt) => {
-                    // Inner protocol is the existing JSON (data, resize, …).
-                    let inner: serde_json::Value = match serde_json::from_slice(&pt) {
-                        Ok(v) => v,
-                        Err(_) => return Ok(()),
-                    };
-                    match inner.get("type").and_then(|t| t.as_str()) {
-                        Some("data") => {
-                            // v1 legacy ack path (kept for old peers).
-                            crate::db::audit("-", "local", "relay-data", token, "ok");
-                            send_enc_via(out_tx, state, &serde_json::json!({"type":"ack"})).await?;
-                        }
-                        _ => {}
-                    }
-                }
-                Err(_) => {
-                    // Wrong key / tampered tag — generic message, no details.
-                    eprintln!("E2E decrypt failed (wrong key or tampered message)");
-                }
-            },
-            None => {
-                // Legacy agent got sealed traffic it cannot read — ignore.
+        match inner.get("type").and_then(|t| t.as_str()) {
+            Some("data") => {
+                // v1 legacy ack path (kept for old peers) — now sealed.
+                crate::db::audit("-", "local", "relay-data", token, "ok");
+                let _ = send_enc_shared(out_tx, &shared, &serde_json::json!({"type":"ack"})).await;
             }
+            Some("ping") => {
+                let _ = send_enc_shared(out_tx, &shared, &serde_json::json!({"type":"pong"})).await;
+            }
+            Some("rpc-begin") | Some("rpc-chunk") | Some("rpc-end") => {
+                handle_inner_rpc(
+                    out_tx,
+                    http_client,
+                    local_base,
+                    pending_rpc,
+                    &inner,
+                    token,
+                    shared.clone(),
+                    peer.clone(),
+                    e2e_on,
+                )
+                .await;
+            }
+            Some("shell-open") | Some("shell-send") | Some("shell-close") => {
+                handle_inner_shell(out_tx, shells.clone(), &inner, local_base, token, shared.clone(), peer.clone(), e2e_on).await;
+            }
+            _ => {}
         }
         return Ok(());
     }
@@ -908,37 +964,66 @@ async fn on_text(
     };
     match msg.get("type").and_then(|t| t.as_str()) {
         Some("hello") => {
-            // Peer capability negotiation: `{type:hello, role, token, e2e?}`.
-            // With `--relay-auth` the client must also present `pin` (its
-            // value is never logged; only the outcome is audited).
-            if let Some(pin_state) = relay_pin {
-                let pin_ok = msg
-                    .get("pin")
-                    .and_then(|v| v.as_str())
-                    .is_some_and(|p| pin_state.verify(p));
-                *viewer_ok = pin_ok;
-                // Audit with token only — never the PIN.
-                crate::db::audit(
-                    "-",
-                    "local",
-                    "relay-viewer-auth",
-                    token,
-                    if pin_ok { "ok" } else { "deny" },
-                );
-                if !pin_ok {
-                    eprintln!("relay viewer PIN rejected");
-                }
-            }
+            // Peer capability negotiation:
+            // `{type:hello, role, token, e2e?, sess?, epoch?, fp?, pin?(legacy)}`.
+            // Strict-by-default: E2E-on locally requires the peer to
+            // advertise E2E, else hard-fail with `E2E error` + audit deny
+            // and refuse all plaintext below. `--no-e2e` is the only escape
+            // hatch (explicit, loud + audited at startup).
             let alg = msg.get("e2e").and_then(|v| v.as_str());
-            if alg == Some(E2E_ALG) {
-                *peer_e2e = true;
+            let peer_ok = alg == Some(E2E_ALG);
+            peer.store(peer_ok, Ordering::SeqCst);
+            if peer_ok {
                 println!("web client supports E2E ({E2E_ALG})");
-            } else {
-                *peer_e2e = false;
-                if e2e.is_some() {
-                    eprintln!(
-                        "Relay is NOT end-to-end encrypted for this peer (legacy client without E2E) — falling back to plaintext for its messages."
+                // Identity binding: peer fp must match ours (same k).
+                if e2e_on {
+                    if let (Some(theirs), Some(ours)) = (
+                        msg.get("fp").and_then(|v| v.as_str()),
+                        local_fp.as_deref(),
+                    ) {
+                        if theirs != ours {
+                            eprintln!(
+                                "E2E error: fingerprint mismatch (wrong key?) — refusing plaintext"
+                            );
+                            crate::db::audit("-", "local", "relay-downgrade", token, "deny");
+                            peer.store(false, Ordering::SeqCst);
+                        }
+                    }
+                }
+            } else if e2e_on {
+                eprintln!("{E2E_ERROR_MSG}");
+                crate::db::audit("-", "local", "relay-downgrade", token, "deny");
+            }
+            // Legacy plaintext PIN: accepted ONLY from non-E2E peers for
+            // compat. Once E2E is negotiated the PIN must arrive inside
+            // `enc` (`auth`) — plaintext `pin` here is ignored (never logged).
+            if let Some(pin_state) = relay_pin {
+                let has_plaintext_pin = msg.get("pin").and_then(|v| v.as_str()).is_some();
+                if has_plaintext_pin && !(e2e_on && peer_e2e_now(&peer)) {
+                    let pin_ok = msg
+                        .get("pin")
+                        .and_then(|v| v.as_str())
+                        .is_some_and(|p| pin_state.verify(p));
+                    *viewer_ok = pin_ok;
+                    crate::db::audit(
+                        "-",
+                        "local",
+                        "relay-viewer-auth",
+                        token,
+                        if pin_ok { "ok" } else { "deny" },
                     );
+                    if !pin_ok {
+                        eprintln!("relay viewer PIN rejected");
+                    } else {
+                        eprintln!(
+                            "note: plaintext viewer PIN accepted (legacy peer) — prefer E2E + PIN inside enc"
+                        );
+                    }
+                } else if has_plaintext_pin {
+                    eprintln!(
+                        "plaintext viewer PIN ignored — resend inside E2E (never in hello/query/logs)"
+                    );
+                    crate::db::audit("-", "local", "relay-viewer-auth", token, "deny");
                 }
             }
         }
@@ -951,6 +1036,10 @@ async fn on_text(
             // ui push needs the raw WS sink; signal via out channel is not
             // possible here (chunked binary) — the next agent_session hello
             // re-pushes. Tell the client to wait for ui-ready.
+            // `ui-*` stays plaintext by design (public build output, zero
+            // secrets — proven by `ui_bundle_has_no_secrets` test + no-store).
+            // When `--relay-auth` gates data, the UI shell still loads but
+            // every data/rpc/shell bridge denies until PIN-inside-enc verifies.
             if push_ui {
                 println!("ui re-requested — client waits for cached replay or reconnect repush");
                 send_out(out_tx, &serde_json::json!({"type":"ui-pending"}));
@@ -969,9 +1058,15 @@ async fn on_text(
                 crate::db::audit("-", "local", "relay-data", token, "deny");
                 return Ok(());
             }
-            // Plaintext data: legacy peer, or peer that chose plaintext.
-            if e2e.is_some() {
-                eprintln!("legacy plaintext data (relay-visible) — peer without E2E");
+            // Strict: E2E-on refuses plaintext data (no silent downgrade).
+            if e2e_on && !strict_peer_ok(e2e_on, peer_e2e_now(&peer)) {
+                eprintln!("{E2E_ERROR_MSG} (data)");
+                crate::db::audit("-", "local", "relay-downgrade", token, "deny");
+                return Ok(());
+            }
+            if e2e_on {
+                // Unreachable when strict (peer must have E2E, hence enc) —
+                // kept only for `--no-e2e` peers that cannot seal.
             }
             crate::db::audit("-", "local", "relay-data", token, "ok");
             send_out(out_tx, &serde_json::json!({"type":"ack"}));
