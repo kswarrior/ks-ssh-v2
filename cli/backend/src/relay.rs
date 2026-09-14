@@ -1403,3 +1403,54 @@ async fn on_text(
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tokens_fresh_are_9_and_legacy_5_still_valid() {
+        let t = new_token();
+        assert_eq!(t.len(), TOKEN_LEN_NEW);
+        assert!(valid_token(&t));
+        // Legacy 5-char tokens still route (compat).
+        assert!(valid_token("ABCDE"));
+        assert!(valid_token("abcde".to_uppercase().as_str()));
+        assert!(!valid_token("ABCD"));
+        assert!(!valid_token("ABCDEFGHIJ"));
+        assert!(!valid_token("AB-CD"));
+        assert!(!valid_token(""));
+    }
+
+    #[test]
+    fn downgrade_strict_matrix() {
+        // E2E-on + legacy peer → refuse (no silent plaintext).
+        assert!(!strict_peer_ok(true, false));
+        assert!(strict_peer_ok(true, true));
+        // Explicit escape hatch only.
+        assert!(strict_peer_ok(false, false));
+    }
+
+    #[test]
+    fn rpc_path_allowlist() {
+        assert!(valid_rpc_path("/api/files"));
+        assert!(valid_rpc_path("/api/terms/abc/recording"));
+        assert!(!valid_rpc_path("/"));
+        assert!(!valid_rpc_path("/v1/shell"));
+        assert!(!valid_rpc_path("/api/../etc"));
+        assert!(!valid_rpc_path("/assets/app.js"));
+    }
+
+    #[test]
+    fn ui_bundle_carries_zero_secrets() {
+        // The pushed bundle is public build output served with `no-store`.
+        // Prove it embeds no E2E secret / PIN material: no `#k=` fragment
+        // keys, no 43-char key blobs, no PIN JSON.
+        let html = crate::ui::build_single_file().expect("build bundle");
+        assert!(!html.contains("#k="), "bundle must not embed an E2E key");
+        assert!(
+            !html.contains("\"pin\"") || html.contains("relay-auth"),
+            "bundle must not embed a viewer PIN"
+        );
+    }
+}

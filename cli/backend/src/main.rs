@@ -438,7 +438,7 @@ async fn main() {
     if let Some(ref t) = token
         && !relay::valid_token(t)
     {
-        eprintln!("bad token (want 5 letters/numbers)");
+        eprintln!("bad token (want 5-9 letters/numbers; fresh runs mint 9)");
         std::process::exit(2);
     }
 
