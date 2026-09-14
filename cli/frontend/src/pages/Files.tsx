@@ -1024,8 +1024,19 @@ export default function FilesPage() {
         const text = await res.text().catch(() => '')
         throw new Error(text || `search failed (${res.status})`)
       }
+      // Old backends (and the relay view) answer unknown /api/* routes with
+      // the app HTML shell (200 OK) — detect that before .json() throws
+      // "Unexpected token '<'".
+      const ctype = res.headers.get('content-type') ?? ''
+      if (!ctype.includes('application/json')) {
+        throw new Error(
+          'Deep search needs an up-to-date ks-ssh on the local UI (http://127.0.0.1:8080). ' +
+            'The relay view and older backends return the app page here instead of results — ' +
+            'rebuild with ./rebuild.sh and reopen this tab locally.',
+        )
+      }
       const json = (await res.json()) as SearchResponse
-      setDeep({ query: q, results: json.entries, truncated: json.truncated, loading: false, error: null })
+      setDeep({ query: q, results: json.entries ?? [], truncated: !!json.truncated, loading: false, error: null })
     } catch (err) {
       setDeep({ query: q, results: [], truncated: false, loading: false, error: err instanceof Error ? err.message : 'Search failed.' })
     }

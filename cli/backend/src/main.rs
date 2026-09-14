@@ -1,4 +1,5 @@
 mod auth;
+mod db;
 mod e2e;
 mod files;
 mod host;
@@ -41,6 +42,10 @@ struct Cli {
     /// Skip the local web UI (no open port at all).
     #[arg(long)]
     no_serve: bool,
+    /// SQLite file for terminal session history (`./ks-ssh.db` by default).
+    /// Any visitor can reattach to these shells — they are shared on purpose.
+    #[arg(long, default_value = "./ks-ssh.db")]
+    db: String,
     /// Relay via the Worker instead of opening a port.
     /// Give a token to reuse it, or pass `--token=` for a random one.
     #[arg(long, num_args(0..=1), require_equals(true), default_missing_value = "")]
