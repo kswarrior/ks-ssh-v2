@@ -129,6 +129,7 @@ async fn serve(host: String, port: u16, auth: Option<Arc<AuthState>>) {
             axum::routing::put(auth::api_update_user).delete(auth::api_delete_user),
         )
         .route("/v1/shell", get(shell::ws_handler))
+        .route("/api/terms", get(shell::api_list_terms))
         .with_state(state);
 
     let app = match auth {
@@ -227,6 +228,27 @@ async fn main() {
     } else {
         None
     };
+
+    // Terminal history DB — shells are shared on purpose, so any visitor
+    // can reattach to them (same gate as the UI: login when --user/--pass).
+    // Pure `--no-serve` agents serve nothing locally, so they skip it.
+    if !cli.no_serve {
+        let raw = cli.db.trim();
+        if raw.is_empty() {
+            println!("Terminal history: OFF (--db empty)");
+        } else {
+            let path = std::path::PathBuf::from(raw);
+            let loaded = db::init(Some(&path));
+            if db::enabled() {
+                println!(
+                    "Terminal history: {} session(s) in {} (--db to move it)",
+                    loaded,
+                    path.display()
+                );
+                shell::load_persisted();
+            }
+        }
+    }
 
     match (cli.no_serve, token) {
         // Pure agent: no open port, only outbound WSS.
