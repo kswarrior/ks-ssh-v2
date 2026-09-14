@@ -312,7 +312,7 @@ async fn agent_session(
     // a single sender task owns the WS sink (no lock contention).
     let (out_tx, mut out_rx): (OutTx, mpsc::UnboundedReceiver<String>) =
         mpsc::unbounded_channel();
-    let mut send_task = tokio::spawn(async move {
+    let send_task = tokio::spawn(async move {
         while let Some(text) = out_rx.recv().await {
             if tx.send(Message::Text(text.into())).await.is_err() {
                 break;
