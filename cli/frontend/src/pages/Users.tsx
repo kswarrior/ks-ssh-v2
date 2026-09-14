@@ -36,6 +36,8 @@ export default function UsersPage() {
   const [loadError, setLoadError] = useState<string | null>(null)
   const [disabled, setDisabled] = useState(false)
 
+  const [showAdd, setShowAdd] = useState(false)
+
   const [name, setName] = useState('')
   const [pass, setPass] = useState('')
   const [show, setShow] = useState(false)
@@ -78,6 +80,14 @@ export default function UsersPage() {
     void load()
   }, [load])
 
+  const openAdd = () => {
+    setName('')
+    setPass('')
+    setShow(false)
+    setCreateError(null)
+    setShowAdd(true)
+  }
+
   const create = async (ev: React.FormEvent) => {
     ev.preventDefault()
     if (creating) return
@@ -91,6 +101,7 @@ export default function UsersPage() {
       })
       setName('')
       setPass('')
+      setShowAdd(false)
       await load()
     } catch (e) {
       setCreateError((e as Error).message)
@@ -169,14 +180,17 @@ export default function UsersPage() {
   }
 
   return (
-    <section className="page settings-page" aria-labelledby="page-title-users">
+    <section className="page settings-page" aria-label="Users">
       <div className="page-head">
-        <h1 id="page-title-users">Users</h1>
-        <div className="row-actions files-actions">
-          <a className="btn btn-sm" href="#/settings">
-            ← Settings
-          </a>
-        </div>
+        <a className="btn btn-sm" href="#/settings">
+          ← Settings
+        </a>
+        <span style={{ flex: 1 }} />
+        {!disabled && (
+          <button type="button" className="btn btn-sm btn-primary" onClick={openAdd}>
+            + Add
+          </button>
+        )}
       </div>
 
       {disabled ? (
@@ -189,59 +203,6 @@ export default function UsersPage() {
         </div>
       ) : (
         <>
-          <div className="card">
-            <h2>Add user</h2>
-            <p className="lead">
-              Extra logins for the web UI. Anyone logged in can create users;
-              editing or deleting an account needs the main password.
-            </p>
-            <form className="form" onSubmit={create}>
-              <label className="field">
-                Username
-                <input
-                  type="text"
-                  autoComplete="username"
-                  required
-                  minLength={3}
-                  maxLength={32}
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  placeholder="e.g. friend"
-                />
-              </label>
-              <label className="field">
-                Password
-                <input
-                  type={show ? 'text' : 'password'}
-                  autoComplete="new-password"
-                  required
-                  minLength={4}
-                  value={pass}
-                  onChange={(e) => setPass(e.target.value)}
-                  placeholder="At least 4 characters"
-                />
-              </label>
-              <label className="field checkbox-row">
-                <input
-                  type="checkbox"
-                  checked={show}
-                  onChange={(e) => setShow(e.target.checked)}
-                />
-                Show password
-              </label>
-              {createError && (
-                <p className="login-error" role="alert">
-                  {createError}
-                </p>
-              )}
-              <div className="row-actions">
-                <button type="submit" className="btn btn-primary" disabled={creating}>
-                  {creating ? 'Adding…' : 'Add user'}
-                </button>
-              </div>
-            </form>
-          </div>
-
           <div className="card">
             <h2>Accounts{users ? ` (${users.length})` : ''}</h2>
             {loadError && (
@@ -290,6 +251,77 @@ export default function UsersPage() {
             )}
           </div>
         </>
+      )}
+
+      {showAdd && (
+        <div
+          className="dialog-overlay"
+          onClick={() => setShowAdd(false)}
+          onKeyDown={closeOnEscape(() => setShowAdd(false))}
+        >
+          <div
+            className="dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="users-add-title"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 id="users-add-title">Add user</h2>
+            <p className="lead">
+              Extra logins for the web UI. Anyone logged in can create users;
+              editing or deleting an account needs the main password.
+            </p>
+            <form className="dialog-form" onSubmit={create}>
+              <label className="field">
+                Username
+                <input
+                  type="text"
+                  autoComplete="username"
+                  required
+                  minLength={3}
+                  maxLength={32}
+                  autoFocus
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  placeholder="e.g. friend"
+                />
+              </label>
+              <label className="field">
+                Password
+                <input
+                  type={show ? 'text' : 'password'}
+                  autoComplete="new-password"
+                  required
+                  minLength={4}
+                  value={pass}
+                  onChange={(e) => setPass(e.target.value)}
+                  placeholder="At least 4 characters"
+                />
+              </label>
+              <label className="field checkbox-row">
+                <input
+                  type="checkbox"
+                  checked={show}
+                  onChange={(e) => setShow(e.target.checked)}
+                />
+                Show password
+              </label>
+              {createError && (
+                <p className="login-error" role="alert">
+                  {createError}
+                </p>
+              )}
+              <div className="dialog-actions">
+                <button type="button" className="btn" onClick={() => setShowAdd(false)}>
+                  Cancel
+                </button>
+                <button type="submit" className="btn btn-primary" disabled={creating}>
+                  {creating ? 'Adding…' : 'Add user'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
       )}
 
       {editing && (

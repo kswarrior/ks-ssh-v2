@@ -106,8 +106,7 @@ function tabLabel(proc: string | null): string {
  * Best-effort foreground process from a submitted shell line:
  * first program word (`sudo apt update` → `apt`, `./serve.sh` → `serve.sh`).
  * Returns null for empty lines.
- */
-function procFromLine(line: string): string | null {
+ */function procFromLine(line: string): string | null {
   const segment = line.split(/[;&|]+/)[0]?.trim() ?? ''
   if (!segment) return null
   const skip = new Set([

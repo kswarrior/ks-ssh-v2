@@ -13,7 +13,7 @@
 //! one short statement.
 
 use std::{
-    path::{Path, PathBuf},
+    path::Path,
     sync::{LazyLock, Mutex as StdMutex},
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -177,6 +177,7 @@ pub fn load_all() -> Vec<PersistedSession> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
 
     fn temp_path(tag: &str) -> PathBuf {
         std::env::temp_dir().join(format!(
