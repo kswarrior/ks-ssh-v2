@@ -664,16 +664,6 @@ pub struct RecordingQuery {
 /// GET /api/terms/:id/recording?from&limit — timestamped input+output frames
 /// for replay (viewer+; middleware enforces, handler audits playback).
 /// `data` is base64 (standard). Frames are oldest-first from `seq >= from`.
-pub async fn api_get_recording(
-    opt_ctx: Option<Extension<auth::AuthContext>>,
-    headers: HeaderMap,
-    Path(id): Path<String>,
-) -> impl IntoResponse {
-    // Parse range from the raw query (Path-only extractor keeps this handler
-    // compatible with both authed and open modes).
-    let _ = &headers;
-    api_get_recording_inner(opt_ctx, headers, id, 0, 2000).await
-}
 
 async fn api_get_recording_inner(
     opt_ctx: Option<Extension<auth::AuthContext>>,

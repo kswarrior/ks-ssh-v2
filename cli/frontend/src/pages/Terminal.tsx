@@ -1168,6 +1168,76 @@ function ShellSession({
     focusKeys()
   }
 
+  const openSearch = () => {
+    setSearchOpen(true)
+    setSearchMiss(false)
+    setTimeout(() => searchInputRef.current?.focus(), 30)
+  }
+
+  const runSearch = (dir: 1 | -1) => {
+    const addon = searchRef.current
+    if (!addon || !searchTerm) return
+    try {
+      const found = dir > 0 ? addon.findNext(searchTerm) : addon.findPrevious(searchTerm)
+      setSearchMiss(!found)
+    } catch {
+      // Search backend unavailable — ignore.
+    }
+  }
+
+  const closeSearch = () => {
+    try {
+      searchRef.current?.clearDecorations()
+    } catch {
+      // Already gone — ignore.
+    }
+    setSearchOpen(false)
+    setSearchMiss(false)
+    focusKeys()
+  }
+
+  const exportLog = () => {
+    const addon = serializeRef.current
+    if (!addon) return
+    try {
+      const text = addon.serialize()
+      const short = (sidRef.current ?? 'terminal').slice(0, 8)
+      downloadText(`terminal-${short}.txt`, text)
+    } catch {
+      // Serialize unavailable — nothing to download.
+    }
+    focusKeys()
+  }
+
+  /** Touch-bar key: tracked, queued and sent exactly like typed input. */
+  const touchSend = (data: string) => {
+    trackInput(data)
+    send(data)
+    focusKeys()
+  }
+
+  const touchPaste = () => {
+    try {
+      const clip = navigator.clipboard
+      if (clip?.readText) {
+        void clip.readText().then(
+          (t) => {
+            if (t) {
+              trackInput(t)
+              send(t)
+            }
+            focusKeys()
+          },
+          () => focusKeys(),
+        )
+        return
+      }
+    } catch {
+      // Clipboard unavailable — nothing to paste.
+    }
+    focusKeys()
+  }
+
   // Latest actions for the parent tab ⋮ menu — a stable proxy registered
   // once, forwarding to the current implementations above.
   const actionsRef = useRef<TermHandle | null>(null)
@@ -1176,6 +1246,8 @@ function ShellSession({
     stop: stopProc,
     reconnect,
     copy: copyAll,
+    search: openSearch,
+    exportLog,
   }
   useEffect(() => {
     const proxy: TermHandle = {
@@ -1183,6 +1255,8 @@ function ShellSession({
       stop: () => actionsRef.current?.stop(),
       reconnect: () => actionsRef.current?.reconnect(),
       copy: () => actionsRef.current?.copy(),
+      search: () => actionsRef.current?.search(),
+      exportLog: () => actionsRef.current?.exportLog(),
     }
     onHandle(id, proxy)
     return () => {
@@ -1199,6 +1273,83 @@ function ShellSession({
           className="term-xterm"
           aria-label="Linux shell terminal — tap then type"
         />
+        {searchOpen && (
+          <div
+            className="term-search"
+            role="search"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <input
+              ref={searchInputRef}
+              type="text"
+              value={searchTerm}
+              placeholder="Find in scrollback…"
+              aria-label="Find in terminal scrollback"
+              autoComplete="off"
+              spellCheck={false}
+              onChange={(e) => {
+                setSearchTerm(e.target.value)
+                setSearchMiss(false)
+                const addon = searchRef.current
+                if (addon && e.target.value) {
+                  try {
+                    const found = addon.findNext(e.target.value)
+                    setSearchMiss(!found)
+                  } catch {
+                    // Ignore mid-typing errors.
+                  }
+                } else {
+                  try {
+                    addon?.clearDecorations()
+                  } catch {
+                    // Ignore.
+                  }
+                }
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault()
+                  runSearch(e.shiftKey ? -1 : 1)
+                } else if (e.key === 'Escape') {
+                  e.preventDefault()
+                  closeSearch()
+                }
+              }}
+            />
+            {searchMiss && (
+              <span className="term-search-miss" role="status">
+                not found
+              </span>
+            )}
+            <button
+              type="button"
+              className="term-search-btn"
+              aria-label="Previous match"
+              title="Previous match (Shift+Enter)"
+              onClick={() => runSearch(-1)}
+            >
+              ↑
+            </button>
+            <button
+              type="button"
+              className="term-search-btn"
+              aria-label="Next match"
+              title="Next match (Enter)"
+              onClick={() => runSearch(1)}
+            >
+              ↓
+            </button>
+            <button
+              type="button"
+              className="term-search-btn"
+              aria-label="Close search"
+              title="Close search (Esc)"
+              onClick={closeSearch}
+            >
+              ✕
+            </button>
+          </div>
+        )}
         {!stuck && (
           <button
             type="button"
@@ -1210,6 +1361,36 @@ function ShellSession({
           >
             ↓ latest
           </button>
+        )}
+        {retryAttempt > 0 && status !== 'online' && (
+          <div className="term-offline term-retrying" role="status">
+            <span>
+              reconnecting… (attempt {retryAttempt}
+              {rttMs != null ? ` · last ${rttMs}ms` : ''})
+            </span>
+            <span className="term-offline-actions">
+              <button
+                type="button"
+                className="term-pill-btn"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  reconnect()
+                }}
+              >
+                Retry now
+              </button>
+              <button
+                type="button"
+                className="term-pill-btn"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  copyAll()
+                }}
+              >
+                Copy
+              </button>
+            </span>
+          </div>
         )}
         {status === 'offline' && (
           <div className="term-offline" role="status">
@@ -1238,6 +1419,44 @@ function ShellSession({
             </span>
           </div>
         )}
+        <div
+          className="term-touchbar"
+          aria-label="Touch keyboard extras"
+          onClick={(e) => e.stopPropagation()}
+        >
+          {(
+            [
+              ['Esc', '\x1b'],
+              ['Tab', '\t'],
+              ['←', '\x1b[D'],
+              ['↑', '\x1b[A'],
+              ['↓', '\x1b[B'],
+              ['→', '\x1b[C'],
+              ['Home', '\x1b[H'],
+              ['End', '\x1b[F'],
+              ['^C', '\x03'],
+              ['^D', '\x04'],
+            ] as [string, string][]
+          ).map(([label, seq]) => (
+            <button
+              key={label}
+              type="button"
+              className="term-touchkey"
+              aria-label={label === '^C' ? 'Control C' : label === '^D' ? 'Control D' : label}
+              onClick={() => touchSend(seq)}
+            >
+              {label}
+            </button>
+          ))}
+          <button
+            type="button"
+            className="term-touchkey"
+            aria-label="Paste from clipboard"
+            onClick={touchPaste}
+          >
+            Paste
+          </button>
+        </div>
       </div>
     </div>
   )
@@ -1287,6 +1506,41 @@ export default function TerminalPage({
   } | null>(null)
   // Live session actions per tab, registered by each ShellSession.
   const handlesRef = useRef(new Map<string, TermHandle>())
+  // Global terminal font size (touch bar / menu A−/A+, persisted).
+  const [fontSize, setFontSize] = useState<number>(loadFontSize)
+  // Predictive local echo (Mosh-lite): engages only above 50ms RTT.
+  const [predict, setPredict] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem(PREDICT_KEY) !== '0'
+    } catch {
+      return true
+    }
+  })
+  // Smoothed RTT per tab/session for the tab bar.
+  const [latencies, setLatencies] = useState<Record<string, number | null>>({})
+  // Bell: unread activity per tab + brief flash animation.
+  const [unread, setUnread] = useState<Record<string, boolean>>({})
+  const [flash, setFlash] = useState<Record<string, number>>({})
+  // Ephemeral vertical split panes (tab id -> second session). Splits are
+  // never persisted — a refresh drops them, the main tabs reattach.
+  const [splits, setSplits] = useState<Record<string, TermSession>>({})
+  const splitCounter = useRef(0)
+
+  // Persist the font + prediction preferences.
+  useEffect(() => {
+    try {
+      localStorage.setItem(FONT_KEY, String(fontSize))
+    } catch {
+      // Storage unavailable — applies for this session only.
+    }
+  }, [fontSize])
+  useEffect(() => {
+    try {
+      localStorage.setItem(PREDICT_KEY, predict ? '1' : '0')
+    } catch {
+      // Storage unavailable — applies for this session only.
+    }
+  }, [predict])
 
   // Persist tabs so a refresh or revisit reattaches to the same shells.
   useEffect(() => {

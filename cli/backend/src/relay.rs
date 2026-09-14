@@ -95,11 +95,15 @@ fn https_base(ws_base: &str) -> String {
 
 /// Hold the relay connection forever (reconnects with backoff).
 /// `e2e_key`: `Some` = E2E on (default), `None` = legacy plaintext (`--no-e2e`).
+/// `relay_pin`: `Some` = `--relay-auth` — the agent requires a one-time
+/// viewer PIN in the client's `hello` before bridging `data` (closes the
+/// bearer-open bypass honestly). Audit rows log the token only, never `k`/PIN.
 pub async fn run_agent(
     relay: &str,
     token: &str,
     push_ui: bool,
     e2e_key: Option<E2eKey>,
+    relay_pin: Option<std::sync::Arc<crate::auth::RelayPinState>>,
 ) {
     // rustls ships without a crypto provider — install ring once.
     let _ = rustls::crypto::ring::default_provider().install_default();
@@ -108,8 +112,11 @@ pub async fn run_agent(
     let http = https_base(base);
     // NOTE: the short token is safe to log (routing only). The E2E secret
     // `k` must NEVER appear in logs except in the one-time share links below.
+    // The viewer PIN (when `--relay-auth`) is likewise printed once and never
+    // logged again.
     println!("Relay token: {token} — enter it in the SSH page to connect.");
     println!("Relay: {url} (no open port needed)");
+    crate::db::audit("-", "local", "relay-register", token, "ok");
     if let Some(ref k) = e2e_key {
         let secret = k.to_base64url();
         println!("E2E: ON (AES-256-GCM, {E2E_ALG}) — relay sees only ciphertext sizes.");
@@ -120,6 +127,9 @@ pub async fn run_agent(
     } else {
         println!("E2E: OFF (legacy --no-e2e) — relay can see plaintext.");
     }
+    if relay_pin.is_some() {
+        println!("Relay auth: ON — viewers must present the PIN printed at startup (or a minted one via POST /api/relay/pin). Default without --relay-auth stays bearer-open.");
+    }
     if push_ui {
         println!("Fullscreen UI: {http}/v/{token}  (or {http}/#/view/{token})");
     }
@@ -128,7 +138,8 @@ pub async fn run_agent(
     loop {
         // Clone the key per session (seq resets to 0 each connection).
         let key_clone = e2e_key.clone();
-        match agent_session(&url, token, push_ui, key_clone).await {
+        let pin_clone = relay_pin.clone();
+        match agent_session(&url, token, push_ui, key_clone, pin_clone).await {
             Ok(()) => backoff_secs = 1,
             Err(e) => eprintln!("relay error: {e} (retry in {backoff_secs}s)"),
         }
@@ -142,11 +153,12 @@ async fn agent_session(
     token: &str,
     push_ui: bool,
     e2e_key: Option<E2eKey>,
+    relay_pin: Option<std::sync::Arc<crate::auth::RelayPinState>>,
 ) -> anyhow::Result<()> {
     let (ws, _) = connect_async(url)
         .await
         .map_err(|e| anyhow::anyhow!("{e}"))?;
-    // Log token only — never the E2E secret.
+    // Log token only — never the E2E secret or PIN.
     println!("relay connected (token {token})");
     let (mut tx, mut rx) = ws.split();
 

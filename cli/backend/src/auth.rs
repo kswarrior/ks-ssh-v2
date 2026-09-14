@@ -120,6 +120,7 @@ pub fn required_role(method: &str, path: &str) -> Required {
         || path.starts_with("/api/auth/totp/")
         || path == "/api/auth/sessions/mine"
         || path == "/api/relay/pin/status"
+        || path == "/api/chat"
     {
         return Required::Viewer;
     }
@@ -1937,17 +1938,6 @@ pub struct ChangePasswordBody {
 
 /// POST /api/auth/change-password {"current_password","new_password"}.
 /// Self-service — no `owner_pass` needed. Verifies the current password.
-pub async fn api_change_password(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-    Extension(ctx): Extension<AuthContext>,
-) -> Response {
-    // Body parsed manually so we can return JSON errors (axum's Json
-    // rejection would otherwise be plain text).
-    let _ = &headers;
-    (StatusCode::INTERNAL_SERVER_ERROR, "use api_change_password_json").into_response()
-}
-
 pub async fn api_change_password_json(
     State(state): State<AppState>,
     headers: HeaderMap,
