@@ -51,19 +51,6 @@ function isZipName(name: string): boolean {
   return extOf(name) === 'zip'
 }
 
-type StatResponse = {
-  path: string
-  name: string
-  is_dir: boolean
-  size: number
-  modified: number | null
-  uid?: number
-  gid?: number
-  mode: number
-  mode_octal: string
-  readonly: boolean
-}
-
 type SearchHit = {
   name: string
   path: string
@@ -561,8 +548,10 @@ export default function FilesPage() {
   const [confirmBulkDelete, setConfirmBulkDelete] = useState(false)
   // Deep (recursive) search results; null = browse mode.
   const [deep, setDeep] = useState<{ query: string; results: SearchHit[]; truncated: boolean; loading: boolean; error: string | null } | null>(null)
-  const [view, setView] = useState<ViewMode>('grid')
+  const [sortKey, setSortKey] = useState<SortKey>('name')
+  const [sortDir, setSortDir] = useState<SortDir>('asc')
   const [selected, setSelected] = useState<string[]>([])
+  const [view, setView] = useState<ViewMode>('grid')
   const [previewing, setPreviewing] = useState<FileEntry | null>(null)
   const [propsEntry, setPropsEntry] = useState<FileEntry | null>(null)
   const [propsMode, setPropsMode] = useState('')
