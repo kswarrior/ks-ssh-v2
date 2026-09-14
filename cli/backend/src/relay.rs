@@ -56,6 +56,8 @@ const RPC_CHUNK_RAW: usize = 48 * 1024;
 const MAX_RPC_BYTES: usize = 32 * 1024 * 1024;
 /// Hard cap on chunks per proxied body (1024 × 48KB ≈ 48MB envelope).
 const MAX_RPC_CHUNKS: usize = 1024;
+/// Max concurrent pending RPC uploads (prevents memory exhaustion).
+const MAX_PENDING_RPC: usize = 64;
 
 type WsTx = futures_util::stream::SplitSink<
     tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>,
