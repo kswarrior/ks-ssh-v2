@@ -1957,7 +1957,7 @@ export default function TerminalPage({
           </svg>
           Terminal
         </button>
-        <HostTerms sessions={sessions} onAttach={attachHost} />
+        <HostTerms sessions={sessions} splits={splits} onAttach={attachHost} />
       </section>
     )
   }
@@ -2047,7 +2047,7 @@ export default function TerminalPage({
         Terminal
       </h1>
       <RecordBanner />
-      <HostTerms sessions={sessions} onAttach={attachHost} />
+      <HostTerms sessions={sessions} splits={splits} onAttach={attachHost} />
       <div className="term-bar" role="tablist" aria-label="Terminals">
         {sessions.map((t, i) => {
           const isActive = t.id === active.id
