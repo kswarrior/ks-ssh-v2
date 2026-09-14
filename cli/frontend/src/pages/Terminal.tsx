@@ -252,11 +252,40 @@ function RecordBanner() {
   )
 }
 
+/** Kill one backend shell explicitly so closing a tab never leaves a live orphan. */
+async function killHostTerm(sid: string): Promise<boolean> {
+  try {
+    const res = await fetch(`/api/terms/${encodeURIComponent(sid)}`, {
+      method: 'DELETE',
+      credentials: 'same-origin',
+    })
+    // 404 = already gone (double-click / race) — treat as killed.
+    return res.ok || res.status === 404
+  } catch {
+    return false
+  }
+}
+
+/** Client-side backend session id: 128-bit hex, matches `valid_session_id`. */
+function newSid(): string {
+  try {
+    const b = new Uint8Array(16)
+    crypto.getRandomValues(b)
+    return Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('')
+  } catch {
+    return `${Date.now().toString(36)}${Math.floor(Math.random() * 1e9).toString(36)}`
+  }
+}
+
 /**
- * Terminals living on the host (SQLite `--db`, shared on purpose).
- * Any visitor sees them here and can attach — live shells reattach,
- * ended ones replay their saved output. Hidden when the backend has no
- * list endpoint (relay view, old backend) or when the host has none yet.
+ * Other terminals living on this host (SQLite `--db`, shared on purpose).
+ *
+ * Your own open tabs are hidden here — this lists only sessions you have
+ * NOT attached in this browser, so a fresh page no longer scares you with
+ * "anyone can attach" rows that are actually your own tabs. Live shells
+ * reattach, ended ones replay their saved output. Hidden when the backend
+ * has no list endpoint (relay view, old backend) or when there is nothing
+ * else on the host.
  */
 function HostTerms({
   sessions,
@@ -266,11 +295,41 @@ function HostTerms({
   onAttach: (sid: string) => void
 }) {
   const [host, setHost] = useState<HostTerm[] | null>(null)
+  const [killing, setKilling] = useState<string | null>(null)
+
+  const load = useCallback(async () => {
+    try {
+      const res = await fetch('/api/terms', {
+        cache: 'no-store',
+        credentials: 'same-origin',
+      })
+      if (!res.ok) {
+        setHost((prev) => prev ?? null)
+        return null
+      }
+      const data = (await res.json()) as {
+        sessions?: Partial<HostTerm>[]
+      }
+      const list = Array.isArray(data.sessions)
+        ? data.sessions.filter(
+            (s): s is HostTerm =>
+              !!s &&
+              typeof s.id === 'string' &&
+              typeof s.alive === 'boolean',
+          )
+        : []
+      setHost(list)
+      return list
+    } catch {
+      setHost((prev) => prev ?? null)
+      return null
+    }
+  }, [])
 
   useEffect(() => {
     let alive = true
     let first = true
-    const load = async () => {
+    const tick = async () => {
       try {
         const res = await fetch('/api/terms', {
           cache: 'no-store',
@@ -301,26 +360,48 @@ function HostTerms({
         if (first && alive) setHost(null)
       }
     }
-    void load()
-    const id = window.setInterval(load, 15000)
+    void tick()
+    const id = window.setInterval(tick, 15000)
     return () => {
       alive = false
       window.clearInterval(id)
     }
   }, [])
 
-  if (!host || host.length === 0) return null
   const attached = new Set(
     sessions.map((t) => t.sid).filter((s): s is string => !!s),
   )
+  // Hide your own open tabs — only show *other* host sessions. This is the
+  // fix for "I didn't open these": previously your own tabs appeared here
+  // as scary "shared — anyone can attach" rows.
+  const others = (host ?? []).filter((h) => !attached.has(h.id))
+  if (!host) return null
+  if (others.length === 0) return null
+  const onKill = async (sid: string) => {
+    setKilling(sid)
+    try {
+      await killHostTerm(sid)
+      await load()
+    } finally {
+      setKilling((cur) => (cur === sid ? null : cur))
+    }
+  }
   return (
-    <div className="host-terms" aria-label="Terminals on this host">
+    <div className="host-terms" aria-label="Other terminals on this host">
       <div className="host-terms-head">
-        <span>On this host</span>
-        <span className="host-terms-sub">shared — anyone can attach</span>
+        <span>Other sessions on this host ({others.length})</span>
+        <span className="host-terms-sub">left by closed tabs — attach or clean up</span>
+        <button
+          type="button"
+          className="btn btn-sm"
+          onClick={() => void load()}
+          title="Refresh the host session list"
+        >
+          Refresh
+        </button>
       </div>
       <ul className="host-terms-list">
-        {host.map((h) => (
+        {others.map((h) => (
           <li key={h.id} className="host-term">
             <span
               className={`term-tab-dot${h.alive ? ' on' : ''}`}
@@ -345,8 +426,18 @@ function HostTerms({
               type="button"
               className="btn btn-sm"
               onClick={() => onAttach(h.id)}
+              title={h.alive ? 'Take over this live shell (the other view is detached)' : 'Open this ended session’s saved output'}
             >
-              {attached.has(h.id) ? 'Open' : 'Attach'}
+              Attach
+            </button>
+            <button
+              type="button"
+              className="btn btn-sm btn-danger"
+              disabled={killing === h.id}
+              onClick={() => void onKill(h.id)}
+              title="Kill this host shell and delete its history"
+            >
+              {killing === h.id ? '…' : 'Kill'}
             </button>
           </li>
         ))}

@@ -3069,6 +3069,8 @@ mod tests {
         assert!(!role_allows(Role::Operator, "DELETE", "/api/files"));
         assert!(!role_allows(Role::Operator, "POST", "/api/files/chmod"));
         assert!(!role_allows(Role::Operator, "POST", "/api/ports/kill"));
+        assert!(role_allows(Role::Operator, "DELETE", "/api/terms/abc123"));
+        assert!(!role_allows(Role::Viewer, "DELETE", "/api/terms/abc123"));
         assert!(!role_allows(Role::Operator, "GET", "/api/auth/users"));
         assert!(!role_allows(Role::Operator, "POST", "/api/auth/users"));
         assert!(!role_allows(Role::Operator, "GET", "/api/audit"));

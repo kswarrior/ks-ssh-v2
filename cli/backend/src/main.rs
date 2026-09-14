@@ -245,6 +245,7 @@ fn build_router(
         // Shell + recordings.
         .route("/v1/shell", get(shell::ws_handler))
         .route("/api/terms", get(shell::api_list_terms))
+        .route("/api/terms/{id}", delete(shell::api_kill_term))
         .route(
             "/api/terms/{id}/recording",
             get(shell::api_get_recording_range).delete(shell::api_delete_recording),
