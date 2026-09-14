@@ -182,8 +182,8 @@ export default function UsersPage() {
   return (
     <section className="page settings-page" aria-label="Users">
       <div className="page-head">
-        <a className="btn btn-sm" href="#/settings">
-          ← Settings
+        <a className="btn btn-sm" href="#/more">
+          ← More
         </a>
         <span style={{ flex: 1 }} />
         {!disabled && (

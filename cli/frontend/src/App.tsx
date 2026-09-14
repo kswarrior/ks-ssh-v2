@@ -3,11 +3,11 @@ import TerminalPage, { type SshEntry } from './pages/Terminal'
 import FilesPage from './pages/Files'
 import PortsPage from './pages/Ports'
 import HostPage from './pages/Host'
-import SettingsPage from './pages/Settings'
+import MorePage from './pages/More'
 import UsersPage from './pages/Users'
 import LoginPage from './pages/Login'
 
-type TabId = 'terminal' | 'files' | 'ports' | 'host' | 'settings' | 'users'
+type TabId = 'terminal' | 'files' | 'ports' | 'host' | 'more' | 'users'
 
 type TabItem = { id: TabId; label: string; hash: string }
 
@@ -17,11 +17,11 @@ const TABS: TabItem[] = [
   { id: 'ports', label: 'Ports', hash: '#/ports' },
 ]
 
-// Host, Settings and Users are not tabs — they open from buttons/links.
+// Host, More and Users are not tabs — they open from buttons/links.
 const HOST_ITEM: TabItem = { id: 'host', label: 'Host', hash: '#/host' }
-const SETTINGS_ITEM: TabItem = { id: 'settings', label: 'Settings', hash: '#/settings' }
+const MORE_ITEM: TabItem = { id: 'more', label: 'More', hash: '#/more' }
 const USERS_ITEM: TabItem = { id: 'users', label: 'Users', hash: '#/users' }
-const EXTRA_ITEMS: TabItem[] = [HOST_ITEM, SETTINGS_ITEM, USERS_ITEM]
+const EXTRA_ITEMS: TabItem[] = [HOST_ITEM, MORE_ITEM, USERS_ITEM]
 
 type Theme = 'light' | 'dark'
 
@@ -58,6 +58,8 @@ function writeJSON(key: string, value: unknown) {
 /** Map a location hash to a tab, or null when it is not a tab route. */
 function hashToTab(hash: string): TabId | null {
   const clean = hash.replace(/^#\/?/, '')
+  // Old Settings URL still opens More.
+  if (clean === 'settings') return 'more'
   const found = TABS.find((t) => t.hash.replace(/^#\/?/, '') === clean)
   if (found) return found.id
   const extra = EXTRA_ITEMS.find((t) => t.hash.replace(/^#\/?/, '') === clean)
@@ -460,11 +462,11 @@ export default function App() {
           </button>
           <button
             type="button"
-            className={`icon-btn${tab === 'settings' ? ' active' : ''}`}
-            aria-label="Settings"
-            title="Settings"
-            aria-current={tab === 'settings' ? 'page' : undefined}
-            onClick={() => go(SETTINGS_ITEM)}
+            className={`icon-btn${tab === 'more' || tab === 'users' ? ' active' : ''}`}
+            aria-label="More"
+            title="More"
+            aria-current={tab === 'more' || tab === 'users' ? 'page' : undefined}
+            onClick={() => go(MORE_ITEM)}
           >
             <svg
               viewBox="0 0 24 24"
@@ -475,8 +477,9 @@ export default function App() {
               strokeLinejoin="round"
               aria-hidden="true"
             >
-              <circle cx="12" cy="12" r="3" />
-              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h.01a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h.01a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.01a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+              <circle cx="5" cy="12" r="1.6" />
+              <circle cx="12" cy="12" r="1.6" />
+              <circle cx="19" cy="12" r="1.6" />
             </svg>
           </button>
           <button
@@ -539,7 +542,7 @@ export default function App() {
         </header>
 
         <main
-          className={`content${tab === 'terminal' ? ' content-term' : tab === 'files' ? ' content-files' : tab === 'host' ? ' content-host' : tab === 'settings' || tab === 'users' ? ' content-settings' : ''}`}
+          className={`content${tab === 'terminal' ? ' content-term' : tab === 'files' ? ' content-files' : tab === 'host' ? ' content-host' : tab === 'more' || tab === 'users' ? ' content-settings' : ''}`}
           id="main"
           tabIndex={-1}
         >
@@ -555,8 +558,8 @@ export default function App() {
           <div hidden={tab !== 'host'} className="tab-panel">
             <HostPage />
           </div>
-          <div hidden={tab !== 'settings'} className="tab-panel">
-            <SettingsPage authProtected={auth.protected} />
+          <div hidden={tab !== 'more'} className="tab-panel">
+            <MorePage authProtected={auth.protected} />
           </div>
           <div hidden={tab !== 'users'} className="tab-panel">
             <UsersPage />
