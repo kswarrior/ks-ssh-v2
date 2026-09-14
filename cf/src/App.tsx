@@ -1,5 +1,12 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
-import { E2E_ALG, parseFragmentKey, type E2eStatus } from './e2e'
+import {
+  E2E_ALG,
+  checkTofu,
+  extractKeyFromText,
+  fingerprintK,
+  parseFragmentKey,
+  type E2eStatus,
+} from './e2e'
 
 /**
  * Inject relay globals into a WSS-fetched UI bundle before rendering it as
@@ -854,6 +861,66 @@ function SessionPage({
   const [cacheBust, setCacheBust] = useState(0)
   const wrapRef = useRef<HTMLDivElement | null>(null)
 
+  // E2E lobby state: `k` lives ONLY in the fragment + memory (never fetch,
+  // never storage). Missing `k` → paste-link prompt; wrong `k` surfaces as
+  // `E2E error` from the live UI shim (decrypt-failed). Fingerprint TOFU
+  // mirrors the CLI's printed `E2E fingerprint:` line.
+  const [fragKey, setFragKey] = useState<string | null>(() => parseFragmentKey())
+  const [paste, setPaste] = useState('')
+  const [pasteError, setPasteError] = useState<string | null>(null)
+  const [fp, setFp] = useState<string | null>(null)
+  const [tofuChanged, setTofuChanged] = useState(false)
+  const [tofuFirst, setTofuFirst] = useState(false)
+  const [gated, setGated] = useState(false)
+
+  // Keep `k` in sync with the fragment (back/forward, paste-apply below).
+  useEffect(() => {
+    const onHash = () => setFragKey(parseFragmentKey())
+    window.addEventListener('hashchange', onHash)
+    return () => window.removeEventListener('hashchange', onHash)
+  }, [])
+
+  // Fingerprint + TOFU from the fragment key (never stored — fp only).
+  useEffect(() => {
+    let alive = true
+    setFp(null)
+    setTofuChanged(false)
+    setTofuFirst(false)
+    if (!fragKey || !activeToken) return
+    void fingerprintK(fragKey)
+      .then((f) => {
+        if (!alive) return
+        setFp(f)
+        const t = checkTofu(activeToken, f)
+        setTofuChanged(t.changed)
+        setTofuFirst(t.first)
+      })
+      .catch(() => {
+        if (alive) setFp(null)
+      })
+    return () => {
+      alive = false
+    }
+  }, [fragKey, activeToken])
+
+  const applyPaste = () => {
+    const k = extractKeyFromText(paste)
+    if (!k) {
+      setPasteError('No valid key found — paste the full link the CLI printed (it contains #k=…).')
+      return
+    }
+    // Fragment-only: the key never touches query/fetch/storage. The pasted
+    // text itself is dropped from memory immediately.
+    const h = window.location.hash || '#/'
+    const base = h.split('#k=')[0]!.split('&k=')[0]!.split('?k=')[0]!
+    window.location.hash = `${base}#k=${k}`
+    setPaste('')
+    setPasteError(null)
+    setFragKey(k)
+  }
+
+  const e2eStatus: E2eStatus = tofuChanged ? 'error' : fragKey ? 'on' : 'off'
+
   // Browser tab title follows the session.
   useEffect(() => {
     document.title =
@@ -940,10 +1007,18 @@ function SessionPage({
     }
     ws.onmessage = (e) => {
       try {
-        const msg = JSON.parse(String(e.data)) as { type?: string }
+        const msg = JSON.parse(String(e.data)) as {
+          type?: string
+          gated?: boolean
+          relay_auth?: boolean
+        }
         // `enc` is opaque sealed traffic — ignore here (UI is plaintext).
         if (msg?.type === 'enc') return
+        // `--relay-auth`: the room/agent advertises gating so the lobby can
+        // prompt for the PIN (enforcement is agent-side, PIN inside `enc`).
+        if (msg?.gated === true || msg?.relay_auth === true) setGated(true)
         if (msg?.type === 'ui-ready') {
+          if (msg?.gated === true) setGated(true)
           setCacheBust((n) => n + 1)
         }
       } catch {
