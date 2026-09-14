@@ -32,9 +32,29 @@
 //! PLAINTEXT — it is public build output, needed for fullscreen caching in
 //! `room.ts`. Never tunnel secrets inside UI messages.
 //!
-//! Control plaintext allowed: `hello` (token+role only, no `k`), `paired`,
-//! `agent` online/offline, `ping`/`pong`, `ui-request`/`ui-ready`/`ui-pending`/
-//! `ui-missing`/`ui-error`/`ui-stored`. Everything sensitive MUST be `enc`.
+//! Control plaintext allowed: `hello` (token+role+e2e/epoch/sess/fp only,
+//! no `k`, no PIN), `paired`, `agent` online/offline, `ping`/`pong`,
+//! `ui-request`/`ui-ready`/`ui-pending`/`ui-missing`/`ui-error`/`ui-stored`.
+//! Everything sensitive MUST be `enc`. The viewer PIN travels ONLY inside
+//! `enc` as `{"type":"auth","pin":"..."}` (never plaintext `hello`);
+//! plaintext `pin` in `hello` is legacy and ignored when both sides do E2E.
+//!
+//! Session binding (reconnect-safe, reflection-safe):
+//! - The agent mints a random `sess` id per process run and an `epoch` per
+//!   connection (0,1,2…), advertised in `hello`.
+//! - AAD = `TOKEN` for legacy peers (empty session, epoch 0, no direction),
+//!   else `TOKEN|sess|dir|epoch` with `dir` = `a2c` (agent→client) or
+//!   `c2a` (client→agent). Cross-session / cross-epoch / reflected
+//!   ciphertext fails the GCM tag by construction.
+//! - `seq` stays strictly increasing per direction within one
+//!   (sess,epoch,dir); a reconnect bumps `epoch`, so old-epoch replays can
+//!   never satisfy the new AAD even if `seq` restarts at 0.
+//! - Inner plaintexts carry a random `_pad` (0–64 bytes) to blur sizes.
+//!
+//! Identity: `E2eKey::fingerprint()` = hex(SHA-256(`ks-ssh-e2e-fp-v1` ‖ raw))
+//! truncated to 16 chars. The CLI prints it at startup and advertises it as
+//! `fp` in `hello`; the viewer computes the same from `#k=` and hard-fails
+//! on mismatch (TOFU: first-seen fp remembered per token, warn on change).
 
 use aes_gcm::{
     Aes256Gcm, KeyInit,
@@ -50,6 +70,16 @@ pub const E2E_ALG: &str = "aes-gcm-v1";
 pub const E2E_VERSION: u32 = 1;
 /// HKDF info for domain separation.
 pub const HKDF_INFO: &[u8] = b"ks-ssh-e2e-v1";
+/// Fingerprint domain separation (`fp` in `hello`, CLI startup line).
+pub const FP_INFO: &[u8] = b"ks-ssh-e2e-fp-v1";
+/// Direction labels for session-bound AAD.
+pub const DIR_A2C: &str = "a2c";
+pub const DIR_C2A: &str = "c2a";
+/// Generic downgrade error (no details — never leak which side/tag failed).
+pub const E2E_ERROR_MSG: &str =
+    "E2E error: peer without E2E — refusing plaintext (relay would see secrets)";
+/// Cap per decrypted inner plaintext (chunks stay far below this).
+pub const MAX_ENC_PLAINTEXT: usize = 512 * 1024;
 /// Explicit 32-byte zero salt so Rust and WebCrypto derive the same subkey.
 const HKDF_SALT: [u8; 32] = [0u8; 32];
 
@@ -114,14 +144,107 @@ impl E2eKey {
             .expect("hkdf expand with fixed length");
         out
     }
+
+    /// Agent fingerprint for TOFU: hex(SHA-256(`ks-ssh-e2e-fp-v1` ‖ raw)),
+    /// truncated to 16 chars. Printed by the CLI, advertised as `fp` in
+    /// `hello`, recomputed by the viewer from `#k=` (never transmitted as
+    /// a secret — it only binds the identity both sides already share).
+    pub fn fingerprint(&self) -> String {
+        use sha2::Digest;
+        let mut h = sha2::Sha256::new();
+        h.update(FP_INFO);
+        h.update(self.0);
+        let sum = h.finalize();
+        hex_of(&sum[..8])
+    }
+}
+
+/// Lowercase hex of bytes.
+fn hex_of(bytes: &[u8]) -> String {
+    let mut s = String::with_capacity(bytes.len() * 2);
+    for b in bytes {
+        s.push(char::from_digit((b >> 4) as u32, 16).unwrap_or('0'));
+        s.push(char::from_digit((b & 0xf) as u32, 16).unwrap_or('0'));
+    }
+    s
+}
+
+/// Fresh random session id (16 bytes → 32 hex chars) minted per agent run.
+/// Advertised in `hello` as `sess`; binds AAD so cross-session replays fail.
+pub fn new_session_id() -> String {
+    let mut raw = [0u8; 16];
+    if getrandom::fill(&mut raw).is_err() {
+        // Fallback (still unique per call): time + process id mixed.
+        let t = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        for (i, b) in raw.iter_mut().enumerate() {
+            *b = ((t >> (8 * (i % 8))) ^ (std::process::id() as u128) ^ (i as u128 * 31)) as u8;
+        }
+    }
+    hex_of(&raw)
+}
+
+/// AAD for AES-GCM. Legacy peers (empty session, empty dir, epoch 0) bind
+/// only the room token; session peers bind `TOKEN|sess|dir|epoch`.
+pub fn aad(token: &str, session: &str, dir: &str, epoch: u64) -> Vec<u8> {
+    let t = token.to_uppercase();
+    if session.is_empty() && dir.is_empty() && epoch == 0 {
+        return t.into_bytes();
+    }
+    format!("{t}|{session}|{dir}|{epoch}").into_bytes()
+}
+
+/// Strict-by-default: E2E-on locally requires the peer to advertise E2E.
+/// `false` → hard-fail with [`E2E_ERROR_MSG`] + audit, never send plaintext.
+pub fn strict_peer_ok(e2e_on: bool, peer_e2e: bool) -> bool {
+    if e2e_on { peer_e2e } else { true }
+}
+
+/// Insert a random `_pad` (0–64 bytes, base64url) into an inner plaintext
+/// JSON value to blur ciphertext sizes. No-op for non-objects.
+pub fn add_padding(value: &mut serde_json::Value) {
+    let obj = match value.as_object_mut() {
+        Some(o) => o,
+        None => return,
+    };
+    if obj.contains_key("_pad") {
+        return;
+    }
+    let mut n = [0u8; 1];
+    let len = if getrandom::fill(&mut n).is_ok() {
+        (n[0] % 65) as usize
+    } else {
+        16
+    };
+    if len == 0 {
+        return;
+    }
+    let mut raw = vec![0u8; len];
+    if getrandom::fill(&mut raw).is_err() {
+        for (i, b) in raw.iter_mut().enumerate() {
+            *b = (i as u8).wrapping_mul(37).wrapping_add(11);
+        }
+    }
+    obj.insert(
+        "_pad".to_string(),
+        serde_json::Value::String(encode_b64url(&raw)),
+    );
 }
 
 /// Stateful E2E session for one direction pair.
 /// `tx_seq` starts at 0; `rx_next` starts at 0. After `hello`, the first
-/// message each side sends uses `seq = 0`.
+/// message each side sends uses `seq = 0` within its `(sess, epoch, dir)`.
+/// A reconnect bumps `epoch` (new AAD), so old-epoch replays fail even
+/// though `seq` restarts at 0.
 pub struct E2e {
     key: E2eKey,
     token: String,
+    session: String,
+    epoch: u64,
+    tx_dir: String,
+    rx_dir: String,
     tx_seq: u64,
     rx_next: u64,
 }
@@ -131,6 +254,37 @@ impl E2e {
         Self {
             key,
             token: token.to_uppercase(),
+            session: String::new(),
+            epoch: 0,
+            tx_dir: String::new(),
+            rx_dir: String::new(),
+            tx_seq: 0,
+            rx_next: 0,
+        }
+    }
+
+    /// Session-bound endpoint. `is_agent` picks direction labels:
+    /// agent tx=`a2c`/rx=`c2a`, client mirrored. Both sides must agree on
+    /// the agent-minted `(session, epoch)` from `hello`.
+    pub fn new_session(
+        key: E2eKey,
+        token: &str,
+        session: &str,
+        epoch: u64,
+        is_agent: bool,
+    ) -> Self {
+        let (tx_dir, rx_dir) = if is_agent {
+            (DIR_A2C.to_string(), DIR_C2A.to_string())
+        } else {
+            (DIR_C2A.to_string(), DIR_A2C.to_string())
+        };
+        Self {
+            key,
+            token: token.to_uppercase(),
+            session: session.to_string(),
+            epoch,
+            tx_dir,
+            rx_dir,
             tx_seq: 0,
             rx_next: 0,
         }
