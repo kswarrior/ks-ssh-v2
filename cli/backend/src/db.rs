@@ -110,6 +110,14 @@ pub struct AuditRow {
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
+pub struct ChatMessage {
+    pub id: i64,
+    pub ts: i64,
+    pub username: String,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct RecFrame {
     pub seq: i64,
     pub ts_ms: i64,
@@ -177,15 +185,22 @@ pub fn init(path: Option<&Path>) -> usize {
          );
          CREATE INDEX IF NOT EXISTS idx_audit_ts ON audit(ts);
          CREATE INDEX IF NOT EXISTS idx_audit_actor ON audit(actor);
-         CREATE TABLE IF NOT EXISTS rec_frames (
-           session_id TEXT NOT NULL,
-           seq        INTEGER NOT NULL,
-           ts_ms      INTEGER NOT NULL,
-           kind       TEXT NOT NULL,
-           data       BLOB NOT NULL,
-           PRIMARY KEY (session_id, seq)
-         );
-         CREATE INDEX IF NOT EXISTS idx_rec_session ON rec_frames(session_id, seq);",
+          CREATE TABLE IF NOT EXISTS rec_frames (
+            session_id TEXT NOT NULL,
+            seq        INTEGER NOT NULL,
+            ts_ms      INTEGER NOT NULL,
+            kind       TEXT NOT NULL,
+            data       BLOB NOT NULL,
+            PRIMARY KEY (session_id, seq)
+          );
+          CREATE INDEX IF NOT EXISTS idx_rec_session ON rec_frames(session_id, seq);
+          CREATE TABLE IF NOT EXISTS chat_messages (
+            id       INTEGER PRIMARY KEY AUTOINCREMENT,
+            ts       INTEGER NOT NULL,
+            username TEXT NOT NULL,
+            message  TEXT NOT NULL
+          );
+          CREATE INDEX IF NOT EXISTS idx_chat_id ON chat_messages(id);",
     ) {
         eprintln!("ks-ssh db: cannot migrate {}: {e:#} — persistence OFF", path.display());
         return 0;
@@ -511,6 +526,107 @@ pub fn rec_frame_count(session_id: &str) -> usize {
         )
     })
     .unwrap_or(0)
+}
+
+// ---------------------------------------------------------------------------
+// Chat (floating widget, persisted in SQLite).
+// ---------------------------------------------------------------------------
+
+/// Oldest-first list, `since` filters by row id (`?since=` cursor).
+/// `limit` clamped to 1..500.
+pub fn chat_list(limit: usize, since: i64) -> Vec<ChatMessage> {
+    let limit = limit.clamp(1, 500) as i64;
+    if enabled() {
+        with_db(|conn| {
+            let mut stmt = conn.prepare(
+                "SELECT id, ts, username, message FROM chat_messages
+                 WHERE id > ?1 ORDER BY id ASC LIMIT ?2",
+            )?;
+            let rows = stmt.query_map(rusqlite::params![since, limit], |r| {
+                Ok(ChatMessage {
+                    id: r.get(0)?,
+                    ts: r.get(1)?,
+                    username: r.get(2)?,
+                    message: r.get(3)?,
+                })
+            })?;
+            rows.collect::<rusqlite::Result<Vec<_>>>()
+        })
+        .unwrap_or_default()
+    } else if let Ok(g) = MEM_CHAT.lock() {
+        g.iter()
+            .filter(|m| m.id > since)
+            .take(limit as usize)
+            .cloned()
+            .collect()
+    } else {
+        Vec::new()
+    }
+}
+
+/// Insert one chat row. Returns the stored message.
+pub fn chat_insert(username: &str, message: &str) -> ChatMessage {
+    let username = truncate(username.trim(), 32);
+    let username = if username.is_empty() {
+        "guest".to_string()
+    } else {
+        username
+    };
+    let message = truncate(message.trim(), 2000);
+    let ts = now_secs() as i64;
+    if enabled() {
+        let msg = with_db(|conn| {
+            conn.execute(
+                "INSERT INTO chat_messages (ts, username, message) VALUES (?1, ?2, ?3)",
+                rusqlite::params![ts, username, message],
+            )?;
+            let id = conn.last_insert_rowid();
+            // Keep the table bounded.
+            let _ = conn.execute(
+                "DELETE FROM chat_messages WHERE id NOT IN
+                   (SELECT id FROM chat_messages ORDER BY id DESC LIMIT ?1)",
+                [MAX_CHAT_MESSAGES],
+            );
+            Ok::<_, rusqlite::Error>(ChatMessage {
+                id,
+                ts,
+                username: username.clone(),
+                message: message.clone(),
+            })
+        });
+        if let Some(m) = msg {
+            return m;
+        }
+    }
+    // In-memory fallback (or SQLite write failed).
+    if let Ok(mut g) = MEM_CHAT.lock() {
+        let id = MEM_CHAT_ID.fetch_add(1, Ordering::SeqCst) as i64;
+        let m = ChatMessage {
+            id,
+            ts,
+            username,
+            message,
+        };
+        g.push(m.clone());
+        while g.len() > MEM_CHAT_CAP {
+            g.remove(0);
+        }
+        return m;
+    }
+    ChatMessage {
+        id: 0,
+        ts,
+        username,
+        message,
+    }
+}
+
+/// Test helper: wipe chat rows (both SQLite and in-memory).
+pub fn chat_clear_for_tests() {
+    with_db(|conn| conn.execute("DELETE FROM chat_messages", []));
+    if let Ok(mut g) = MEM_CHAT.lock() {
+        g.clear();
+    }
 }
 
 #[cfg(test)]

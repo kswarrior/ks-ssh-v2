@@ -1,4 +1,5 @@
 mod auth;
+mod chat;
 mod db;
 mod e2e;
 mod files;

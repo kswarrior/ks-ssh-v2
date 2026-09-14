@@ -389,6 +389,7 @@ function ShellSession({
   const rttRef = useRef<number | null>(null)
   const lastMsgRef = useRef(0)
   const lastAckRef = useRef(0)
+  const lastSaveRef = useRef(0)
   const unackedRef = useRef(0)
   // Predictive echo: unconfirmed locally-echoed chars + their UTF-8 bytes.
   const predCharsRef = useRef<string[]>([])
@@ -869,6 +870,12 @@ function ShellSession({
       if (attemptRef.current >= MAX_RETRIES) {
         setRetryAttempt(0)
         setStatus('offline')
+        const hint =
+          window.location.pathname.startsWith('/v/') ||
+          window.location.hash.includes('/view/')
+            ? 'disconnected (relay view has no local shell — open the local URL instead)'
+            : 'disconnected — Reconnect to restart the shell'
+        term.write(`\r\n${hint}\r\n`)
         return
       }
       const wait = backoffMs(attemptRef.current)
@@ -876,6 +883,9 @@ function ShellSession({
       setRetryAttempt(attemptRef.current)
       // Yellow dot while backing off (status stays 'connecting').
       setStatus('connecting')
+      if (attemptRef.current === 1) {
+        term.write('\r\nconnection lost — retrying…\r\n')
+      }
       backoffTimerRef.current = window.setTimeout(() => {
         backoffTimerRef.current = undefined
         setGen((g) => g + 1)
@@ -898,12 +908,35 @@ function ShellSession({
         // Session handshake — a fresh tab learns its backend id here and
         // persists it so a refresh reattaches to the same shell.
         try {
-          const msg = JSON.parse(d) as { type?: string; id?: string }
+          const msg = JSON.parse(d) as {
+            type?: string
+            id?: string
+            v?: number
+            seq?: number
+            behind?: boolean
+            t?: number
+          }
           if (msg?.type === 'ready' && typeof msg.id === 'string' && msg.id) {
             if (!sidRef.current) {
               sidRef.current = msg.id
               onReady(id, msg.id)
             }
+            if (msg.v === 2) {
+              v2Ref.current = true
+              lastMsgRef.current = Date.now()
+              // offRef stays at our watermark — the replayed tail advances
+              // it frame by frame (overlap-trimmed), so nothing duplicates
+              // and nothing is skipped.
+              if (msg.behind === true) {
+                term.write('\r\n[reconnected — some output was missed]\r\n')
+              }
+            }
+            return
+          }
+          // v2 latency probe reply.
+          if (msg?.type === 'pong' && typeof msg.t === 'number') {
+            lastMsgRef.current = Date.now()
+            noteRtt(Date.now() - msg.t)
             return
           }
         } catch {
@@ -918,45 +951,117 @@ function ShellSession({
           term.write('\r\n[shell exited]\r\n')
           return
         }
-        term.write(d)
+        lastMsgRef.current = Date.now()
+        if (!v2Ref.current) {
+          // v1 fallback: raw PTY text — still confirm predictions.
+          const bytes = new TextEncoder().encode(d)
+          const rest = confirmPredictions(bytes)
+          if (rest.length > 0) term.write(rest)
+        } else {
+          term.write(d)
+        }
         return
       }
+      const toBytes = (buf: ArrayBuffer): Uint8Array => new Uint8Array(buf)
+      const handleBin = (raw: Uint8Array) => {
+        lastMsgRef.current = Date.now()
+        let bytes = raw
+        if (v2Ref.current) {
+          const frame = decodeFrame(raw)
+          if (frame) {
+            // Overlap (replay/live boundary, refresh): skip bytes we have.
+            if (frame.base < offRef.current) {
+              const skip = offRef.current - frame.base
+              if (skip >= frame.bytes.length) return
+              bytes = frame.bytes.subarray(skip)
+            } else {
+              bytes = frame.bytes
+            }
+            // Advance past the whole frame (even the trimmed prefix).
+            offRef.current = frame.base + frame.bytes.length
+            unackedRef.current += frame.bytes.length
+          }
+          // Reconcile predictive echo, then render only the new bytes.
+          bytes = confirmPredictions(bytes)
+        } else {
+          const rest = confirmPredictions(bytes)
+          bytes = rest
+        }
+        if (bytes.length > 0) term.write(bytes)
+        maybeAck(false)
+        const now = Date.now()
+        if (now - lastSaveRef.current > 10000) {
+          lastSaveRef.current = now
+          saveOffset()
+          maybeAck(true)
+        }
+      }
       if (d instanceof ArrayBuffer) {
-        term.write(new Uint8Array(d))
+        handleBin(toBytes(d))
         return
       }
       if (typeof Blob !== 'undefined' && d instanceof Blob) {
         void d
           .arrayBuffer()
-          .then((b) => term.write(new Uint8Array(b)))
+          .then((b) => handleBin(toBytes(b)))
           .catch(() => {})
       }
     }
     ws.onerror = () => {
-      term.write('\r\nsocket error\r\n')
-      setStatus('offline')
+      // The close event follows with the real verdict — don't flap the UI
+      // (or write) here; onclose decides between retry and offline.
     }
     ws.onclose = (e) => {
       if (wsRef.current !== ws) return
       wsRef.current = null
-      // Always go offline — a failed connect must not stick on amber.
-      setStatus('offline')
+      clearRtt()
+      saveOffset()
       // A real exit means nothing is running anymore; a plain disconnect
       // keeps the label (the detached shell may still be busy).
       if (gotExitRef.current) reportProc(null)
+      if (gotExitRef.current) {
+        // Dead shell — stay offline until the user reconnects manually
+        // (which spawns a fresh session).
+        setRetryAttempt(0)
+        setStatus('offline')
+        return
+      }
       if (e.code === 4000) {
         // Same session attached elsewhere (another page/tab) — say so
-        // instead of a generic "disconnected".
+        // instead of a generic "disconnected". No auto-retry: the other
+        // owner holds the shell now.
+        setRetryAttempt(0)
+        setStatus('offline')
         term.write('\r\nattached elsewhere — Reconnect here to take over\r\n')
-      } else if (!gotExitRef.current) {
-        const hint =
-          window.location.pathname.startsWith('/v/') ||
-          window.location.hash.includes('/view/')
-            ? 'disconnected (relay view has no local shell — open the local URL instead)'
-            : 'disconnected — Reconnect to restart the shell'
-        term.write(`\r\n${hint}\r\n`)
+        return
       }
+      // Abnormal drop (network, sleep, restart) — back off and reattach.
+      // Pending keystrokes survive in pendingRef and flush on open.
+      scheduleRetry()
     }
+
+    // Heartbeat: v2 ping doubles as keepalive + RTT probe. If traffic
+    // stalls entirely the path is dead — recycle the socket so the
+    // backoff loop (not the user) re-establishes it.
+    const beat = window.setInterval(() => {
+      const live = wsRef.current
+      if (!live || live !== ws || live.readyState !== WebSocket.OPEN) return
+      const now = Date.now()
+      if (v2Ref.current) {
+        try {
+          live.send(JSON.stringify({ type: 'ping', t: now }))
+        } catch {
+          // Send failed — the socket error/close path takes over.
+        }
+      }
+      if (lastMsgRef.current > 0 && now - lastMsgRef.current > STALE_MS) {
+        try {
+          live.close()
+        } catch {
+          // Already dead — onclose handles the retry.
+        }
+      }
+    }, PING_MS)
 
     const onResize = () => scheduleResize()
     window.addEventListener('resize', onResize)
@@ -970,6 +1075,11 @@ function ShellSession({
 
     return () => {
       window.removeEventListener('resize', onResize)
+      window.clearInterval(beat)
+      if (backoffTimerRef.current !== undefined) {
+        window.clearTimeout(backoffTimerRef.current)
+        backoffTimerRef.current = undefined
+      }
       ro?.disconnect()
       if (resizeTimerRef.current !== undefined) {
         window.clearTimeout(resizeTimerRef.current)
@@ -996,6 +1106,12 @@ function ShellSession({
   }
 
   const reconnect = () => {
+    if (backoffTimerRef.current !== undefined) {
+      window.clearTimeout(backoffTimerRef.current)
+      backoffTimerRef.current = undefined
+    }
+    attemptRef.current = 0
+    setRetryAttempt(0)
     try {
       wsRef.current?.close()
     } catch {
@@ -1006,6 +1122,8 @@ function ShellSession({
     // spawns a fresh session (and reports the new id via `ready`).
     if (gotExitRef.current) {
       sidRef.current = null
+      offRef.current = 0
+      saveOffset()
       onReady(id, null)
     }
     gotExitRef.current = false

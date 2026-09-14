@@ -105,6 +105,7 @@ impl Role {
 pub fn required_role(method: &str, path: &str) -> Required {
     // Public auth flow (never needs a session).
     if path == "/api/hello"
+        || path == "/api/record/status"
         || path == "/api/auth/status"
         || path == "/api/auth/login"
         || path == "/api/auth/logout"
