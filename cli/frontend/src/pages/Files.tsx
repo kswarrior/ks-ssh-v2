@@ -586,6 +586,23 @@ export default function FilesPage() {
   const [typeFilter, setTypeFilter] = useState<FileTypeFilter>('all')
   const [sortKey, setSortKey] = useState<SortKey>('name')
   const [sortDir, setSortDir] = useState<SortDir>('asc')
+  // Multi-select for batch delete / zip.
+  const [selected, setSelected] = useState<string[]>([])
+  const [bulkBusy, setBulkBusy] = useState(false)
+  const [confirmBulkDelete, setConfirmBulkDelete] = useState(false)
+  // Copy / move dialog: { entry, mode } + destination folder.
+  const [copyMove, setCopyMove] = useState<{ entry: FileEntry; mode: 'copy' | 'move' } | null>(null)
+  const [destFolder, setDestFolder] = useState('')
+  const [copyMoveBusy, setCopyMoveBusy] = useState(false)
+  const [copyMoveError, setCopyMoveError] = useState<string | null>(null)
+  // Media preview modal.
+  const [preview, setPreview] = useState<FileEntry | null>(null)
+  // Deep (recursive) search results; null = browse mode.
+  const [deep, setDeep] = useState<{ query: string; results: SearchHit[]; truncated: boolean; loading: boolean; error: string | null } | null>(null)
+  // Properties (stat + chmod) dialog.
+  const [props, setProps] = useState<{ entry: FileEntry; stat: StatResponse | null; loading: boolean; error: string | null; chmod: string; saving: boolean } | null>(null)
+  const [sortKey, setSortKey] = useState<SortKey>('name')
+  const [sortDir, setSortDir] = useState<SortDir>('asc')
   const [view, setView] = useState<ViewMode>('grid')
   const [selected, setSelected] = useState<string[]>([])
   const [previewing, setPreviewing] = useState<FileEntry | null>(null)
@@ -676,6 +693,9 @@ export default function FilesPage() {
       setRenaming(null)
       setConfirmDelete(null)
       setActionError(null)
+      setSelected([])
+      setConfirmBulkDelete(false)
+      setDeep(null)
       setSelected([])
     } catch (e) {
       setError(

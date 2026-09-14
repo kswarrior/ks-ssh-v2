@@ -3164,6 +3164,28 @@ a.file-link {
   .ports-select {
     width: 100%;
   }
+
+  .files-path-tools {
+    width: 100%;
+    margin-left: 0;
+  }
+
+  .files-path-tools .ports-select-wrap {
+    flex: 1 1 auto;
+  }
+
+  .bulk-actions {
+    width: 100%;
+    margin-left: 0;
+  }
+
+  .bulk-actions .btn {
+    flex: 1 1 auto;
+  }
+
+  .file-list .file-meta {
+    max-width: none;
+  }
 }
 
 /* ---------- Host: full machine overview (flush top like Files) ---------- */
