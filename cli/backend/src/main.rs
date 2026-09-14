@@ -1,4 +1,5 @@
 mod auth;
+mod chat;
 mod db;
 mod e2e;
 mod files;
@@ -201,6 +202,10 @@ async fn serve(
         .route("/api/ports", get(ports::api_list_ports))
         .route("/api/ports/kill", post(ports::api_kill_port))
         .route("/api/host", get(host::api_host_info))
+        .route(
+            "/api/chat",
+            get(chat::api_list_chat).post(chat::api_post_chat),
+        )
         .route(
             "/api/files/content",
             get(files::api_read_content).put(files::api_save_content),
