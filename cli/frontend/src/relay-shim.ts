@@ -202,6 +202,8 @@ class RelayConnection {
   private e2eRequired = false
   private authed = false
   private authFlight: Promise<void> | null = null
+  /** Agent presence from `paired`/`agent` (null = unknown yet). */
+  private agentOnline: boolean | null = null
 
   constructor(token: string, host: string, NativeWS: typeof WebSocket) {
     this.token = token

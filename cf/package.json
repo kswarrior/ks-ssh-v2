@@ -10,7 +10,7 @@
     "preview": "vite preview",
     "deploy": "wrangler deploy",
     "cf-typegen": "wrangler types",
-    "test:e2e": "node scripts/e2e-check.mjs"
+    "test:e2e": "node scripts/e2e-check.mjs && node --experimental-strip-types scripts/relay-check.mjs"
   },
   "dependencies": {
     "react": "^19.2.8",
