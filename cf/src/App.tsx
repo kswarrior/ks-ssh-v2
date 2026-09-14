@@ -1054,7 +1054,9 @@ function SessionPage({
         await el.requestFullscreen()
       } else if (activeToken) {
         // Fallback: raw /v/ page in a new tab is already fullscreen-capable.
-        window.open(`/v/${activeToken}`, '_blank', 'noopener')
+        // Preserve #k=... so E2E survives.
+        const k = parseFragmentKey()
+        window.open(k ? `/v/${activeToken}#k=${k}` : `/v/${activeToken}`, '_blank', 'noopener')
       }
     } catch {
       setError('Fullscreen blocked — use "Open raw" in a new tab instead.')
@@ -1112,7 +1114,10 @@ function SessionPage({
               </button>
               <a
                 className="btn btn-sm"
-                href={`/v/${activeToken}`}
+                href={(() => {
+                  const k = parseFragmentKey()
+                  return k ? `/v/${activeToken}#k=${k}` : `/v/${activeToken}`
+                })()}
                 target="_blank"
                 rel="noreferrer"
               >
