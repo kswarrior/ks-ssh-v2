@@ -44,13 +44,72 @@ const NAV: NavItem[] = [
 ]
 
 type Settings = {
-  defaultUser: string
-  defaultPort: number
+  relayHost: string
+  connectTimeoutMs: number
+  requireE2E: boolean
 }
 
+const DEFAULT_RELAY_HOST = ''
+// Empty = same origin that served this page (the deployed Worker).
+// Set to e.g. "ks-ssh-v2.kswarriorpro.workers.dev" to point at another relay.
+
 const DEFAULT_SETTINGS: Settings = {
-  defaultUser: 'root',
-  defaultPort: 22,
+  relayHost: DEFAULT_RELAY_HOST,
+  connectTimeoutMs: 8000,
+  requireE2E: true,
+}
+
+function normalizeSettings(raw: unknown): Settings {
+  const o = (raw ?? {}) as Partial<Settings>
+  const relayHost =
+    typeof o.relayHost === 'string'
+      ? o.relayHost.trim().replace(/^https?:\/\//, '').replace(/\/.*$/, '').slice(0, 253)
+      : DEFAULT_RELAY_HOST
+  const n = Number(o.connectTimeoutMs)
+  const connectTimeoutMs = Number.isFinite(n)
+    ? Math.min(30000, Math.max(3000, Math.round(n)))
+    : DEFAULT_SETTINGS.connectTimeoutMs
+  return { relayHost, connectTimeoutMs, requireE2E: o.requireE2E !== false }
+}
+
+/** Base URL for relay HTTP ('' = same origin). Never includes secrets. */
+function relayHttpBase(settings: Settings): string {
+  const h = settings.relayHost.trim()
+  if (!h || h === window.location.host) return ''
+  return `https://${h}`
+}
+
+/** Host for relay WSS (custom relay or the page origin). */
+function relayWsHost(settings: Settings): string {
+  const h = settings.relayHost.trim()
+  return h || window.location.host
+}
+
+async function fetchRelayStatus(
+  relayBase: string,
+  token: string,
+  signal?: AbortSignal,
+): Promise<{ agentOnline: boolean; hasUi: boolean; gated: boolean; size: number } | null> {
+  try {
+    const res = await fetch(`${relayBase}/api/ssh/status?token=${encodeURIComponent(token)}`, { signal })
+    if (!res.ok) return null
+    const data = (await res.json()) as {
+      ok?: boolean
+      agentOnline?: boolean
+      hasUi?: boolean
+      gated?: boolean
+      size?: number
+    }
+    if (!data?.ok) return null
+    return {
+      agentOnline: data.agentOnline === true,
+      hasUi: data.hasUi === true,
+      gated: data.gated === true,
+      size: Number(data.size) || 0,
+    }
+  } catch {
+    return null
+  }
 }
 
 type Theme = 'light' | 'dark'
