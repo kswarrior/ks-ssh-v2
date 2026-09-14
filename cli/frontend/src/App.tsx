@@ -5,10 +5,12 @@ import PortsPage from './pages/Ports'
 import HostPage from './pages/Host'
 import MorePage from './pages/More'
 import UsersPage from './pages/Users'
+import AuditPage from './pages/Audit'
+import RecordingsPage from './pages/Recordings'
 import LoginPage from './pages/Login'
 import ChatWidget from './components/ChatWidget'
 
-type TabId = 'terminal' | 'files' | 'ports' | 'host' | 'more' | 'users'
+type TabId = 'terminal' | 'files' | 'ports' | 'host' | 'more' | 'users' | 'audit' | 'recordings'
 
 type TabItem = { id: TabId; label: string; hash: string }
 
@@ -18,11 +20,13 @@ const TABS: TabItem[] = [
   { id: 'ports', label: 'Ports', hash: '#/ports' },
 ]
 
-// Host, More and Users are not tabs — they open from buttons/links.
+// Host, More, Users, Audit and Recordings are not tabs — they open from buttons/links.
 const HOST_ITEM: TabItem = { id: 'host', label: 'Host', hash: '#/host' }
 const MORE_ITEM: TabItem = { id: 'more', label: 'More', hash: '#/more' }
 const USERS_ITEM: TabItem = { id: 'users', label: 'Users', hash: '#/users' }
-const EXTRA_ITEMS: TabItem[] = [HOST_ITEM, MORE_ITEM, USERS_ITEM]
+const AUDIT_ITEM: TabItem = { id: 'audit', label: 'Audit', hash: '#/audit' }
+const RECORDINGS_ITEM: TabItem = { id: 'recordings', label: 'Recordings', hash: '#/recordings' }
+const EXTRA_ITEMS: TabItem[] = [HOST_ITEM, MORE_ITEM, USERS_ITEM, AUDIT_ITEM, RECORDINGS_ITEM]
 
 type Theme = 'light' | 'dark'
 

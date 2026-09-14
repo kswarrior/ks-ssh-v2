@@ -972,13 +972,16 @@ function SessionPage({
       : undefined
 
   return (
-    <section className="page page-session" aria-labelledby="page-title-session">
-      <div className="page-head">
+    <section className="page page-session-full" aria-labelledby="page-title-session">
+      <div className="page-head session-head">
         <h1 id="page-title-session">{name ?? `Session ${activeToken}`}</h1>
-        <div className="row-actions">
+        <div className="row-actions session-actions">
           <E2eBadge status={parseFragmentKey() ? 'on' : 'off'} />
           {(meta?.hasUi || srcDoc) && (
             <>
+              <button type="button" className="btn btn-sm" onClick={() => setCacheBust((n) => n + 1)}>
+                Reload
+              </button>
               <button type="button" className="btn btn-sm btn-primary" onClick={openFullscreen}>
                 Fullscreen
               </button>
@@ -997,12 +1000,20 @@ function SessionPage({
           </a>
         </div>
       </div>
-      <p className="lead">
-        The whole UI pushed by your CLI over WSS — no port forwarding.
-        The bundle itself is public (plaintext); the private session needs
-        the full link with <code>#k=...</code> for 🔒 E2E.
-      </p>
-      {checking && <p aria-live="polite">Checking for agent UI …</p>}
+      {checking && (
+        <p className="session-status" aria-live="polite">
+          Checking for agent UI …
+        </p>
+      )}
+      {meta?.hasUi && !srcDoc && (
+        <p className="session-status session-hint">
+          Live from your CLI over WSS — Terminal, Files, Ports, Host in one page
+          {typeof meta.size === 'number' && meta.size > 0
+            ? ` · ${Math.round(meta.size / 1024)} KB`
+            : ''}
+          .
+        </p>
+      )}
       {error && (
         <div className="banner-error" role="alert">
           <p>{error}</p>
@@ -1017,7 +1028,8 @@ function SessionPage({
         <div className="card">
           <p>
             Waiting for the agent UI for <code>{activeToken}</code>. On the
-            machine, run: <code>ks-ssh --no-serve --token={activeToken}</code>
+            machine, run: <code>ks-ssh --token={activeToken}</code> (same UI
+            as <code>--port</code>, pushed over WSS — no port forwarding).
           </p>
           <div className="row-actions">
             <button type="button" className="btn btn-sm" onClick={() => setCacheBust((n) => n + 1)}>
@@ -1028,30 +1040,22 @@ function SessionPage({
       )}
 
       {(meta?.hasUi || srcDoc) && (
-        <div className="session-wrap" ref={wrapRef}>
-          <div className="session-bar">
-            <code>{name ?? activeToken}</code>
-            {meta && <span>{Math.round(meta.size / 1024)} KB</span>}
-            <span className="header-spacer" />
-            <button type="button" className="btn btn-sm btn-primary" onClick={openFullscreen}>
-              Fullscreen
-            </button>
-          </div>
+        <div className="session-wrap-full" ref={wrapRef}>
           {srcDoc !== null ? (
             <iframe
-              title={`Agent UI ${activeToken}`}
-              className="session-frame"
+              title={`Agent UI ${activeToken} — Terminal, Files, Ports, Host`}
+              className="session-frame-full"
               srcDoc={srcDoc}
-              allow="fullscreen"
+              allow="fullscreen; clipboard-read; clipboard-write"
               allowFullScreen
-              sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
+              sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-downloads"
             />
           ) : (
             <iframe
-              title={`Agent UI ${activeToken}`}
-              className="session-frame"
+              title={`Agent UI ${activeToken} — Terminal, Files, Ports, Host`}
+              className="session-frame-full"
               src={frameSrc}
-              allow="fullscreen"
+              allow="fullscreen; clipboard-read; clipboard-write"
               allowFullScreen
             />
           )}
@@ -1548,7 +1552,7 @@ export default function App() {
           <main
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           ref={mainRef as any}
-          className="content"
+          className={`content${page === 'session' ? ' content-session' : ''}`}
           id="main"
           tabIndex={-1}
         >

@@ -425,6 +425,7 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  gap: 8px;
   text-decoration: none;
   padding: 11px 18px;
   min-height: 44px;
@@ -1155,9 +1156,97 @@
 }
 
 /* ================= Session page (fullscreen CLI frontend over WSS) ================= */
+/* Real page: same CF Header + Sidebar as Home/SSH/Installation/Settings,
+   with the whole CLI frontend (Terminal, Files, Ports, Host — same as
+   `ks-ssh --port`) filling the content area edge-to-edge via WSS. */
 
 .page-session {
   max-width: 1100px;
+}
+
+.content-session {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  padding: clamp(10px, 1.5vw, 18px);
+  padding-bottom: calc(clamp(10px, 1.5vw, 18px) + env(safe-area-inset-bottom));
+}
+
+.page-session-full {
+  max-width: none;
+  flex: 1;
+  min-height: 0;
+  height: 100%;
+  padding-top: 4px;
+  gap: 10px;
+}
+
+.session-head {
+  flex-wrap: wrap;
+}
+
+.session-actions {
+  margin-top: 0;
+  padding-top: 0;
+}
+
+.session-status {
+  font-size: 13px;
+  color: var(--text);
+  margin: 0;
+}
+
+.session-hint {
+  opacity: 0.9;
+}
+
+.session-wrap-full {
+  border: 1px solid var(--glass-border);
+  border-radius: 8px;
+  overflow: hidden;
+  background: #000;
+  box-shadow: var(--glow-line), var(--shadow-lg);
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  height: calc(100svh - 190px);
+  min-height: 480px;
+}
+
+.session-wrap-full:fullscreen {
+  border-radius: 0;
+  height: 100svh;
+  min-height: 100svh;
+  width: 100%;
+}
+
+.session-frame-full {
+  width: 100%;
+  flex: 1;
+  min-height: 0;
+  height: 100%;
+  border: 0;
+  background: #fff;
+  display: block;
+}
+
+.session-wrap-full:fullscreen .session-frame-full {
+  height: 100svh;
+}
+
+@media (max-width: 768px) {
+  .content-session {
+    padding: 10px;
+    padding-bottom: calc(10px + env(safe-area-inset-bottom));
+  }
+
+  .session-wrap-full {
+    height: calc(100svh - 170px);
+    min-height: 420px;
+    border-radius: 8px;
+  }
 }
 
 .session-wrap {
