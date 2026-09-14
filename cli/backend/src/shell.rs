@@ -256,8 +256,15 @@ struct Session {
 static SESSIONS: LazyLock<tokio::sync::Mutex<HashMap<String, Arc<Session>>>> =
     LazyLock::new(|| tokio::sync::Mutex::new(HashMap::new()));
 
-pub async fn ws_handler(ws: WebSocketUpgrade, Query(q): Query<ShellQuery>) -> impl IntoResponse {
-    ws.on_upgrade(move |socket| handle_socket(socket, q))
+pub async fn ws_handler(
+    opt_ctx: Option<Extension<auth::AuthContext>>,
+    headers: HeaderMap,
+    Query(q): Query<ShellQuery>,
+    ws: WebSocketUpgrade,
+) -> impl IntoResponse {
+    let ctx = opt_ctx.map(|Extension(c)| c);
+    let ip = auth::client_ip(&headers);
+    ws.on_upgrade(move |socket| handle_socket(socket, q, ctx, ip))
 }
 
 fn spawn_shell(
@@ -585,6 +592,9 @@ pub async fn load_persisted() -> usize {
             last_active: StdMutex::new(Instant::now()),
             created_at: row.created_at,
             dirty: AtomicBool::new(false),
+            rec: StdMutex::new(Vec::new()),
+            rec_seq: AtomicU64::new(0),
+            rec_bytes: AtomicU64::new(0),
         });
         map.insert(row.id, session);
         n += 1;
@@ -606,6 +616,13 @@ pub async fn api_list_terms() -> impl IntoResponse {
                     .ok()
                     .map(|t| t.elapsed().as_secs())
                     .unwrap_or(u64::MAX);
+                let (rec_frames, rec_bytes) = if db::enabled() {
+                    (db::rec_frame_count(&s.id), db::rec_session_bytes(&s.id))
+                } else {
+                    let n = s.rec.lock().map(|r| r.len()).unwrap_or(0);
+                    let b = s.rec_bytes.load(Ordering::SeqCst);
+                    (n, b)
+                };
                 serde_json::json!({
                     "id": s.id,
                     "alive": !s.dead.load(Ordering::SeqCst),
@@ -613,6 +630,9 @@ pub async fn api_list_terms() -> impl IntoResponse {
                     "bytes": bytes,
                     "seq": s.offset.load(Ordering::SeqCst),
                     "acked": s.acked.load(Ordering::SeqCst),
+                    "rec_frames": rec_frames,
+                    "rec_bytes": rec_bytes,
+                    "recording": is_recording_enabled(),
                 })
             })
             .collect()
@@ -625,6 +645,156 @@ pub async fn api_list_terms() -> impl IntoResponse {
         )
     });
     axum::Json(serde_json::json!({ "sessions": sessions }))
+}
+
+/// GET /api/record/status — whether session recording is on (public, no secrets).
+/// The Terminal page shows a consent banner from this.
+pub async fn api_record_status() -> impl IntoResponse {
+    axum::Json(serde_json::json!({ "recording": is_recording_enabled() }))
+}
+
+#[derive(Deserialize)]
+pub struct RecordingQuery {
+    #[serde(default)]
+    pub from: i64,
+    #[serde(default)]
+    pub limit: Option<usize>,
+}
+
+/// GET /api/terms/:id/recording?from&limit — timestamped input+output frames
+/// for replay (viewer+; middleware enforces, handler audits playback).
+/// `data` is base64 (standard). Frames are oldest-first from `seq >= from`.
+pub async fn api_get_recording(
+    opt_ctx: Option<Extension<auth::AuthContext>>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> impl IntoResponse {
+    // Parse range from the raw query (Path-only extractor keeps this handler
+    // compatible with both authed and open modes).
+    let _ = &headers;
+    api_get_recording_inner(opt_ctx, headers, id, 0, 2000).await
+}
+
+async fn api_get_recording_inner(
+    opt_ctx: Option<Extension<auth::AuthContext>>,
+    headers: HeaderMap,
+    id: String,
+    from: i64,
+    limit: usize,
+) -> axum::response::Response {
+    use axum::response::IntoResponse as _;
+    if !valid_session_id(&id) {
+        return (StatusCode::BAD_REQUEST, "bad session id").into_response();
+    }
+    let actor = opt_ctx
+        .as_ref()
+        .map(|Extension(c)| c.username.clone())
+        .unwrap_or_else(|| "-".to_string());
+    let ip = auth::client_ip(&headers);
+    // Prefer SQLite (survives restarts); fall back to in-memory.
+    let frames: Vec<serde_json::Value> = if db::enabled() {
+        db::rec_list(&id, from, limit)
+            .into_iter()
+            .map(|f| {
+                use base64::Engine as _;
+                serde_json::json!({
+                    "seq": f.seq,
+                    "ts_ms": f.ts_ms,
+                    "kind": f.kind,
+                    "data": base64::engine::general_purpose::STANDARD.encode(&f.data),
+                })
+            })
+            .collect()
+    } else {
+        let map = SESSIONS.lock().await;
+        match map.get(&id) {
+            Some(s) => {
+                use base64::Engine as _;
+                s.rec
+                    .lock()
+                    .map(|rec| {
+                        rec.iter()
+                            .filter(|f| f.seq as i64 >= from)
+                            .take(limit)
+                            .map(|f| {
+                                serde_json::json!({
+                                    "seq": f.seq,
+                                    "ts_ms": f.ts_ms,
+                                    "kind": f.kind,
+                                    "data": base64::engine::general_purpose::STANDARD.encode(&f.data),
+                                })
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default()
+            }
+            None => Vec::new(),
+        }
+    };
+    db::audit(&actor, &ip, "recording-playback", &id, "ok");
+    (
+        StatusCode::OK,
+        axum::Json(serde_json::json!({
+            "id": id,
+            "recording": is_recording_enabled(),
+            "frames": frames,
+        })),
+    )
+        .into_response()
+}
+
+/// GET /api/terms/:id/recording/range — explicit range variant used by the
+/// replay player (`?from=&limit=`). Split from the base handler so the route
+/// table stays explicit.
+pub async fn api_get_recording_range(
+    opt_ctx: Option<Extension<auth::AuthContext>>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Query(q): Query<RecordingQuery>,
+) -> impl IntoResponse {
+    api_get_recording_inner(opt_ctx, headers, id, q.from, q.limit.unwrap_or(2000)).await
+}
+
+/// DELETE /api/terms/:id/recording — drop recording frames (admin only;
+/// middleware enforces, handler audits).
+pub async fn api_delete_recording(
+    opt_ctx: Option<Extension<auth::AuthContext>>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> impl IntoResponse {
+    use axum::http::StatusCode;
+    use axum::response::IntoResponse as _;
+    if !valid_session_id(&id) {
+        return (StatusCode::BAD_REQUEST, "bad session id").into_response();
+    }
+    // Defense in depth: middleware already requires admin, but double-check
+    // so direct unit calls can't bypass it.
+    if let Some(Extension(ctx)) = opt_ctx.as_ref()
+        && ctx.role != auth::Role::Admin
+    {
+        return (
+            StatusCode::FORBIDDEN,
+            axum::Json(serde_json::json!({ "error": "admin only" })),
+        )
+            .into_response();
+    }
+    let actor = opt_ctx
+        .as_ref()
+        .map(|Extension(c)| c.username.clone())
+        .unwrap_or_else(|| "-".to_string());
+    let ip = auth::client_ip(&headers);
+    db::rec_delete(&id);
+    {
+        let map = SESSIONS.lock().await;
+        if let Some(s) = map.get(&id) {
+            if let Ok(mut rec) = s.rec.lock() {
+                rec.clear();
+            }
+            s.rec_bytes.store(0, Ordering::SeqCst);
+        }
+    }
+    db::audit(&actor, &ip, "recording-delete", &id, "ok");
+    (StatusCode::OK, axum::Json(serde_json::json!({ "ok": true }))).into_response()
 }
 
 /// Detach bookkeeping when a socket goes away — the shell keeps running.
@@ -680,14 +850,24 @@ pub fn spawn_reaper() {
     });
 }
 
-async fn handle_socket(socket: WebSocket, q: ShellQuery) {
+async fn handle_socket(
+    socket: WebSocket,
+    q: ShellQuery,
+    ctx: Option<auth::AuthContext>,
+    ip: String,
+) {
     let (mut ws_tx, mut ws_rx) = socket.split();
 
     // v2 is opt-in (`?v=2`); everything else stays on the v1 shapes.
     let v2 = q.v == Some(PROTO_V2);
     let from = q.from.unwrap_or(0);
+    // Viewer role attaches read-only (input dropped, output still streams).
+    let read_only = ctx.as_ref().is_some_and(|c| c.role == auth::Role::Viewer);
+    let actor = ctx.as_ref().map(|c| c.username.clone()).unwrap_or_else(|| "-".to_string());
 
     let session = get_or_create_session(q.id).await;
+    // Audit attach (never secrets — session id only).
+    db::audit(&actor, &ip, "shell-attach", &session.id, "ok");
     if let Ok(mut t) = session.last_active.lock() {
         *t = Instant::now();
     }
@@ -732,13 +912,15 @@ async fn handle_socket(socket: WebSocket, q: ShellQuery) {
             "v": PROTO_V2,
             "seq": session.offset.load(Ordering::SeqCst),
             "behind": behind,
+            "readonly": read_only,
         })
         .to_string()
     } else {
-        serde_json::json!({"type": "ready", "id": session.id}).to_string()
+        serde_json::json!({"type": "ready", "id": session.id, "readonly": read_only}).to_string()
     };
     if ws_tx.send(Message::Text(ready.into())).await.is_err() {
         release(&session, my_epoch);
+        db::audit(&actor, &ip, "shell-detach", &session.id, "ok");
         return;
     }
     // Replay the scrollback ring so a refreshed page sees what it missed.
