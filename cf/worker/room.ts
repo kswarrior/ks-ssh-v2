@@ -328,8 +328,10 @@ export class TunnelRoom implements DurableObject {
             this.uiUpdatedAt = Date.now()
             this.uiPending = null
             try {
-              await this.state.storage.put('uiHtml', html)
-              await this.state.storage.put('uiUpdatedAt', this.uiUpdatedAt)
+              await this.state.storage.put({
+                uiHtml: html,
+                uiUpdatedAt: this.uiUpdatedAt,
+              })
             } catch {
               // Storage full/unavailable — keep in-memory copy only.
             }
@@ -410,6 +412,8 @@ export class TunnelRoom implements DurableObject {
       // the next agent connect re-advertises fresh ones.
       this.lastAgentHello = null
       this.authGated = false
+      // Clear any in-progress UI upload from the disconnected agent.
+      this.uiPending = null
       this.broadcast({ type: 'agent', online: false })
     }
     this.clients.delete(ws)
@@ -417,7 +421,6 @@ export class TunnelRoom implements DurableObject {
 
   private async ensureUiLoaded(): Promise<void> {
     if (this.uiLoaded) return
-    this.uiLoaded = true
     try {
       const [html, ts] = await Promise.all([
         this.state.storage.get<string>('uiHtml'),
@@ -430,6 +433,7 @@ export class TunnelRoom implements DurableObject {
     } catch {
       // Storage unavailable — in-memory only.
     }
+    this.uiLoaded = true
   }
 
   /** Replay the cached UI to one client in base64 chunks. */
