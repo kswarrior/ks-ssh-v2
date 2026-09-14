@@ -409,6 +409,7 @@ class RelayConnection {
     this.helloResolve = null
     this.e2e = null
     this.e2eRequired = false
+    this.agentOnline = null
     this.authed = false
     this.authFlight = null
     this.authResolve = null
@@ -494,13 +495,30 @@ class RelayConnection {
 
   private routeAgentMessage(msg: JsonMsg): void {
     const type = typeof msg.type === 'string' ? msg.type : ''
-    if (
-      type === 'pong' ||
-      type === 'paired' ||
-      type === 'ui-ready' ||
-      type === 'ui-pending' ||
-      type === 'ack'
-    ) {
+    if (type === 'pong' || type === 'ui-ready' || type === 'ui-pending' || type === 'ack') {
+      return
+    }
+    // Agent presence: fail fast when the CLI is offline instead of hanging
+    // rpc/shell until the 120s timeout.
+    if (type === 'paired') {
+      if (typeof msg['agent'] === 'boolean') this.agentOnline = msg['agent'] as boolean
+      return
+    }
+    if (type === 'agent') {
+      if (typeof msg['online'] === 'boolean') {
+        this.agentOnline = msg['online'] as boolean
+        if (!this.agentOnline) {
+          for (const [, p] of this.pending) {
+            window.clearTimeout(p.timer)
+            p.reject(new Error('agent offline — run the CLI with --token=...'))
+          }
+          this.pending.clear()
+          for (const [, sock] of this.shells) {
+            sock.relayClosed(1006, 'agent offline')
+          }
+          this.shells.clear()
+        }
+      }
       return
     }
     if (type === 'auth-ok') {
@@ -634,6 +652,12 @@ class RelayConnection {
 
   async rpc(method: string, path: string, init?: RequestInit): Promise<Response> {
     await this.ensure()
+    if (this.agentOnline === false) {
+      return new Response('agent offline — run the CLI with --token=...', {
+        status: 502,
+        headers: { 'content-type': 'text/plain' },
+      })
+    }
     if (this.e2eRequired) {
       return new Response(FULL_LINK_MSG, { status: 426, headers: { 'content-type': 'text/plain' } })
     }
@@ -708,6 +732,10 @@ class RelayConnection {
       }
       if (this.e2eRequired) {
         sock.relayFailed(FULL_LINK_MSG)
+        return
+      }
+      if (this.agentOnline === false) {
+        sock.relayFailed('agent offline — run the CLI with --token=...')
         return
       }
       try {

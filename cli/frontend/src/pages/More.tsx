@@ -189,8 +189,20 @@ export default function MorePage({ authProtected }: { authProtected: boolean }) 
           router — so login, RBAC and audit apply over relay exactly as locally
           (your session cookie is forwarded). Restart with <code>--relay-auth</code>{' '}
           to additionally require a one-time viewer PIN (printed once at startup;
-          authed users can mint fresh ones) before any bridge opens. The PIN and
-          the E2E key <code>k</code> never travel in query strings or logs.
+          authed users can mint fresh ones; each mint invalidates the previous
+          PIN and PINs expire after 15 minutes) before any bridge opens. The PIN
+          travels inside E2E only, and the E2E key <code>k</code> never travels
+          in query strings or logs.
+        </p>
+        <p className="lead">
+          Relay traffic is end-to-end encrypted by default (AES-256-GCM, strict:
+          peers without E2E are refused with an <code>E2E error</code>, never
+          silently downgraded; <code>--no-e2e</code> is the only explicit escape
+          hatch). Ciphertexts bind the room, session, direction and connection
+          epoch, carry random padding, and the agent&apos;s{' '}
+          <code>E2E fingerprint</code> (printed at startup) is verified by the
+          viewer on first connect. The pushed UI bundle itself is public build
+          output with zero secrets, served with <code>no-store</code>.
         </p>
       </div>
     </section>
