@@ -127,19 +127,46 @@ export default {
     }
 
     if (url.pathname === '/api/health') {
-      return Response.json({ ok: true, service: 'ks-ssh' })
+      return Response.json({ ok: true, service: 'ks-ssh', now: Date.now() })
     }
 
+    // Live relay status backed by the token room (fully functional —
+    // reports whether the CLI agent is online, whether it pushed its UI,
+    // and whether viewers need a PIN). Used by the SSH list, the home
+    // dashboard, and the installation health check.
+    //   GET /api/ssh/status?token=ABCDE  -> { ok, agentOnline, hasUi, ... }
+    //   GET /api/relay/ABCDE/status      -> same (path form)
+    if (url.pathname === '/api/ssh/status' || url.pathname === '/api/relay/status') {
+      const token = validToken(url)
+      if (!token) {
+        const miss = checkLimit(tokenMiss, `miss:${ip}`, now, RATE_MISS_LIMIT, RATE_MISS_WINDOW_MS)
+        if (!miss.allowed) return rateLimited(miss.retryAfter)
+        return Response.json(
+          { ok: false, error: 'bad token (want 5-9 letters/numbers)' },
+          { status: 400 },
+        )
+      }
+      const stub = stubFor(env, token)
+      const inner = new URL(request.url)
+      inner.searchParams.set('role', 'ui-http')
+      inner.searchParams.set('ui', 'status')
+      return stub.fetch(new Request(inner, request))
+    }
+    if (url.pathname.startsWith('/api/relay/')) {
+      const token = pathToken(url.pathname + '/', '/api/relay/')
+      const tail = url.pathname.slice(('/api/relay/' + (token ?? '')).length)
+      if (token && (tail === '/status' || tail === '' || tail === '/')) {
+        const stub = stubFor(env, token)
+        const inner = new URL(request.url)
+        inner.searchParams.set('role', 'ui-http')
+        inner.searchParams.set('ui', 'status')
+        return stub.fetch(new Request(inner, request))
+      }
+    }
     if (url.pathname.startsWith('/api/ssh/')) {
-      // No live SSH backend is wired up yet — answer honestly instead of
-      // faking a connection. Run the KS SSH backend to enable this.
       return Response.json(
-        {
-          ok: false,
-          error:
-            'SSH backend not connected. Start it with `cargo run -p ks-ssh` and try again.',
-        },
-        { status: 501 },
+        { ok: false, error: 'Not found (use /api/ssh/status?token=ABCDE)' },
+        { status: 404 },
       )
     }
 

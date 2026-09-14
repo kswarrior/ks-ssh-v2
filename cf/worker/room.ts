@@ -68,8 +68,19 @@ export class TunnelRoom implements DurableObject {
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url)
 
-    // Plain HTTP (no Upgrade) = UI retrieval for this token room.
+    // Plain HTTP (no Upgrade) = UI retrieval + live status for this token room.
     if (request.headers.get('Upgrade') !== 'websocket') {
+      if (url.searchParams.get('ui') === 'status') {
+        await this.ensureUiLoaded()
+        return Response.json({
+          ok: true,
+          agentOnline: this.agent !== null,
+          hasUi: this.uiHtml !== null,
+          size: this.uiHtml ? this.uiHtml.length : 0,
+          updatedAt: this.uiUpdatedAt,
+          gated: this.authGated,
+        })
+      }
       if (url.searchParams.get('ui') === 'meta') {
         await this.ensureUiLoaded()
         return Response.json({
