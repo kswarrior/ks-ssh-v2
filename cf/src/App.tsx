@@ -157,7 +157,7 @@ function hashToPage(hash: string): PageId | null {
 function hashToSessionToken(hash: string): string | null {
   // Supports `#/session/ABCDE` and `#/session/ABCDE#k=...` (fragment key
   // ignored here; use parseFragmentKey() for `k` — never query/fetch).
-  const m = hash.match(new RegExp(`^#/session/([A-Za-z0-9]{0,9})`))
+  const m = hash.match(new RegExp(`^#/session/([A-Za-z0-9]{5,9})`))
   if (m?.[1] && TOKEN_EXACT_RE.test(m[1])) return m[1].toUpperCase()
   try {
     const q = new URLSearchParams(window.location.search).get('token')

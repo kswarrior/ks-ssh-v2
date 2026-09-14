@@ -995,6 +995,7 @@ function ShellSession({
       : `${base}?v=2&from=${offRef.current}`
     const ws = new WebSocket(url)
     wsRef.current = ws
+    pendingRef.current = []
     try {
       ws.binaryType = 'arraybuffer'
     } catch {
