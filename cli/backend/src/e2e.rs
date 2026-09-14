@@ -714,6 +714,50 @@ mod tests {
     }
 
     #[test]
+    fn e2e_session_vector_stable() {
+        // Cross-language session vector (AAD=`TOKEN|sess|dir|epoch`).
+        // `ct` below was generated with WebCrypto (HKDF-SHA256 salt=32
+        // zeros, info=`ks-ssh-e2e-v1`, AES-256-GCM) and must match Rust
+        // byte-for-byte — this locks the shared TS/Rust wire format.
+        let k = E2eKey::from_base64url("AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8")
+            .unwrap();
+        assert_eq!(k.fingerprint(), "7508e2b9fe76ad77");
+        let nonce: [u8; 12] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11];
+        let env = encrypt_bound(
+            &k,
+            "ABCDE1234",
+            "0123456789abcdef0123456789abcdef",
+            "c2a",
+            2,
+            0,
+            b"{\"type\":\"shell-send\",\"id\":\"s1\"}",
+            Some(&nonce),
+        )
+        .unwrap();
+        assert_eq!(env.seq, 0);
+        assert_eq!(env.nonce, "AAECAwQFBgcICQoL");
+        assert_eq!(
+            env.ct,
+            "a2XGzNkSK2_xKkveOJodFselwedqFY1-RhCFTO8y95eWsHJfdmXQl1NQsaSyEdM"
+        );
+        // And back: session/dir/epoch-bound decrypt works.
+        let pt = decrypt_bound(
+            &k,
+            "ABCDE1234",
+            "0123456789abcdef0123456789abcdef",
+            "c2a",
+            2,
+            &env,
+        )
+        .unwrap();
+        assert_eq!(pt, b"{\"type\":\"shell-send\",\"id\":\"s1\"}");
+        // Wrong dir / epoch / session all fail the tag.
+        assert!(decrypt_bound(&k, "ABCDE1234", "0123456789abcdef0123456789abcdef", "a2c", 2, &env).is_err());
+        assert!(decrypt_bound(&k, "ABCDE1234", "0123456789abcdef0123456789abcdef", "c2a", 3, &env).is_err());
+        assert!(decrypt_bound(&k, "ABCDE1234", "ffffffffffffffffffffffffffffffff", "c2a", 2, &env).is_err());
+    }
+
+    #[test]
     fn e2e_session_id_unique() {
         let a = new_session_id();
         let b = new_session_id();
