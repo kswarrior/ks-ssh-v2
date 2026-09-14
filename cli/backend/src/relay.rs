@@ -180,7 +180,6 @@ struct PendingRpc {
     path: String,
     headers: HashMap<String, String>,
     body_len: usize,
-    chunks: usize,
     parts: Vec<Option<String>>,
 }
 
@@ -833,7 +832,6 @@ async fn on_text(
                         path: req.path,
                         headers: req.headers,
                         body_len: req.body_len,
-                        chunks: req.chunks.min(MAX_RPC_CHUNKS),
                         parts,
                     },
                 );
