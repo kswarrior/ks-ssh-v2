@@ -205,6 +205,8 @@ class RelayConnection {
   private authResolve: ((ok: boolean) => void) | null = null
   /** Agent presence from `paired`/`agent` (null = unknown yet). */
   private agentOnline: boolean | null = null
+  /** Buffer `enc` messages during late E2E upgrade so they aren't dropped. */
+  private upgradePending: EncEnvelope[] = []
 
   constructor(token: string, host: string, NativeWS: typeof WebSocket) {
     this.token = token
@@ -439,7 +441,13 @@ class RelayConnection {
     const type = typeof msg.type === 'string' ? msg.type : ''
     // Sealed traffic: open with the channel, then route the inner message.
     if (type === 'enc') {
-      if (!this.e2e) return
+      if (!this.e2e) {
+        // Buffer during late E2E upgrade — processed after channel is ready.
+        if (this.upgradePending.length < 32) {
+          this.upgradePending.push(msg as unknown as EncEnvelope)
+        }
+        return
+      }
       try {
         const inner = await this.e2e.open(msg as unknown as EncEnvelope)
         this.routeAgentMessage(inner)
