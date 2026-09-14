@@ -250,8 +250,9 @@ export class E2eChannel {
         this.aes,
         ct.buffer as ArrayBuffer,
       )
+      const parsed = JSON.parse(new TextDecoder().decode(ptBuf)) as Record<string, unknown>
       this.rxNext += 1
-      return JSON.parse(new TextDecoder().decode(ptBuf)) as Record<string, unknown>
+      return parsed
     } catch {
       throw new Error('E2E decrypt failed')
     }
