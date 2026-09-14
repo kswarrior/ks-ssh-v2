@@ -154,9 +154,34 @@ type PendingRpc = {
 
 type JsonMsg = Record<string, unknown>
 
+const FULL_LINK_MSG =
+  'E2E required — open the full link with #k=... (the CLI printed it at startup)'
+
+function fpRememberKey(token: string): string {
+  return `ks-e2e-fp:${token}`
+}
+
+function showRelayBanner(text: string): void {
+  try {
+    if (document.getElementById('ks-relay-banner')) return
+    const div = document.createElement('div')
+    div.id = 'ks-relay-banner'
+    div.setAttribute('role', 'alert')
+    div.textContent = text
+    div.style.cssText =
+      'position:fixed;top:0;left:0;right:0;z-index:99999;padding:10px 16px;' +
+      'background:#7f1d2d;color:#fff;font:600 14px system-ui,sans-serif;' +
+      'text-align:center;box-shadow:0 4px 16px rgba(0,0,0,.4)'
+    document.documentElement.appendChild(div)
+  } catch {
+    // DOM unavailable — the rpc/shell errors still surface per-request.
+  }
+}
+
 class RelayConnection {
   private token: string
   private host: string
+  private k: string | null
   private ws: WebSocket | null = null
   private connecting: Promise<void> | null = null
   private cookie: string
@@ -165,16 +190,34 @@ class RelayConnection {
   private shells = new Map<string, RelaySocket>()
   private keepalive: number | undefined
   private NativeWS: typeof WebSocket
+  // E2E handshake state (strict-by-default, mirrors backend relay.rs).
+  private e2e: E2eChannel | null = null
+  private helloDone = false
+  private helloResolve: (() => void) | null = null
+  private agentE2e = false
+  private agentSess = ''
+  private agentEpoch = 0
+  private agentFp: string | null = null
+  private agentRelayAuth = false
+  /** Agent E2E on but no `#k=` — sealed refused; surface full-link errors. */
+  private e2eRequired = false
+  private authed = false
+  private authFlight: Promise<void> | null = null
 
   constructor(token: string, host: string, NativeWS: typeof WebSocket) {
     this.token = token
     this.host = host
     this.NativeWS = NativeWS
     this.cookie = loadJar(token)
+    try {
+      this.k = readRelayKey()
+    } catch {
+      this.k = null
+    }
   }
 
   get ready(): boolean {
-    return this.ws !== null && this.ws.readyState === 1
+    return this.ws !== null && this.ws.readyState === 1 && this.helloDone
   }
 
   ensure(): Promise<void> {
@@ -197,20 +240,14 @@ class RelayConnection {
           // Ignore.
         }
         this.connecting = null
+        this.helloResolve = null
         reject(new Error('relay connect timed out'))
-      }, 10_000)
+      }, HELLO_TIMEOUT_MS)
       ws.onopen = () => {
-        window.clearTimeout(timeout)
-        try {
-          ws.send(JSON.stringify({ type: 'hello', role: 'client', token: this.token }))
-        } catch {
-          // Hello is best-effort; pairing still works without it.
-        }
         this.ws = ws
-        this.connecting = null
         this.startKeepalive()
         ws.onmessage = (e) => {
-          this.onMessage(e.data)
+          void this.onMessage(e.data)
         }
         ws.onclose = () => {
           this.onClose()
@@ -218,16 +255,141 @@ class RelayConnection {
         ws.onerror = () => {
           // Close follows with the real verdict.
         }
-        resolve()
+        // Wait for the agent's hello before deciding sealed vs plaintext.
+        this.helloResolve = () => {
+          window.clearTimeout(timeout)
+          this.connecting = null
+          void this.finishHandshake().then(resolve, reject)
+        }
+        window.setTimeout(() => {
+          // Nudge: some relays answer `paired` but the agent hello may lag
+          // (agent reconnecting). The hello wait below still guards.
+        }, 0)
+        try {
+          void this.sendHello(ws)
+        } catch (e) {
+          window.clearTimeout(timeout)
+          this.connecting = null
+          this.helloResolve = null
+          reject(e instanceof Error ? e : new Error('relay hello failed'))
+        }
       }
       ws.onerror = () => {
         window.clearTimeout(timeout)
         this.connecting = null
+        this.helloResolve = null
         reject(new Error('relay unreachable — is the CLI running with --token?'))
       }
     })
     return this.connecting
   }
+
+  private async sendHello(ws: WebSocket): Promise<void> {
+    const hello: JsonMsg = { type: 'hello', role: 'client', token: this.token }
+    if (this.k) {
+      hello['e2e'] = E2E_ALG
+      try {
+        hello['fp'] = await e2eFingerprint(this.k)
+      } catch {
+        // Fingerprint is advisory; the channel still seals with k.
+      }
+    }
+    ws.send(JSON.stringify(hello))
+    // If no agent hello arrives (agent offline / old build), fall through
+    // to plaintext after the timeout so the UI shows relay errors, not hangs.
+    window.setTimeout(() => {
+      if (!this.helloDone && this.helloResolve) {
+        const resolve = this.helloResolve
+        this.helloResolve = null
+        // Treat as plaintext peer (agent without E2E or unreachable).
+        this.agentE2e = false
+        this.helloDone = true
+        resolve()
+      }
+    }, HELLO_TIMEOUT_MS)
+  }
+
+  /** Decide sealed vs plaintext after the agent hello (or its absence). */
+  private async finishHandshake(): Promise<void> {
+    this.helloDone = true
+    if (this.agentE2e && this.k) {
+      // Verify identity: agent-advertised fp must match our `#k=`.
+      try {
+        const mine = await e2eFingerprint(this.k)
+        if (this.agentFp && this.agentFp !== mine) {
+          showRelayBanner('E2E fingerprint mismatch — wrong #k=... for this agent?')
+          throw new Error('E2E fingerprint mismatch — wrong #k=... for this agent?')
+        }
+        this.rememberFp(this.agentFp ?? mine)
+        this.e2e = await E2eChannel.create(this.k, this.token, this.agentSess, this.agentEpoch)
+      } catch (e) {
+        this.e2e = null
+        throw e instanceof Error ? e : new Error('E2E setup failed')
+      }
+      return
+    }
+    if (this.agentE2e && !this.k) {
+      // Strict-by-default: the agent refuses plaintext from us. Fail fast
+      // with the actionable message (plus a visible banner).
+      this.e2eRequired = true
+      showRelayBanner(FULL_LINK_MSG)
+      return
+    }
+    // Agent without E2E (`--no-e2e`): plaintext allowed explicitly.
+    this.e2e = null
+  }
+
+  private rememberFp(fp: string): void {
+    try {
+      const key = fpRememberKey(this.token)
+      const prev = localStorage.getItem(key)
+      if (prev && prev !== fp) {
+        // eslint-disable-next-line no-console
+        console.warn('KS relay: agent fingerprint changed since last visit')
+      }
+      localStorage.setItem(key, fp)
+    } catch {
+      // Storage unavailable — TOFU still holds for this page view.
+    }
+  }
+
+  /** PIN-gated agents (`--relay-auth`): prompt once, verify inside E2E. */
+  private ensureAuthed(): Promise<void> {
+    if (!this.e2e || !this.agentRelayAuth || this.authed) return Promise.resolve()
+    if (this.authFlight) return this.authFlight
+    this.authFlight = new Promise((resolve, reject) => {
+      let pin: string | null = null
+      try {
+        pin = window.prompt('This relay needs a viewer PIN (printed by the CLI at startup):')
+      } catch {
+        pin = null
+      }
+      if (!pin) {
+        reject(new Error('relay viewer PIN required'))
+        return
+      }
+      const timer = window.setTimeout(() => {
+        reject(new Error('relay PIN verification timed out'))
+      }, 15_000)
+      this.authResolve = (ok: boolean) => {
+        window.clearTimeout(timer)
+        if (ok) {
+          this.authed = true
+          resolve()
+        } else {
+          reject(new Error('relay viewer PIN rejected'))
+        }
+      }
+      void this.send({ type: 'auth', pin })
+    })
+    const flight = this.authFlight
+    void flight.catch(() => {
+      if (this.authFlight === flight) this.authFlight = null
+    })
+    return flight
+  }
+
+  private authResolve: ((ok: boolean) => void) | null = null
 
   private startKeepalive(): void {
     if (this.keepalive !== undefined) return
@@ -242,6 +404,13 @@ class RelayConnection {
 
   private onClose(): void {
     this.ws = null
+    this.helloDone = false
+    this.helloResolve = null
+    this.e2e = null
+    this.e2eRequired = false
+    this.authed = false
+    this.authFlight = null
+    this.authResolve = null
     if (this.keepalive !== undefined) {
       window.clearInterval(this.keepalive)
       this.keepalive = undefined
@@ -258,7 +427,7 @@ class RelayConnection {
     this.shells.clear()
   }
 
-  private onMessage(data: unknown): void {
+  private async onMessage(data: unknown): Promise<void> {
     if (typeof data !== 'string') return
     let msg: JsonMsg
     try {
@@ -267,7 +436,58 @@ class RelayConnection {
       return
     }
     const type = typeof msg.type === 'string' ? msg.type : ''
-    if (type === 'pong' || type === 'paired' || type === 'ui-ready' || type === 'ui-pending') {
+    // Sealed traffic: open with the channel, then route the inner message.
+    if (type === 'enc') {
+      if (!this.e2e) return
+      try {
+        const inner = await this.e2e.open(msg as unknown as EncEnvelope)
+        this.routeAgentMessage(inner)
+      } catch {
+        // Wrong key / tampered / replay — generic, never details.
+        showRelayBanner('E2E decrypt failed — wrong #k=... or tampered message?')
+      }
+      return
+    }
+    // Agent hello (plaintext): capture sess/epoch/fp/relay_auth for the
+    // handshake, then route the rest normally.
+    if (type === 'hello' && msg['role'] === 'agent') {
+      this.agentE2e = msg['e2e'] === E2E_ALG
+      this.agentSess = typeof msg['sess'] === 'string' ? (msg['sess'] as string) : ''
+      const epoch = typeof msg['epoch'] === 'number' ? (msg['epoch'] as number) : 0
+      this.agentEpoch = Number.isFinite(epoch) && epoch >= 0 ? Math.floor(epoch) : 0
+      this.agentFp = typeof msg['fp'] === 'string' ? (msg['fp'] as string) : null
+      this.agentRelayAuth = msg['relay_auth'] === true
+      if (this.helloResolve) {
+        const resolve = this.helloResolve
+        this.helloResolve = null
+        resolve()
+      }
+      return
+    }
+    this.routeAgentMessage(msg)
+  }
+
+  private routeAgentMessage(msg: JsonMsg): void {
+    const type = typeof msg.type === 'string' ? msg.type : ''
+    if (
+      type === 'pong' ||
+      type === 'paired' ||
+      type === 'ui-ready' ||
+      type === 'ui-pending' ||
+      type === 'ack'
+    ) {
+      return
+    }
+    if (type === 'auth-ok') {
+      this.authed = true
+      this.authResolve?.(true)
+      this.authResolve = null
+      return
+    }
+    if (type === 'auth-fail' || type === 'auth-required') {
+      this.authed = false
+      this.authResolve?.(false)
+      this.authResolve = null
       return
     }
     if (type === 'rpc-begin' || type === 'rpc-chunk' || type === 'rpc-end' || type === 'rpc-error') {
@@ -389,6 +609,15 @@ class RelayConnection {
 
   async rpc(method: string, path: string, init?: RequestInit): Promise<Response> {
     await this.ensure()
+    if (this.e2eRequired) {
+      return new Response(FULL_LINK_MSG, { status: 426, headers: { 'content-type': 'text/plain' } })
+    }
+    try {
+      await this.ensureAuthed()
+    } catch (e) {
+      const message = e instanceof Error ? e.message : 'relay viewer PIN required'
+      return new Response(message, { status: 403, headers: { 'content-type': 'text/plain' } })
+    }
     const headersIn = new Headers(init?.headers)
     const accept = headersIn.get('accept') ?? undefined
     const contentType = headersIn.get('content-type') ?? undefined
@@ -445,15 +674,33 @@ class RelayConnection {
   }
 
   openShell(sock: RelaySocket, opts: { sid: string | null; v: number; from: number }): void {
-    this.shells.set(sock.channelId, sock)
-    this.send({
-      type: 'shell-open',
-      id: sock.channelId,
-      sid: opts.sid,
-      v: opts.v,
-      from: opts.from,
-      cookie: this.cookie || undefined,
-    })
+    void (async () => {
+      try {
+        await this.ensure()
+      } catch {
+        sock.relayFailed('relay unreachable — is the CLI running with --token?')
+        return
+      }
+      if (this.e2eRequired) {
+        sock.relayFailed(FULL_LINK_MSG)
+        return
+      }
+      try {
+        await this.ensureAuthed()
+      } catch {
+        sock.relayFailed('relay viewer PIN required')
+        return
+      }
+      this.shells.set(sock.channelId, sock)
+      this.send({
+        type: 'shell-open',
+        id: sock.channelId,
+        sid: opts.sid,
+        v: opts.v,
+        from: opts.from,
+        cookie: this.cookie || undefined,
+      })
+    })()
   }
 
   sendShell(id: string, isText: boolean, raw: Uint8Array): void {
@@ -470,6 +717,32 @@ class RelayConnection {
   }
 
   private send(value: JsonMsg): void {
+    // Sealed when the E2E channel is up (default); plaintext only for
+    // `--no-e2e` agents or always-public control (`hello`/`ping` callers
+    // below bypass this and use the socket directly).
+    if (this.e2e) {
+      const channel = this.e2e
+      const ws = this.ws
+      void (async () => {
+        try {
+          const env = await channel.seal(value)
+          ws?.send(JSON.stringify(env))
+        } catch {
+          const id = typeof value['id'] === 'string' ? (value['id'] as string) : ''
+          if (id) {
+            const p = this.pending.get(id)
+            if (p) {
+              this.pending.delete(id)
+              window.clearTimeout(p.timer)
+              p.reject(new Error('E2E seal failed'))
+            }
+            const sock = this.shells.get(id)
+            if (sock) sock.relayFailed('E2E seal failed')
+          }
+        }
+      })()
+      return
+    }
     try {
       this.ws?.send(JSON.stringify(value))
     } catch {

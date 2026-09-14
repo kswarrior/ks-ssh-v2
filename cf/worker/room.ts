@@ -285,6 +285,7 @@ export class TunnelRoom implements DurableObject {
               type: 'ui-ready',
               size: html.length,
               updatedAt: this.uiUpdatedAt,
+              ...(this.authGated ? { gated: true } : {}),
             })
           } catch {
             this.uiPending = null
@@ -340,10 +341,12 @@ export class TunnelRoom implements DurableObject {
   }
 
   webSocketClose(ws: WebSocket) {
+    this.msgCount.delete(ws)
     this.drop(ws)
   }
 
   webSocketError(ws: WebSocket) {
+    this.msgCount.delete(ws)
     this.drop(ws)
   }
 

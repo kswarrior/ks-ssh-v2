@@ -12,19 +12,32 @@
  * - Key = raw 32 bytes from `k`, then HKDF-SHA256(info="ks-ssh-e2e-v1",
  *   salt=32 zero bytes) for domain separation. No Argon2: `k` is already
  *   high-entropy from a CSPRNG; HKDF only binds the key to this protocol.
- * - AAD = `token` bytes (binds ciphertext to the room).
+ * - AAD = `TOKEN` for legacy peers, else `TOKEN|sess|dir|epoch` where the
+ *   agent mints `sess` per run and bumps `epoch` per connection, and `dir`
+ *   is `a2c` (agent→client) or `c2a` (client→agent). Cross-session /
+ *   cross-epoch / reflected ciphertext fails the tag by construction, so
+ *   `seq` can safely restart at 0 per connection.
  * - Envelope: `{"type":"enc","v":1,"seq":N,"nonce":"b64url","ct":"b64url"}`.
- *   `seq` starts at 0 per direction after `hello`; strict increment, reject
- *   replays/duplicates. Wrong key / tampered tag -> throw generic
+ *   `seq` starts at 0 per direction per (sess,epoch,dir); strict increment,
+ *   reject replays/duplicates. Wrong key / tampered tag -> throw generic
  *   "E2E decrypt failed" (no details).
+ * - Inner plaintexts carry a random `_pad` (0–64 bytes) to blur sizes.
+ * - Fingerprint = hex(SHA-256("ks-ssh-e2e-fp-v1" ‖ raw))[:16], shown by the
+ *   CLI and verified here (TOFU per token, sessionStorage only — never k).
  *
  * Sealed `enc` envelopes stay opaque to the relay — never logged, stored,
- * or inspected beyond the outer `type` for routing.
+ * or inspected beyond the outer `type` for routing. The viewer PIN travels
+ * ONLY inside `enc` (`{"type":"auth","pin":"..."}`), never plaintext hello.
  */
 
 export const E2E_ALG = 'aes-gcm-v1'
 export const E2E_VERSION = 1
 export const HKDF_INFO = 'ks-ssh-e2e-v1'
+export const FP_INFO = 'ks-ssh-e2e-fp-v1'
+export const DIR_A2C = 'a2c'
+export const DIR_C2A = 'c2a'
+export const E2E_ERROR_MSG =
+  'E2E error: peer without E2E — refusing plaintext (relay would see secrets)'
 
 export type E2eStatus = 'on' | 'off' | 'error'
 
@@ -101,6 +114,69 @@ export function extractKeyFromText(text: string): string | null {
   }
 }
 
+/** AAD bytes: legacy `TOKEN`, else `TOKEN|sess|dir|epoch`. */
+export function aadBytes(token: string, session: string, dir: string, epoch: number): Uint8Array {
+  const t = token.toUpperCase()
+  if (!session && !dir && epoch === 0) return utf8(t)
+  return utf8(`${t}|${session}|${dir}|${epoch}`)
+}
+
+/** Strict-by-default: E2E-on locally requires the peer to advertise E2E. */
+export function strictPeerOk(e2eOn: boolean, peerE2e: boolean): boolean {
+  return e2eOn ? peerE2e : true
+}
+
+/** Fresh random session id (16 bytes → 32 hex chars) — mirrors Rust. */
+export function newSessionId(): string {
+  const raw = new Uint8Array(16)
+  crypto.getRandomValues(raw)
+  return [...raw].map((b) => b.toString(16).padStart(2, '0')).join('')
+}
+
+/** Random `_pad` (0–64 bytes b64url) blurred into inner plaintext objects. */
+export function addPadding(value: Record<string, unknown>): void {
+  if ('_pad' in value) return
+  const len = Math.floor(Math.random() * 65)
+  if (len === 0) return
+  const raw = new Uint8Array(len)
+  crypto.getRandomValues(raw)
+  value['_pad'] = b64urlEncode(raw)
+}
+
+/**
+ * Fingerprint of `k` for TOFU: hex(SHA-256("ks-ssh-e2e-fp-v1" ‖ raw))[:16].
+ * Matches `E2eKey::fingerprint()` in Rust. Not a secret — binds identity.
+ */
+export async function fingerprintK(masterB64: string): Promise<string> {
+  const raw = b64urlDecode(masterB64)
+  if (raw.length !== 32) throw new Error('bad e2e key length')
+  const data = new Uint8Array(FP_INFO.length + 32)
+  data.set(utf8(FP_INFO), 0)
+  data.set(raw, FP_INFO.length)
+  const sum = new Uint8Array(await crypto.subtle.digest('SHA-256', data))
+  return [...sum.slice(0, 8)].map((b) => b.toString(16).padStart(2, '0')).join('')
+}
+
+/**
+ * TOFU check per token: first-seen fingerprint is remembered in
+ * sessionStorage (never `k` itself); a changed fp warns of a new key.
+ * Returns `{ ok, changed, first }`.
+ */
+export function checkTofu(token: string, fp: string): { ok: boolean; changed: boolean; first: boolean } {
+  const key = `ks-ssh:fp:${token.toUpperCase()}`
+  try {
+    const prev = sessionStorage.getItem(key)
+    if (!prev) {
+      sessionStorage.setItem(key, fp)
+      return { ok: true, changed: false, first: true }
+    }
+    if (prev === fp) return { ok: true, changed: false, first: false }
+    sessionStorage.setItem(key, fp)
+    return { ok: false, changed: true, first: false }
+  } catch {
+    return { ok: true, changed: false, first: true }
+  }
+}
 /** Derive the AES-256-GCM CryptoKey via HKDF-SHA256 (salt 32 zeros). */
 async function deriveAesKey(masterB64: string): Promise<CryptoKey> {
   const raw = b64urlDecode(masterB64)
@@ -128,22 +204,54 @@ async function deriveAesKey(masterB64: string): Promise<CryptoKey> {
 
 /**
  * Stateful E2E session (one per WebSocket). `txSeq`/`rxNext` start at 0
- * after `hello`. Use `create()` (async HKDF) then `encryptNext`/`decryptNext`.
+ * per (sess,epoch,dir) after `hello`. Use `create()` (async HKDF) then
+ * `encryptNext`/`decryptNext`. Session peers bind AAD=`TOKEN|sess|dir|epoch`
+ * with mirrored directions (client tx=`c2a`/rx=`a2c`); legacy peers use
+ * empty sess/dir + epoch 0 (AAD=`TOKEN`, byte-identical to the old vector).
  */
 export class E2eSession {
   private aes: CryptoKey
   private token: string
+  private session: string
+  private epoch: number
+  private txDir: string
+  private rxDir: string
   private txSeq = 0
   private rxNext = 0
 
-  private constructor(aes: CryptoKey, token: string) {
+  private constructor(
+    aes: CryptoKey,
+    token: string,
+    session: string,
+    epoch: number,
+    txDir: string,
+    rxDir: string,
+  ) {
     this.aes = aes
     this.token = token.toUpperCase()
+    this.session = session
+    this.epoch = epoch
+    this.txDir = txDir
+    this.rxDir = rxDir
   }
 
   static async create(masterB64: string, token: string): Promise<E2eSession> {
     const aes = await deriveAesKey(masterB64)
-    return new E2eSession(aes, token)
+    return new E2eSession(aes, token, '', 0, '', '')
+  }
+
+  /** Session-bound endpoint (client side: tx=`c2a`, rx=`a2c`). */
+  static async createSession(
+    masterB64: string,
+    token: string,
+    session: string,
+    epoch: number,
+    isAgent: boolean,
+  ): Promise<E2eSession> {
+    const aes = await deriveAesKey(masterB64)
+    const txDir = isAgent ? DIR_A2C : DIR_C2A
+    const rxDir = isAgent ? DIR_C2A : DIR_A2C
+    return new E2eSession(aes, token, session, epoch, txDir, rxDir)
   }
 
   getTxSeq(): number {
