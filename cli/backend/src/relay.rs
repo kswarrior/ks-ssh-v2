@@ -481,9 +481,37 @@ async fn rpc_error_shared(
 ) {
     let v = serde_json::json!({"type":"rpc-error","id":id,"status":status,"message":message});
     if !send_strict(out_tx, shared, peer, e2e_on, &v).await {
-        eprintln!("{E2E_ERROR_MSG} (rpc-error {status})");
+        // Error bodies carry no secrets — still notify plaintext peers so
+        // requests fail fast with a message instead of a 120s timeout.
+        rpc_error(out_tx, id, status, message);
         crate::db::audit("-", "local", "relay-downgrade", token, "deny");
     }
+}
+
+/// Strict-refusal notice for plaintext peers (E2E on, peer without `#k=`).
+/// Plaintext by necessity — the peer cannot open sealed mail. The body is
+/// the actionable hint only, never key material.
+fn rpc_e2e_required(out_tx: &OutTx, token: &str, id: &str) {
+    rpc_error(
+        out_tx,
+        id,
+        426,
+        "E2E required — open the full link with #k=... (the CLI printed it at startup)",
+    );
+    crate::db::audit("-", "local", "relay-downgrade", token, "deny");
+}
+
+fn shell_e2e_required(out_tx: &OutTx, token: &str, id: &str) {
+    send_out(
+        out_tx,
+        &serde_json::json!({
+            "type": "shell-closed",
+            "id": id,
+            "code": 4401,
+            "reason": "E2E required — open the full link with #k=... (the CLI printed it at startup)",
+        }),
+    );
+    crate::db::audit("-", "local", "relay-downgrade", token, "deny");
 }
 
 fn rpc_error(out_tx: &OutTx, id: &str, status: u16, message: &str) {
@@ -1240,7 +1268,7 @@ async fn on_text(
             if e2e_on && !strict_peer_ok(e2e_on, peer_e2e_now(&peer)) {
                 let id = msg.get("id").and_then(|v| v.as_str()).unwrap_or("");
                 eprintln!("{E2E_ERROR_MSG} (rpc-begin {id})");
-                crate::db::audit("-", "local", "relay-downgrade", token, "deny");
+                rpc_e2e_required(out_tx, token, id);
                 return Ok(());
             }
             let parsed: Result<RpcBeginMsg, _> = serde_json::from_value(msg.clone());
@@ -1343,6 +1371,8 @@ async fn on_text(
                 crate::db::audit("-", "local", "relay-shell", token, "deny");
                 let v = serde_json::json!({"type":"shell-closed","id":id,"code":4403,"reason":"viewer PIN required"});
                 if !send_strict(out_tx, &shared, &peer, e2e_on, &v).await {
+                    // No secrets in the notice — still notify plaintext peers.
+                    send_out(out_tx, &serde_json::json!({"type":"shell-closed","id":id,"code":4403,"reason":"viewer PIN required"}));
                     crate::db::audit("-", "local", "relay-downgrade", token, "deny");
                 }
                 return Ok(());
@@ -1350,7 +1380,7 @@ async fn on_text(
             if e2e_on && !strict_peer_ok(e2e_on, peer_e2e_now(&peer)) {
                 let id = msg.get("id").and_then(|v| v.as_str()).unwrap_or("");
                 eprintln!("{E2E_ERROR_MSG} (shell-open {id})");
-                crate::db::audit("-", "local", "relay-downgrade", token, "deny");
+                shell_e2e_required(out_tx, token, id);
                 return Ok(());
             }
             let id = msg.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();

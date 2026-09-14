@@ -460,10 +460,34 @@ class RelayConnection {
         const resolve = this.helloResolve
         this.helloResolve = null
         resolve()
+        return
+      }
+      // Late agent hello (handshake already fell through to plaintext):
+      // upgrade to sealed now rather than failing every request.
+      if (this.helloDone && !this.e2e && !this.e2eRequired && this.agentE2e && this.k) {
+        void this.upgradeLate()
       }
       return
     }
     this.routeAgentMessage(msg)
+  }
+
+  /** Establish the sealed channel after a late agent hello. */
+  private async upgradeLate(): Promise<void> {
+    try {
+      const mine = await e2eFingerprint(this.k as string)
+      if (this.agentFp && this.agentFp !== mine) {
+        showRelayBanner('E2E fingerprint mismatch — wrong #k=... for this agent?')
+        this.e2eRequired = true
+        return
+      }
+      this.rememberFp(this.agentFp ?? mine)
+      this.e2e = await E2eChannel.create(this.k as string, this.token, this.agentSess, this.agentEpoch)
+    } catch {
+      this.e2e = null
+      this.e2eRequired = true
+      showRelayBanner(FULL_LINK_MSG)
+    }
   }
 
   private routeAgentMessage(msg: JsonMsg): void {
