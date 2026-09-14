@@ -680,7 +680,7 @@ function ShellSession({
     const term = new Terminal({
       cursorBlink: true,
       cursorStyle: 'block',
-      fontSize: 14,
+      fontSize,
       fontFamily:
         'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
       lineHeight: 1.5,
@@ -696,10 +696,63 @@ function ShellSession({
       },
     })
     const fit = new FitAddon()
+    const search = new SearchAddon()
+    const serialize = new SerializeAddon()
     term.loadAddon(fit)
+    try {
+      // CJK/emoji width tables (v11) — must load before open for metrics.
+      term.loadAddon(new Unicode11Addon())
+      term.unicode.activeVersion = '11'
+    } catch {
+      // Older xterm — widths fall back to the built-in tables.
+    }
+    try {
+      term.loadAddon(new WebLinksAddon())
+    } catch {
+      // Links just won't be clickable.
+    }
+    term.loadAddon(search)
+    term.loadAddon(serialize)
     term.open(container)
     termRef.current = term
     fitRef.current = fit
+    searchRef.current = search
+    serializeRef.current = serialize
+    // Suspend predictive echo inside fullscreen apps (vim, less, htop):
+    // their output never matches typed echo.
+    const csiDisposers: { dispose: () => void }[] = []
+    try {
+      const hasAlt = (params: unknown): boolean => {
+        try {
+          const arr = (
+            params as { toArray: () => (number | number[])[] }
+          ).toArray()
+          const flat: number[] = []
+          for (const p of arr) {
+            if (Array.isArray(p)) flat.push(...p)
+            else flat.push(p)
+          }
+          return flat.includes(1049) || flat.includes(1047)
+        } catch {
+          return false
+        }
+      }
+      csiDisposers.push(
+        term.parser.registerCsiHandler({ final: 'h' }, (params) => {
+          if (hasAlt(params)) {
+            altBufRef.current = true
+            abandonPredictions()
+          }
+          return false
+        }),
+        term.parser.registerCsiHandler({ final: 'l' }, (params) => {
+          if (hasAlt(params)) altBufRef.current = false
+          return false
+        }),
+      )
+    } catch {
+      // Old xterm without parser API — prediction stays enabled.
+    }
     // Ctrl/⌘+C copies when text is selected (otherwise SIGINT goes to the
     // shell); Ctrl/⌘+V pastes via the helper textarea (fires onData).
     term.attachCustomKeyEventHandler((e) => {
@@ -714,7 +767,11 @@ function ShellSession({
     })
     const onData = term.onData((data) => {
       trackInput(data)
+      predictInput(data)
       send(data)
+    })
+    const onBell = term.onBell(() => {
+      onBellRef.current(idRef.current)
     })
     // xterm owns its scroll viewport — watch it for the "↓ latest" pill.
     const vp = container.querySelector('.xterm-viewport')
@@ -726,11 +783,31 @@ function ShellSession({
       setStuck((prev) => (prev === nearBottom ? prev : nearBottom))
     }
     vp?.addEventListener('scroll', onVpScroll)
+    // Ctrl+F opens the in-terminal search bar instead of the browser find.
+    const onKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'f' || e.key === 'F')) {
+        e.preventDefault()
+        e.stopPropagation()
+        setSearchOpen(true)
+      }
+    }
+    container.addEventListener('keydown', onKeyDown, true)
     return () => {
       vp?.removeEventListener('scroll', onVpScroll)
+      container.removeEventListener('keydown', onKeyDown, true)
+      for (const d of csiDisposers) {
+        try {
+          d.dispose()
+        } catch {
+          // Already gone — ignore.
+        }
+      }
       onData.dispose()
+      onBell.dispose()
       termRef.current = null
       fitRef.current = null
+      searchRef.current = null
+      serializeRef.current = null
       try {
         term.dispose()
       } catch {
@@ -748,6 +825,20 @@ function ShellSession({
     requestAnimationFrame(() => sendResize())
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [active])
+
+  // Apply the global font size live (touch bar A−/A+, ⋮ menu).
+  useEffect(() => {
+    const term = termRef.current
+    if (!term) return
+    try {
+      term.options.fontSize = fontSize
+      fitRef.current?.fit()
+    } catch {
+      // Emulator gone — ignore.
+    }
+    sendResize()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fontSize])
 
   useEffect(() => {
     const term = termRef.current
