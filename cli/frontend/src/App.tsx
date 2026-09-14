@@ -6,6 +6,7 @@ import HostPage from './pages/Host'
 import MorePage from './pages/More'
 import UsersPage from './pages/Users'
 import LoginPage from './pages/Login'
+import ChatWidget from './components/ChatWidget'
 
 type TabId = 'terminal' | 'files' | 'ports' | 'host' | 'more' | 'users'
 
@@ -642,7 +643,8 @@ export default function App() {
             )
           })}
         </nav>
-      </div>
+        </div>
+      <ChatWidget />
     </div>
   )
 }

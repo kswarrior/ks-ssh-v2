@@ -1575,6 +1575,27 @@ export default function TerminalPage({
     setActiveId(t.id)
   }
 
+  // Vertical split: a second live shell beside this tab's own (own backend
+  // session + own socket — two panes must never share one PTY).
+  const toggleSplit = (tabId: string) => {
+    setSplits((prev) => {
+      if (prev[tabId]) {
+        handlesRef.current.delete(prev[tabId].id)
+        const next = { ...prev }
+        delete next[tabId]
+        return next
+      }
+      splitCounter.current += 1
+      const pane: TermSession = {
+        id: `${tabId}-split-${splitCounter.current}`,
+        name: 'split',
+        sid: null,
+        off: 0,
+      }
+      return { ...prev, [tabId]: pane }
+    })
+  }
+
   const closeTerminal = (id: string) => {
     const next = sessions.filter((t) => t.id !== id)
     setSessions(next)
@@ -1584,6 +1605,26 @@ export default function TerminalPage({
     if (confirmId === id) setConfirmId(null)
     setMenuId((cur) => (cur === id ? null : cur))
     handlesRef.current.delete(id)
+    setSplits((prev) => {
+      if (!(id in prev)) return prev
+      handlesRef.current.delete(prev[id].id)
+      const next = { ...prev }
+      delete next[id]
+      return next
+    })
+    const dropKey = (prev: Record<string, boolean>) => {
+      if (!(id in prev)) return prev
+      const next = { ...prev }
+      delete next[id]
+      return next
+    }
+    setUnread(dropKey)
+    setLatencies((prev) => {
+      if (!(id in prev)) return prev
+      const next = { ...prev }
+      delete next[id]
+      return next
+    })
     setStatuses((prev) => {
       const next = { ...prev }
       delete next[id]
@@ -1629,6 +1670,60 @@ export default function TerminalPage({
     if (h) handlesRef.current.set(id, h)
     else handlesRef.current.delete(id)
   }, [])
+
+  // Child persists its v2 resume watermark (throttled) — tabs and splits.
+  const handleOffset = useCallback((id: string, off: number) => {
+    setSessions((prev) => {
+      const i = prev.findIndex((t) => t.id === id)
+      if (i < 0 || prev[i].off === off) return prev
+      const next = [...prev]
+      next[i] = { ...next[i], off }
+      return next
+    })
+    setSplits((prev) => {
+      const cur = prev[id]
+      if (!cur || cur.off === off) return prev
+      return { ...prev, [id]: { ...cur, off } }
+    })
+  }, [])
+
+  // Child reports smoothed RTT (null = unknown/offline).
+  const handleLatency = useCallback((id: string, ms: number | null) => {
+    setLatencies((prev) => (prev[id] === ms ? prev : { ...prev, [id]: ms }))
+  }, [])
+
+  // Bell from any pane: flash its tab; mark unread when not looking at it.
+  const handleBell = useCallback(
+    (id: string) => {
+      const tabId = sessions.find((t) => t.id === id)
+        ? id
+        : Object.keys(splits).find((tab) => splits[tab]?.id === id) ?? id
+      setFlash((prev) => ({ ...prev, [tabId]: (prev[tabId] ?? 0) + 1 }))
+      window.setTimeout(() => {
+        setFlash((prev) => {
+          if (!(tabId in prev)) return prev
+          const next = { ...prev }
+          delete next[tabId]
+          return next
+        })
+      }, 1200)
+      if (tabId !== activeId) {
+        setUnread((prev) => (prev[tabId] ? prev : { ...prev, [tabId]: true }))
+      }
+    },
+    [sessions, splits, activeId],
+  )
+
+  // Looking at a tab clears its unread bell marker.
+  useEffect(() => {
+    if (!activeId) return
+    setUnread((prev) => {
+      if (!prev[activeId]) return prev
+      const next = { ...prev }
+      delete next[activeId]
+      return next
+    })
+  }, [activeId])
 
   // Escape closes the open ⋮ tab menu.
   useEffect(() => {
@@ -1733,6 +1828,29 @@ export default function TerminalPage({
     closeMenu()
   }
 
+  const bumpFont = (delta: number) => {
+    setFontSize((f) => Math.max(10, Math.min(24, f + delta)))
+  }
+
+  /** One live emulator, main pane or split pane — same wiring. */
+  const sessionEl = (s: TermSession, isActive: boolean) => (
+    <ShellSession
+      id={s.id}
+      active={isActive}
+      sid={s.sid}
+      off0={s.off}
+      fontSize={fontSize}
+      predict={predict}
+      onStatus={handleStatus}
+      onReady={handleReady}
+      onProc={handleProc}
+      onHandle={handleHandle}
+      onOffset={handleOffset}
+      onLatency={handleLatency}
+      onBell={handleBell}
+    />
+  )
+
   return (
     <section className="page term-page" aria-labelledby="page-title-terminal">
       <h1 id="page-title-terminal" className="sr-only">
@@ -1747,13 +1865,14 @@ export default function TerminalPage({
           const proc = procs[t.id] ?? null
           const label = tabLabel(proc)
           const fullTitle = proc ? `${t.name} — ${proc}` : t.name
+          const rtt = latencies[t.id] ?? null
           return (
             <div
               key={t.id}
               role="tab"
               aria-selected={isActive}
               tabIndex={0}
-              className={`term-tab${isActive ? ' active' : ''}`}
+              className={`term-tab${isActive ? ' active' : ''}${flash[t.id] ? ' flash' : ''}`}
               onClick={() => setActiveId(t.id)}
               onKeyDown={(e) => {
                 if (e.key === 'Enter' || e.key === ' ') {
@@ -1798,6 +1917,14 @@ export default function TerminalPage({
               <span className="term-tab-name" title={fullTitle}>
                 {label}
               </span>
+              {isActive && st === 'online' && rtt != null && (
+                <span className="term-tab-ping" title={`Round-trip ${rtt} ms`}>
+                  {rtt}ms
+                </span>
+              )}
+              {unread[t.id] && !isActive && (
+                <span className="term-tab-unread" title="Activity while away" aria-hidden="true" />
+              )}
               <span
                 className={`term-tab-dot${st === 'online' ? ' on' : st === 'connecting' ? ' wait' : ''}`}
                 title={st}
@@ -1839,19 +1966,21 @@ export default function TerminalPage({
         </button>
       </div>
       <div className="term-opened">
-        {sessions.map((t) => (
-          <div key={t.id} hidden={t.id !== active.id}>
-            <ShellSession
-              id={t.id}
-              active={t.id === active.id}
-              sid={t.sid}
-              onStatus={handleStatus}
-              onReady={handleReady}
-              onProc={handleProc}
-              onHandle={handleHandle}
-            />
-          </div>
-        ))}
+        {sessions.map((t) => {
+          const pane = splits[t.id]
+          return (
+            <div key={t.id} hidden={t.id !== active.id}>
+              {pane ? (
+                <div className="term-split">
+                  <div className="term-split-pane">{sessionEl(t, t.id === active.id)}</div>
+                  <div className="term-split-pane">{sessionEl(pane, t.id === active.id)}</div>
+                </div>
+              ) : (
+                sessionEl(t, t.id === active.id)
+              )}
+            </div>
+          )
+        })}
       </div>
       {menuTerm && menuAnchor
         ? createPortal(
@@ -1913,6 +2042,72 @@ export default function TerminalPage({
               onClick={() => menuAction((h) => h.copy())}
             >
               Copy output
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              className="term-tab-menu-item"
+              onClick={() => menuAction((h) => h.search())}
+            >
+              Search scrollback
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              className="term-tab-menu-item"
+              onClick={() => menuAction((h) => h.exportLog())}
+            >
+              Export log (.txt)
+            </button>
+            <div className="term-tab-menu-sep" aria-hidden="true" />
+            <button
+              type="button"
+              role="menuitem"
+              className="term-tab-menu-item"
+              title="Dimmed local echo while typing on slow links (above 50ms)"
+              onClick={() => {
+                setPredict((p) => !p)
+                closeMenu()
+              }}
+            >
+              Predictive echo {predict ? '✓' : ''}
+            </button>
+            <div className="term-tab-menu-row" role="none">
+              <button
+                type="button"
+                role="menuitem"
+                className="term-tab-menu-item"
+                aria-label="Decrease font size"
+                onClick={() => {
+                  bumpFont(-1)
+                  closeMenu()
+                }}
+              >
+                A−
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                className="term-tab-menu-item"
+                aria-label="Increase font size"
+                onClick={() => {
+                  bumpFont(1)
+                  closeMenu()
+                }}
+              >
+                A+
+              </button>
+            </div>
+            <button
+              type="button"
+              role="menuitem"
+              className="term-tab-menu-item"
+              onClick={() => {
+                if (menuTerm) toggleSplit(menuTerm.id)
+                closeMenu()
+              }}
+            >
+              {menuTerm && splits[menuTerm.id] ? 'Close split' : 'Split vertically'}
             </button>
             <div className="term-tab-menu-sep" aria-hidden="true" />
             <button

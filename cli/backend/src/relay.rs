@@ -173,11 +173,14 @@ async fn agent_session(
     })?;
     tx.send(Message::Text(hello.into())).await?;
 
-    if push_ui && let Err(e) = push_ui_bundle(&mut tx).await {
+    if push_ui && let Err(e) = push_ui_bundle(&mut tx, token).await {
         eprintln!("ui push failed: {e:#}");
     }
 
     let mut keepalive = tokio::time::interval(std::time::Duration::from_secs(20));
+    // `--relay-auth`: track whether the paired viewer presented the PIN.
+    // Plain `bool` per connection (single viewer per agent session in v1).
+    let mut viewer_ok = relay_pin.is_none();
     loop {
         tokio::select! {
             _ = keepalive.tick() => {
@@ -189,7 +192,7 @@ async fn agent_session(
                 let msg = msg.map_err(|e| anyhow::anyhow!("{e}"))?;
                 match msg {
                     Message::Text(text) => {
-                        on_text(&mut tx, &text, push_ui, &mut e2e, &mut peer_e2e).await?
+                        on_text(&mut tx, &text, push_ui, token, &mut e2e, &mut peer_e2e, &relay_pin, &mut viewer_ok).await?
                     }
                     Message::Binary(_) => {}
                     Message::Close(_) => anyhow::bail!("relay closed"),
@@ -204,7 +207,7 @@ async fn agent_session(
 /// NOTE: the UI bundle is public build output and stays PLAINTEXT by design
 /// (needed for per-token caching in `room.ts`). Never tunnel secrets inside
 /// UI messages.
-async fn push_ui_bundle(tx: &mut WsTx) -> anyhow::Result<()> {
+async fn push_ui_bundle(tx: &mut WsTx, token: &str) -> anyhow::Result<()> {
     let html = crate::ui::build_single_file()?;
     let bytes = html.as_bytes();
     let chunks: Vec<String> = bytes
@@ -236,6 +239,8 @@ async fn push_ui_bundle(tx: &mut WsTx) -> anyhow::Result<()> {
         bytes.len(),
         chunks.len()
     );
+    // Audit the push (token only, never bundle contents / secrets).
+    crate::db::audit("-", "local", "relay-ui-push", token, "ok");
     Ok(())
 }
 
@@ -252,11 +257,21 @@ async fn on_text(
     tx: &mut WsTx,
     text: &str,
     push_ui: bool,
+    token: &str,
     e2e: &mut Option<E2e>,
     peer_e2e: &mut bool,
+    relay_pin: &Option<std::sync::Arc<crate::auth::RelayPinState>>,
+    viewer_ok: &mut bool,
 ) -> anyhow::Result<()> {
     // Fast path: `enc` envelopes (opaque to the relay, sealed for us).
     if let Some(env) = crate::e2e::parse_envelope(text) {
+        // `--relay-auth`: refuse sealed data until the viewer PIN checked out.
+        // (Audit logs the token only, never key material.)
+        if relay_pin.is_some() && !*viewer_ok {
+            eprintln!("relay viewer PIN required before data bridge");
+            crate::db::audit("-", "local", "relay-data", token, "deny");
+            return Ok(());
+        }
         match e2e {
             Some(state) => match state.decrypt_next(&env) {
                 Ok(pt) => {
@@ -293,6 +308,26 @@ async fn on_text(
     match msg.get("type").and_then(|t| t.as_str()) {
         Some("hello") => {
             // Peer capability negotiation: `{type:hello, role, token, e2e?}`.
+            // With `--relay-auth` the client must also present `pin` (its
+            // value is never logged; only the outcome is audited).
+            if let Some(pin_state) = relay_pin {
+                let pin_ok = msg
+                    .get("pin")
+                    .and_then(|v| v.as_str())
+                    .is_some_and(|p| pin_state.verify(p));
+                *viewer_ok = pin_ok;
+                // Audit with token only — never the PIN.
+                crate::db::audit(
+                    "-",
+                    "local",
+                    "relay-viewer-auth",
+                    token,
+                    if pin_ok { "ok" } else { "deny" },
+                );
+                if !pin_ok {
+                    eprintln!("relay viewer PIN rejected");
+                }
+            }
             let alg = msg.get("e2e").and_then(|v| v.as_str());
             if alg == Some(E2E_ALG) {
                 *peer_e2e = true;
@@ -315,17 +350,25 @@ async fn on_text(
             // CF has no cached UI for this token (e.g. DO restarted) — resend.
             if push_ui {
                 println!("ui re-requested — repushing bundle");
-                if let Err(e) = push_ui_bundle(tx).await {
+                if let Err(e) = push_ui_bundle(tx, token).await {
                     eprintln!("ui repush failed: {e:#}");
                 }
             }
         }
         Some("data") => {
+            // `--relay-auth`: refuse plaintext data until the viewer PIN
+            // checked out (audit token only).
+            if relay_pin.is_some() && !*viewer_ok {
+                eprintln!("relay viewer PIN required before data bridge");
+                crate::db::audit("-", "local", "relay-data", token, "deny");
+                return Ok(());
+            }
             // Plaintext data: legacy peer, or peer that chose plaintext.
             // v1: acknowledge (PTY bridging comes next).
             if e2e.is_some() {
                 eprintln!("legacy plaintext data (relay-visible) — peer without E2E");
             }
+            crate::db::audit("-", "local", "relay-data", token, "ok");
             tx.send(Message::Text(r#"{"type":"ack"}"#.to_string().into()))
                 .await?;
         }
