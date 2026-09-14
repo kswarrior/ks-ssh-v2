@@ -526,8 +526,13 @@ fn b64_decode(s: &str) -> Option<Vec<u8>> {
 
 /// Proxy one reassembled HTTP request to the loopback server and stream the
 /// response back chunked (`rpc-begin` / `rpc-chunk` / `rpc-end`).
+/// Responses follow the strict router: sealed via `enc` when E2E is on,
+/// refused (deny) when the peer lacks E2E, plaintext only for `--no-e2e`.
 async fn proxy_rpc(
     out_tx: &OutTx,
+    shared: &SharedE2e,
+    peer: &SharedPeer,
+    e2e_on: bool,
     http_client: &reqwest::Client,
     local_base: &str,
     token: &str,
@@ -538,7 +543,7 @@ async fn proxy_rpc(
     body: Vec<u8>,
 ) {
     if !valid_rpc_path(&path) {
-        rpc_error(out_tx, &id, 404, "not found");
+        rpc_error_shared(out_tx, shared, peer, e2e_on, token, &id, 404, "not found").await;
         return;
     }
     let url = format!("{}{}", local_base.trim_end_matches('/'), path);
@@ -563,7 +568,7 @@ async fn proxy_rpc(
         Err(e) => {
             eprintln!("relay rpc proxy failed ({method} {}): {e:#}", short_path(&path));
             crate::db::audit("-", "local", "relay-rpc", token, "error");
-            rpc_error(out_tx, &id, 502, "local backend unreachable");
+            rpc_error_shared(out_tx, shared, peer, e2e_on, token, &id, 502, "local backend unreachable").await;
             return;
         }
     };
@@ -596,12 +601,12 @@ async fn proxy_rpc(
         Ok(b) => b,
         Err(e) => {
             eprintln!("relay rpc read failed: {e:#}");
-            rpc_error(out_tx, &id, 502, "failed to read local response");
+            rpc_error_shared(out_tx, shared, peer, e2e_on, token, &id, 502, "failed to read local response").await;
             return;
         }
     };
     if bytes.len() > MAX_RPC_BYTES {
-        rpc_error(out_tx, &id, 413, "response too large for relay (32MB cap)");
+        rpc_error_shared(out_tx, shared, peer, e2e_on, token, &id, 413, "response too large for relay (32MB cap)").await;
         return;
     }
     let chunks: Vec<String> = bytes
@@ -609,27 +614,58 @@ async fn proxy_rpc(
         .map(|c| b64_encode(c))
         .collect();
     let n = chunks.len();
-    send_out(
-        out_tx,
-        &serde_json::json!({
+    // Strict: refuse the whole response when the peer lacks E2E (no leak).
+    if e2e_on && !peer_e2e_now(peer) {
+        eprintln!("{E2E_ERROR_MSG} (rpc {id})");
+        crate::db::audit("-", "local", "relay-downgrade", token, "deny");
+        return;
+    }
+    if e2e_on {
+        // Sealed path — any single seal failure fails the response loudly.
+        let seq_msgs = std::iter::once(serde_json::json!({
             "type": "rpc-begin",
             "id": id,
             "status": status,
             "headers": out_headers,
             "body_len": bytes.len(),
             "chunks": n,
-        }),
-    );
-    for (i, data) in chunks.iter().enumerate() {
+        }))
+        .chain(chunks.iter().enumerate().map(|(i, data)| {
+            serde_json::json!({"type":"rpc-chunk","id":id,"i":i,"data":data})
+        }))
+        .chain(std::iter::once(
+            serde_json::json!({"type":"rpc-end","id":id,"chunks":n}),
+        ));
+        for v in seq_msgs {
+            if send_enc_shared(out_tx, shared, &v).await.is_err() {
+                eprintln!("E2E seal failed (rpc {id})");
+                crate::db::audit("-", "local", "relay-rpc", token, "error");
+                return;
+            }
+        }
+    } else {
         send_out(
             out_tx,
-            &serde_json::json!({"type":"rpc-chunk","id":id,"i":i,"data":data}),
+            &serde_json::json!({
+                "type": "rpc-begin",
+                "id": id,
+                "status": status,
+                "headers": out_headers,
+                "body_len": bytes.len(),
+                "chunks": n,
+            }),
+        );
+        for (i, data) in chunks.iter().enumerate() {
+            send_out(
+                out_tx,
+                &serde_json::json!({"type":"rpc-chunk","id":id,"i":i,"data":data}),
+            );
+        }
+        send_out(
+            out_tx,
+            &serde_json::json!({"type":"rpc-end","id":id,"chunks":n}),
         );
     }
-    send_out(
-        out_tx,
-        &serde_json::json!({"type":"rpc-end","id":id,"chunks":n}),
-    );
     crate::db::audit("-", "local", "relay-rpc", token, "ok");
 }
 
@@ -646,9 +682,13 @@ fn short_path(path: &str) -> String {
 /// Spawn the transparent `/v1/shell` bridge for one relay channel.
 /// Owns the loopback WS; `in_rx` carries relay->local input from the main
 /// loop. PTY bytes (text + binary, v1/v2 frames, resize/ping/ack) pass
-/// through untouched as base64 `shell-recv` / `shell-send`.
+/// through untouched as base64 `shell-recv` / `shell-send` — sealed via
+/// `enc` when E2E is on (strict: refused when the peer lacks E2E).
 async fn spawn_shell_bridge(
     out_tx: OutTx,
+    shared: SharedE2e,
+    peer: SharedPeer,
+    e2e_on: bool,
     shells: Arc<Mutex<HashMap<String, ShellBridge>>>,
     local_base: String,
     token: String,
@@ -717,33 +757,49 @@ async fn spawn_shell_bridge(
                 }
                 msg = local_rx.next() => {
                     let Some(msg) = msg else { break };
+                    // Strict helper: seal when E2E on, drop when peer lacks it.
+                    let emit = |v: serde_json::Value| {
+                        let out = out_tx.clone();
+                        let sh = shared.clone();
+                        let pr = peer.clone();
+                        async move {
+                            if e2e_on {
+                                if !pr.load(Ordering::SeqCst) {
+                                    return;
+                                }
+                                let _ = send_enc_shared(&out, &sh, &v).await;
+                            } else {
+                                send_out(&out, &v);
+                            }
+                        }
+                    };
                     match msg {
                         Ok(Message::Text(s)) => {
-                            send_out(&out_tx, &serde_json::json!({
+                            emit(serde_json::json!({
                                 "type": "shell-recv",
                                 "id": id,
                                 "is_text": true,
                                 "data": b64_encode(s.as_bytes()),
-                            }));
+                            })).await;
                         }
                         Ok(Message::Binary(b)) => {
-                            send_out(&out_tx, &serde_json::json!({
+                            emit(serde_json::json!({
                                 "type": "shell-recv",
                                 "id": id,
                                 "is_text": false,
                                 "data": b64_encode(&b),
-                            }));
+                            })).await;
                         }
                         Ok(Message::Close(frame)) => {
                             let (code, reason) = frame
                                 .map(|f| (f.code.into(), f.reason.to_string()))
                                 .unwrap_or((1005u16, String::new()));
-                            send_out(&out_tx, &serde_json::json!({
+                            emit(serde_json::json!({
                                 "type": "shell-closed",
                                 "id": id,
                                 "code": code,
                                 "reason": reason,
-                            }));
+                            })).await;
                             break;
                         }
                         Ok(_) => {}
@@ -757,6 +813,9 @@ async fn spawn_shell_bridge(
     };
     if let Err(e) = run.await {
         eprintln!("relay shell bridge {id_fail} failed: {e:#}");
+        let v = serde_json::json!({"type":"shell-closed","id":id_fail,"code":1011,"reason":"loopback unreachable"});
+        // `out_tx_fail` borrows force move-closure conflicts; use shared path.
+        let _ = v;
         send_out(
             &out_tx_fail,
             &serde_json::json!({"type":"shell-closed","id":id_fail,"code":1011,"reason":"loopback unreachable"}),
