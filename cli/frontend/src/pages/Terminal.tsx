@@ -1252,13 +1252,14 @@ function ShellSession({
       // Ignore — a fresh socket is created below regardless.
     }
     wsRef.current = null
-    // A dead shell can't be reattached to — drop the id so the backend
-    // spawns a fresh session (and reports the new id via `ready`).
+    // A dead shell can't be reattached to — mint a fresh id so the backend
+    // spawns a new session (and reports it via `ready`).
     if (gotExitRef.current) {
-      sidRef.current = null
+      const fresh = newSid()
+      sidRef.current = fresh
       offRef.current = 0
       saveOffset()
-      onReady(id, null)
+      onReady(id, fresh)
     }
     gotExitRef.current = false
     sizeRef.current = null
@@ -1599,7 +1600,11 @@ function ShellSession({
 let termCounter = 0
 function nextTerm(): TermSession {
   termCounter += 1
-  return { id: `term-${Date.now().toString(36)}-${termCounter}`, name: `terminal ${termCounter}`, sid: null, off: 0 }
+  // Pre-generate the backend session id client-side so a React StrictMode
+  // double-mount (or any double-connect race) reuses the SAME id: the
+  // second socket takes over the first instead of orphaning a second live
+  // shell that would linger as a phantom "shared" row.
+  return { id: `term-${Date.now().toString(36)}-${termCounter}`, name: `terminal ${termCounter}`, sid: newSid(), off: 0 }
 }
 
 export default function TerminalPage({
@@ -1619,7 +1624,9 @@ export default function TerminalPage({
       const m = /^terminal (\d+)$/.exec(t.name)
       if (m) termCounter = Math.max(termCounter, parseInt(m[1], 10))
     }
-    return stored
+    // Migrate legacy tabs without a sid (pre-client-id builds): mint one
+    // now so the first connect reuses it (no StrictMode double orphan).
+    return stored.map((t) => (t.sid ? t : { ...t, sid: newSid() }))
   })
   const [activeId, setActiveId] = useState<string | null>(() =>
     loadActiveId(loadTerms().length > 0 ? (loadTerms()[0]?.id ?? null) : null),
@@ -1714,7 +1721,11 @@ export default function TerminalPage({
   const toggleSplit = (tabId: string) => {
     setSplits((prev) => {
       if (prev[tabId]) {
-        handlesRef.current.delete(prev[tabId].id)
+        // Closing the split kills its backend shell — otherwise it lingers
+        // detached and reappears as a phantom "shared" row.
+        const doomed = prev[tabId]
+        if (doomed.sid) void killHostTerm(doomed.sid)
+        handlesRef.current.delete(doomed.id)
         const next = { ...prev }
         delete next[tabId]
         return next
@@ -1723,7 +1734,7 @@ export default function TerminalPage({
       const pane: TermSession = {
         id: `${tabId}-split-${splitCounter.current}`,
         name: 'split',
-        sid: null,
+        sid: newSid(),
         off: 0,
       }
       return { ...prev, [tabId]: pane }
@@ -1731,6 +1742,12 @@ export default function TerminalPage({
   }
 
   const closeTerminal = (id: string) => {
+    const doomed = sessions.find((t) => t.id === id)
+    // Kill the backend PTY now — closing a tab must not leave a live
+    // detached shell that keeps showing up under "Other sessions".
+    if (doomed?.sid) void killHostTerm(doomed.sid)
+    const splitDoomed = splits[id]
+    if (splitDoomed?.sid) void killHostTerm(splitDoomed.sid)
     const next = sessions.filter((t) => t.id !== id)
     setSessions(next)
     if (activeId === id) {
