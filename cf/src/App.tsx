@@ -753,7 +753,14 @@ function SSHPage({
                         <>
                           <a
                             className="btn btn-sm btn-primary"
-                            href={`#/session/${e.token.trim().toUpperCase()}`}
+                            href={(() => {
+                              // Full-page CLI frontend (same as --port): raw /v/TOKEN
+                              // has no CF header/sidebar, only the CLI chrome.
+                              // Preserve #k=... so E2E survives the navigation.
+                              const t = e.token.trim().toUpperCase()
+                              const k = parseFragmentKey()
+                              return k ? `/v/${t}#k=${k}` : `/v/${t}`
+                            })()}
                             aria-label={`Visit ${e.name}`}
                             title="Visit — open the full CLI frontend (Terminal, Files, Ports, Host) for this machine"
                           >
