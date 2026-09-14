@@ -1,8 +1,11 @@
 //! Relay agent: one outbound WSS to the Worker, no open port needed.
 //!
-//! The CLI registers a 5-char token (`/v1/agent?token=XXXXX`). A browser
+//! The CLI registers a token (`/v1/agent?token=XXXXX`). A browser
 //! that opens `/v1/client?token=XXXXX` is paired into the same
 //! Durable Object room and the two sides are bridged.
+//!
+//! Tokens are 9-char by default (letters + numbers, no look-alikes);
+//! 5-char legacy tokens still route (compat) but fresh runs mint 9.
 //!
 //! On connect the agent also pushes its whole embedded frontend as a
 //! single-file HTML bundle (`ui-begin` / `ui-chunk` / `ui-end`), so CF can
@@ -16,20 +19,34 @@
 //!   transparently (text + binary) to the same loopback server.
 //! The Worker relays these opaquely by room; `k`/PINs are never logged.
 //!
-//! E2E (sshx-style): `token` routes, `k` (256-bit, fragment-only) seals.
-//! Sensitive payloads travel as `{"type":"enc",...}` (AES-256-GCM, AAD=token).
-//! The relay sees only sizes/timing. UI bundle + rpc/shell control messages
-//! stay plaintext by design (see `crate::e2e`).
+//! E2E (sshx-style), strict-by-default: `token` routes, `k` (256-bit,
+//! fragment-only) seals. When E2E is on (default) both sides advertise
+//! `e2e:"aes-gcm-v1"` in `hello` plus session binding (`sess`, `epoch`,
+//! `fp` = fingerprint of `k`). Sensitive payloads travel ONLY as
+//! `{"type":"enc",...}` (AES-256-GCM, AAD=`TOKEN|sess|dir|epoch`, strict
+//! seq, random `_pad`). A peer without E2E is hard-failed with `E2E error`
+//! + audit deny — no plaintext is sent. `--no-e2e` is the only escape hatch
+//! (explicit, loud warning + audit row). The relay sees only sizes/timing.
+//! UI bundle + `paired`/`agent` presence + `ping`/`pong` + `ui-*` control
+//! stay plaintext by design (public build output / no secrets); the viewer
+//! PIN travels ONLY inside `enc` (`{"type":"auth","pin":"..."}`) when both
+//! sides do E2E.
 
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use futures_util::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
 use tokio::sync::{Mutex, mpsc};
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 
-use crate::e2e::{E2E_ALG, E2e, E2eKey};
+use crate::e2e::{E2E_ALG, E2E_ERROR_MSG, E2e, E2eKey, strict_peer_ok};
+
+const TOKEN_ALPHABET: &[u8] = b"ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+/// Fresh tokens are 9 chars (~46 bits of routing entropy, up from 5/~25b).
+/// 5-char legacy tokens still route for compat.
+pub const TOKEN_LEN_NEW: usize = 9;
 
 const TOKEN_ALPHABET: &[u8] = b"ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 /// Raw bytes per ui-chunk (~64KB base64 per WS message, well under limits).
@@ -48,9 +65,9 @@ type WsTx = futures_util::stream::SplitSink<
 /// Outgoing relay texts from the main loop + per-shell bridge tasks.
 type OutTx = mpsc::UnboundedSender<String>;
 
-/// Random 5-char token (letters + numbers, no look-alikes like 0/O or 1/I).
+/// Random 9-char token (letters + numbers, no look-alikes like 0/O or 1/I).
 pub fn new_token() -> String {
-    (0..5)
+    (0..TOKEN_LEN_NEW)
         .map(|_| {
             let i = fastrand::usize(..TOKEN_ALPHABET.len());
             TOKEN_ALPHABET[i] as char
@@ -58,9 +75,16 @@ pub fn new_token() -> String {
         .collect()
 }
 
+/// 5-char legacy tokens still route; fresh runs mint 9 chars.
 pub fn valid_token(t: &str) -> bool {
-    t.len() == 5 && t.bytes().all(|b| b.is_ascii_alphanumeric())
+    (t.len() == 5 || t.len() == TOKEN_LEN_NEW)
+        && t.bytes().all(|b| b.is_ascii_alphanumeric())
 }
+
+/// Shared E2E sender state: the main loop owns decrypt order, spawned
+/// rpc/shell tasks share encrypt order through this lock (monotonic seq).
+type SharedE2e = Arc<Mutex<Option<E2e>>>;
+type SharedPeer = Arc<AtomicBool>;
 
 #[derive(Serialize)]
 struct Hello<'a> {
@@ -70,6 +94,17 @@ struct Hello<'a> {
     token: &'a str,
     #[serde(skip_serializing_if = "Option::is_none")]
     e2e: Option<&'a str>,
+    /// Session binding (E2E only): random per-run id + per-connection epoch.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    sess: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    epoch: Option<u64>,
+    /// Fingerprint of `k` (TOFU identity, E2E only — not a secret).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    fp: Option<&'a str>,
+    /// Whether this agent gates data behind a viewer PIN (`--relay-auth`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    relay_auth: Option<bool>,
 }
 
 #[derive(Serialize)]
@@ -114,10 +149,12 @@ fn https_base(ws_base: &str) -> String {
 }
 
 /// Hold the relay connection forever (reconnects with backoff).
-/// `e2e_key`: `Some` = E2E on (default), `None` = legacy plaintext (`--no-e2e`).
-/// `relay_pin`: `Some` = `--relay-auth` — the agent requires a one-time
-/// viewer PIN in the client's `hello` before bridging `data` (closes the
-/// bearer-open bypass honestly). Audit rows log the token only, never `k`/PIN.
+/// `e2e_key`: `Some` = E2E on (default, strict), `None` = legacy plaintext
+/// (`--no-e2e`, explicit escape hatch only).
+/// `relay_pin`: `Some` = `--relay-auth` — the agent requires the viewer PIN
+/// inside `enc` (`{"type":"auth","pin":"..."}`) before bridging data/rpc/
+/// shell (closes the bearer-open bypass honestly). Audit rows log the token
+/// only, never `k`/PIN.
 /// `local_base`: loopback HTTP base (e.g. `http://127.0.0.1:PORT`) the agent
 /// proxies `rpc-*` / `shell-*` relay messages to — same router/auth/DB as
 /// `--port`, so Visit-over-WSS is fully functional with no open port.
@@ -134,7 +171,7 @@ pub async fn run_agent(
     let base = relay.trim_end_matches('/');
     let url = format!("{base}/v1/agent?token={token}");
     let http = https_base(base);
-    // NOTE: the short token is safe to log (routing only). The E2E secret
+    // NOTE: the token is safe to log (routing only). The E2E secret
     // `k` must NEVER appear in logs except in the one-time share links below.
     // The viewer PIN (when `--relay-auth`) is likewise printed once and never
     // logged again.
@@ -143,32 +180,59 @@ pub async fn run_agent(
     crate::db::audit("-", "local", "relay-register", token, "ok");
     if let Some(ref k) = e2e_key {
         let secret = k.to_base64url();
+        let fp = k.fingerprint();
         println!("E2E: ON (AES-256-GCM, {E2E_ALG}) — relay sees only ciphertext sizes.");
+        println!("E2E fingerprint: {fp} — verify it matches in the viewer on first connect (TOFU).");
         println!("Share link (contains secret — send directly, do not log):");
         println!("  {http}/v/{token}#k={secret}");
         println!("  {http}/#/session/{token}#k={secret}");
         // Drop the display copy immediately (the key itself stays in memory).
     } else {
-        println!("E2E: OFF (legacy --no-e2e) — relay can see plaintext.");
+        println!("E2E: OFF (legacy --no-e2e) — relay can see plaintext. Explicit escape hatch only; prefer the default E2E link above.");
+        crate::db::audit("-", "local", "relay-downgrade", token, "explicit-no-e2e");
     }
     if relay_pin.is_some() {
-        println!("Relay auth: ON — viewers must present the PIN printed at startup (or a minted one via POST /api/relay/pin). Default without --relay-auth stays bearer-open.");
+        println!("Relay auth: ON — viewers must present the PIN inside E2E (never in query/logs) before data flows. Mint fresh PINs via POST /api/relay/pin. Default without --relay-auth stays bearer-open.");
     }
     if push_ui {
         println!("Fullscreen UI: {http}/v/{token}  (or {http}/#/session/{token})");
         println!("Visit in CF opens the full CLI UI (Terminal, Files, Ports, Host) over WSS — same as --port, fully functional.");
+        println!("UI bundle is public build output (zero secrets) served with no-store; all session data inside it travels via E2E when on.");
     }
 
+    // Session binding: one random `sess` per run, `epoch` bumps per connect.
+    // AAD=`TOKEN|sess|dir|epoch` so cross-session/epoch replays fail even
+    // though `seq` restarts at 0 per connection.
+    let sess = if e2e_key.is_some() {
+        crate::e2e::new_session_id()
+    } else {
+        String::new()
+    };
+    let mut epoch: u64 = 0;
     let mut backoff_secs = 1u64;
     loop {
-        // Clone the key per session (seq resets to 0 each connection).
+        // Clone the key per session (seq restarts at 0; epoch binds AAD).
         let key_clone = e2e_key.clone();
         let pin_clone = relay_pin.clone();
         let base_clone = local_base.clone();
-        match agent_session(&url, token, push_ui, key_clone, pin_clone, base_clone).await {
+        let sess_clone = sess.clone();
+        let cur_epoch = epoch;
+        match agent_session(
+            &url,
+            token,
+            push_ui,
+            key_clone,
+            pin_clone,
+            base_clone,
+            sess_clone,
+            cur_epoch,
+        )
+        .await
+        {
             Ok(()) => backoff_secs = 1,
             Err(e) => eprintln!("relay error: {e} (retry in {backoff_secs}s)"),
         }
+        epoch = epoch.wrapping_add(1);
         tokio::time::sleep(std::time::Duration::from_secs(backoff_secs)).await;
         backoff_secs = (backoff_secs * 2).min(30);
     }

@@ -970,6 +970,19 @@ function SessionPage({
     }
   }
 
+  // WSS-fetched bundles render as srcDoc (opaque origin) — inject the relay
+  // token/host so the bundled shim tunnels /api/* + /v1/shell over WSS to
+  // the agent's loopback server (same functionality as local --port).
+  // (Above the empty-token early return: hooks must run unconditionally.)
+  const injectedSrcDoc = useMemo(() => {
+    if (srcDoc === null || !activeToken) return null
+    try {
+      return withRelayGlobals(srcDoc, activeToken, window.location.host)
+    } catch {
+      return srcDoc
+    }
+  }, [srcDoc, activeToken])
+
   if (!activeToken) {
     return (
       <section className="page" aria-labelledby="page-title-session">
@@ -991,18 +1004,6 @@ function SessionPage({
     meta?.hasUi && srcDoc === null
       ? `/v/${activeToken}${cacheBust ? `?t=${cacheBust}` : ''}`
       : undefined
-
-  // WSS-fetched bundles render as srcDoc (opaque origin) — inject the relay
-  // token/host so the bundled shim tunnels /api/* + /v1/shell over WSS to
-  // the agent's loopback server (same functionality as local --port).
-  const injectedSrcDoc = useMemo(() => {
-    if (srcDoc === null || !activeToken) return null
-    try {
-      return withRelayGlobals(srcDoc, activeToken, window.location.host)
-    } catch {
-      return srcDoc
-    }
-  }, [srcDoc, activeToken])
 
   return (
     <section className="page page-session-full" aria-labelledby="page-title-session">
