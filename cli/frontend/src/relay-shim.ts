@@ -136,6 +136,7 @@ type PendingRpc = {
   chunks: (string | null)[]
   expected: number
   received: number
+  gotBegin: boolean
 }
 
 type JsonMsg = Record<string, unknown>
@@ -464,19 +465,6 @@ class RelayConnection {
   }
 }
 
-/** One-shot handoff: rpc() registers resolvers just before begin lands. */
-class RpcHooks {
-  private static map = new Map<string, { resolve: (r: Response) => void; reject: (e: Error) => void }>()
-  static set(id: string, hooks: { resolve: (r: Response) => void; reject: (e: Error) => void }): void {
-    RpcHooks.map.set(id, hooks)
-  }
-  static take(id: string): { resolve: (r: Response) => void; reject: (e: Error) => void } | null {
-    const h = RpcHooks.map.get(id) ?? null
-    if (h) RpcHooks.map.delete(id)
-    return h
-  }
-}
-
 async function readBodyBytes(body: BodyInit | null | undefined): Promise<Uint8Array | null> {
   if (body === null || body === undefined) return null
   if (typeof body === 'string') return new TextEncoder().encode(body)
@@ -798,10 +786,11 @@ export function installRelayShim(): boolean {
     return sock
   } as unknown as typeof WebSocket
   RelayWS.prototype = NativeWS.prototype
-  RelayWS.CONNECTING = 0
-  RelayWS.OPEN = 1
-  RelayWS.CLOSING = 2
-  RelayWS.CLOSED = 3
+  const statics = RelayWS as unknown as Record<string, number>
+  statics['CONNECTING'] = 0
+  statics['OPEN'] = 1
+  statics['CLOSING'] = 2
+  statics['CLOSED'] = 3
   window.WebSocket = RelayWS
 
   installMediaBridge(conn)
@@ -886,7 +875,7 @@ function installMediaBridge(conn: RelayConnection): void {
         for (const node of m.addedNodes) {
           if (node instanceof Element) {
             if (/^(IMG|VIDEO|AUDIO|IFRAME|SOURCE)$/.test(node.tagName)) upgrade(node)
-            if (node.querySelectorAll) scan(node as unknown as ParentNode)
+            if (typeof node.querySelectorAll === 'function') scan(node as unknown as ParentNode)
           }
         }
       }

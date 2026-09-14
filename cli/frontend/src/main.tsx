@@ -1,4 +1,3 @@
-import './relay-shim.ts'
 import { installRelayShim } from './relay-shim.ts'
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
