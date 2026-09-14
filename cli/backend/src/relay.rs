@@ -295,8 +295,6 @@ async fn agent_session(
     pending_rpc.clear();
     res
 }
-    }
-}
 
 /// Build the single-file frontend and push it chunked over the agent socket.
 /// NOTE: the UI bundle is public build output and stays PLAINTEXT by design
@@ -340,13 +338,140 @@ async fn push_ui_bundle(tx: &mut WsTx, token: &str) -> anyhow::Result<()> {
 }
 
 /// Send a JSON value sealed inside `enc` (E2E on). No-op error when E2E off.
-async fn send_enc(tx: &mut WsTx, e2e: &mut E2e, value: &serde_json::Value) -> anyhow::Result<()> {
+async fn send_enc_via(out_tx: &OutTx, e2e: &mut E2e, value: &serde_json::Value) -> anyhow::Result<()> {
     let pt = serde_json::to_vec(value)?;
     let env = e2e.encrypt_next(&pt)?;
     let text = crate::e2e::envelope_to_text(&env)?;
-    tx.send(Message::Text(text.into())).await?;
+    let _ = out_tx.send(text);
     Ok(())
 }
+
+fn send_out(out_tx: &OutTx, value: &serde_json::Value) {
+    if let Ok(text) = serde_json::to_string(value) {
+        let _ = out_tx.send(text);
+    }
+}
+
+fn rpc_error(out_tx: &OutTx, id: &str, status: u16, message: &str) {
+    send_out(
+        out_tx,
+        &serde_json::json!({"type":"rpc-error","id":id,"status":status,"message":message}),
+    );
+}
+
+/// Only `/api/*` is proxied (never `/`, `/v1/shell` over HTTP, or `/assets/`).
+fn valid_rpc_path(path: &str) -> bool {
+    if !path.starts_with("/api/") {
+        return false;
+    }
+    if path.contains("..") || path.contains('\0') || path.len() > 4096 {
+        return false;
+    }
+    true
+}
+
+fn ws_base(local_base: &str) -> String {
+    let base = local_base.trim_end_matches('/');
+    if let Some(rest) = base.strip_prefix("https://") {
+        format!("wss://{rest}")
+    } else if let Some(rest) = base.strip_prefix("http://") {
+        format!("ws://{rest}")
+    } else {
+        base.to_string()
+    }
+}
+
+fn b64_encode(raw: &[u8]) -> String {
+    use base64::Engine as _;
+    base64::engine::general_purpose::STANDARD.encode(raw)
+}
+
+fn b64_decode(s: &str) -> Option<Vec<u8>> {
+    use base64::Engine as _;
+    base64::engine::general_purpose::STANDARD.decode(s).ok()
+}
+
+/// Proxy one reassembled HTTP request to the loopback server and stream the
+/// response back chunked (`rpc-begin` / `rpc-chunk` / `rpc-end`).
+async fn proxy_rpc(
+    out_tx: &OutTx,
+    http_client: &reqwest::Client,
+    local_base: &str,
+    token: &str,
+    id: String,
+    method: String,
+    path: String,
+    headers: HashMap<String, String>,
+    body: Vec<u8>,
+) {
+    if !valid_rpc_path(&path) {
+        rpc_error(out_tx, &id, 404, "not found");
+        return;
+    }
+    let url = format!("{}{}", local_base.trim_end_matches('/'), path);
+    let req_method = reqwest::Method::from_bytes(method.to_uppercase().as_bytes())
+        .unwrap_or(reqwest::Method::GET);
+    // Only safe methods without body are cacheable — everything here is a
+    // live proxy, no caching.
+    let mut req = http_client.request(req_method.clone(), &url);
+    for (k, v) in &headers {
+        let kl = k.to_ascii_lowercase();
+        // Allowlist: auth + content negotiation only. `host`/`connection`/
+        // `content-length` are set by reqwest itself.
+        if kl == "cookie" || kl == "content-type" || kl == "accept" || kl == "range" {
+            req = req.header(kl.as_str(), v.as_str());
+        }
+    }
+    if !body.is_empty() {
+        req = req.body(body);
+    }
+    let resp = match req.send().await {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("relay rpc proxy failed ({method} {}): {e:#}", short_path(&path));
+            crate::db::audit("-", "local", "relay-rpc", token, "error");
+            rpc_error(out_tx, &id, 502, "local backend unreachable");
+            return;
+        }
+    };
+    let status = resp.status().as_u16();
+    let mut out_headers = HashMap::new();
+    for (k, v) in resp.headers().iter() {
+        let kl = k.as_str().to_ascii_lowercase();
+        if kl == "content-type"
+            || kl == "content-disposition"
+            || kl == "set-cookie"
+            || kl == "cache-control"
+            || kl == "accept-ranges"
+            || kl == "content-range"
+        {
+            if let Ok(s) = v.to_str() {
+                // Multiple set-cookie headers collapse in reqwest iteration;
+                // keep the last (login/logout set a single cookie).
+                out_headers.insert(kl, s.to_string());
+            }
+        }
+    }
+    // Guard huge downloads before buffering (Content-Length may be absent).
+    if let Some(cl) = resp.content_length()
+        && cl > MAX_RPC_BYTES as u64
+    {
+        rpc_error(out_tx, &id, 413, "response too large for relay (32MB cap)");
+        return;
+    }
+    let bytes = match resp.bytes().await {
+        Ok(b) => b,
+        Err(e) => {
+            eprintln!("relay rpc read failed: {e:#}");
+            rpc_error(out_tx, &id, 502, "failed to read local response");
+            return;
+        }
+    };
+    if bytes.len() > MAX_RPC_BYTES {
+        rpc_error(out_tx, &id, 413, "response too large for relay (32MB cap)");
+        return;
+    }
+    let..........................................................................................
 
 async fn on_text(
     tx: &mut WsTx,
