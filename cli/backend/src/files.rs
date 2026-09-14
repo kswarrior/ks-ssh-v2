@@ -6,15 +6,33 @@
 //! this keeps the endpoint safe when bound with `--host 0.0.0.0`.
 
 use axum::{
-    Json,
+    Extension, Json,
     body::{Body, Bytes},
     extract::Query,
-    http::{StatusCode, header},
+    http::{HeaderMap, StatusCode, header},
     response::{IntoResponse, Response},
 };
 use serde::{Deserialize, Serialize};
 use std::path::{Component, PathBuf};
 use std::time::UNIX_EPOCH;
+
+use crate::{auth, db};
+
+/// Audit helper for file mutations (never secrets — paths only).
+fn audit_file(
+    ctx: &Option<Extension<auth::AuthContext>>,
+    headers: &HeaderMap,
+    action: &str,
+    target: &str,
+    ok: bool,
+) {
+    let actor = ctx
+        .as_ref()
+        .map(|Extension(c)| c.username.as_str())
+        .unwrap_or("-");
+    let ip = auth::client_ip(headers);
+    db::audit(actor, &ip, action, target, if ok { "ok" } else { "deny" });
+}
 
 #[derive(Deserialize)]
 pub struct ListQuery {
@@ -287,12 +305,18 @@ fn valid_file_name(name: &str) -> bool {
 }
 
 /// DELETE /api/files?path=<file|dir> — delete a file or folder inside HOME.
-pub async fn api_delete_file(Query(q): Query<DownloadQuery>) -> Response {
+/// Admin only (RBAC). Audited.
+pub async fn api_delete_file(
+    opt_ctx: Option<Extension<auth::AuthContext>>,
+    headers: HeaderMap,
+    Query(q): Query<DownloadQuery>,
+) -> Response {
     let (home, target) = match resolve_inside_home(Some(&q.path)) {
         Ok(v) => v,
         Err((code, msg)) => return (code, msg).into_response(),
     };
     if target == home {
+        audit_file(&opt_ctx, &headers, "file-delete", &q.path, false);
         return (
             StatusCode::BAD_REQUEST,
             "cannot delete HOME itself".to_string(),
@@ -302,6 +326,7 @@ pub async fn api_delete_file(Query(q): Query<DownloadQuery>) -> Response {
     let meta = match std::fs::symlink_metadata(&target) {
         Ok(m) => m,
         Err(_) => {
+            audit_file(&opt_ctx, &headers, "file-delete", &q.path, false);
             return (
                 StatusCode::NOT_FOUND,
                 format!("not found: {}", target.display()),
@@ -315,16 +340,22 @@ pub async fn api_delete_file(Query(q): Query<DownloadQuery>) -> Response {
         std::fs::remove_file(&target)
     };
     match res {
-        Ok(()) => (
-            StatusCode::OK,
-            Json(serde_json::json!({ "ok": true, "path": target.to_string_lossy() })),
-        )
-            .into_response(),
-        Err(e) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("cannot delete {}: {e}", target.display()),
-        )
-            .into_response(),
+        Ok(()) => {
+            audit_file(&opt_ctx, &headers, "file-delete", &q.path, true);
+            (
+                StatusCode::OK,
+                Json(serde_json::json!({ "ok": true, "path": target.to_string_lossy() })),
+            )
+                .into_response()
+        }
+        Err(e) => {
+            audit_file(&opt_ctx, &headers, "file-delete", &q.path, false);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("cannot delete {}: {e}", target.display()),
+            )
+                .into_response()
+        }
     }
 }
 
