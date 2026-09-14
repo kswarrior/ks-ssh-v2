@@ -6,15 +6,27 @@
 //!
 //! On connect the agent also pushes its whole embedded frontend as a
 //! single-file HTML bundle (`ui-begin` / `ui-chunk` / `ui-end`), so CF can
-//! cache it per token and open it fullscreen (`/v/TOKEN`, `#/view/TOKEN`).
+//! cache it per token and open it fullscreen (`/v/TOKEN`, `#/session/TOKEN`).
+//!
+//! Full-function relay (Visit == `--port`): the pushed bundle runs in relay
+//! mode inside CF and tunnels everything over this same WSS:
+//! * `rpc-begin` / `rpc-chunk` / `rpc-end` — HTTP `/api/*` proxied to a
+//!   loopback-only server in this process (same router, auth, DB, shells).
+//! * `shell-open` / `shell-send` / `shell-close` — `/v1/shell` PTY proxied
+//!   transparently (text + binary) to the same loopback server.
+//! The Worker relays these opaquely by room; `k`/PINs are never logged.
 //!
 //! E2E (sshx-style): `token` routes, `k` (256-bit, fragment-only) seals.
 //! Sensitive payloads travel as `{"type":"enc",...}` (AES-256-GCM, AAD=token).
-//! The relay sees only sizes/timing. UI bundle + control messages stay
-//! plaintext by design (see `crate::e2e`).
+//! The relay sees only sizes/timing. UI bundle + rpc/shell control messages
+//! stay plaintext by design (see `crate::e2e`).
+
+use std::collections::HashMap;
+use std::sync::Arc;
 
 use futures_util::{SinkExt, StreamExt};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
+use tokio::sync::{Mutex, mpsc};
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 
 use crate::e2e::{E2E_ALG, E2e, E2eKey};
@@ -22,11 +34,19 @@ use crate::e2e::{E2E_ALG, E2e, E2eKey};
 const TOKEN_ALPHABET: &[u8] = b"ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 /// Raw bytes per ui-chunk (~64KB base64 per WS message, well under limits).
 const UI_CHUNK_RAW: usize = 48 * 1024;
+/// Raw bytes per rpc-chunk (same 48KB budget as the UI upload).
+const RPC_CHUNK_RAW: usize = 48 * 1024;
+/// Hard cap per proxied HTTP body (32 MiB — covers UI JSON + file up/down).
+const MAX_RPC_BYTES: usize = 32 * 1024 * 1024;
+/// Hard cap on chunks per proxied body (1024 × 48KB ≈ 48MB envelope).
+const MAX_RPC_CHUNKS: usize = 1024;
 
 type WsTx = futures_util::stream::SplitSink<
     tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>,
     Message,
 >;
+/// Outgoing relay texts from the main loop + per-shell bridge tasks.
+type OutTx = mpsc::UnboundedSender<String>;
 
 /// Random 5-char token (letters + numbers, no look-alikes like 0/O or 1/I).
 pub fn new_token() -> String {
@@ -98,12 +118,16 @@ fn https_base(ws_base: &str) -> String {
 /// `relay_pin`: `Some` = `--relay-auth` — the agent requires a one-time
 /// viewer PIN in the client's `hello` before bridging `data` (closes the
 /// bearer-open bypass honestly). Audit rows log the token only, never `k`/PIN.
+/// `local_base`: loopback HTTP base (e.g. `http://127.0.0.1:PORT`) the agent
+/// proxies `rpc-*` / `shell-*` relay messages to — same router/auth/DB as
+/// `--port`, so Visit-over-WSS is fully functional with no open port.
 pub async fn run_agent(
     relay: &str,
     token: &str,
     push_ui: bool,
     e2e_key: Option<E2eKey>,
     relay_pin: Option<std::sync::Arc<crate::auth::RelayPinState>>,
+    local_base: String,
 ) {
     // rustls ships without a crypto provider — install ring once.
     let _ = rustls::crypto::ring::default_provider().install_default();
@@ -131,7 +155,8 @@ pub async fn run_agent(
         println!("Relay auth: ON — viewers must present the PIN printed at startup (or a minted one via POST /api/relay/pin). Default without --relay-auth stays bearer-open.");
     }
     if push_ui {
-        println!("Fullscreen UI: {http}/v/{token}  (or {http}/#/view/{token})");
+        println!("Fullscreen UI: {http}/v/{token}  (or {http}/#/session/{token})");
+        println!("Visit in CF opens the full CLI UI (Terminal, Files, Ports, Host) over WSS — same as --port, fully functional.");
     }
 
     let mut backoff_secs = 1u64;
@@ -139,7 +164,8 @@ pub async fn run_agent(
         // Clone the key per session (seq resets to 0 each connection).
         let key_clone = e2e_key.clone();
         let pin_clone = relay_pin.clone();
-        match agent_session(&url, token, push_ui, key_clone, pin_clone).await {
+        let base_clone = local_base.clone();
+        match agent_session(&url, token, push_ui, key_clone, pin_clone, base_clone).await {
             Ok(()) => backoff_secs = 1,
             Err(e) => eprintln!("relay error: {e} (retry in {backoff_secs}s)"),
         }
@@ -148,12 +174,36 @@ pub async fn run_agent(
     }
 }
 
+/// Incoming chunked HTTP body being reassembled from `rpc-chunk`s.
+struct PendingRpc {
+    method: String,
+    path: String,
+    headers: HashMap<String, String>,
+    body_len: usize,
+    chunks: usize,
+    parts: Vec<Option<String>>,
+}
+
+/// One live `/v1/shell` bridge: relay channel <-> loopback WS.
+struct ShellBridge {
+    /// Relay -> loopback forwarder (main loop sends here).
+    to_local: mpsc::UnboundedSender<ShellLocalIn>,
+}
+
+#[derive(Debug)]
+enum ShellLocalIn {
+    /// Raw client bytes: text (UTF-8 incl. JSON control) or binary.
+    Send { is_text: bool, data: Vec<u8> },
+    Close,
+}
+
 async fn agent_session(
     url: &str,
     token: &str,
     push_ui: bool,
     e2e_key: Option<E2eKey>,
     relay_pin: Option<std::sync::Arc<crate::auth::RelayPinState>>,
+    local_base: String,
 ) -> anyhow::Result<()> {
     let (ws, _) = connect_async(url)
         .await
@@ -177,29 +227,74 @@ async fn agent_session(
         eprintln!("ui push failed: {e:#}");
     }
 
+    // Outgoing queue: main loop + per-shell tasks send JSON texts here;
+    // a single sender task owns the WS sink (no lock contention).
+    let (out_tx, mut out_rx): (OutTx, mpsc::UnboundedReceiver<String>) =
+        mpsc::unbounded_channel();
+    let mut send_task = tokio::spawn(async move {
+        while let Some(text) = out_rx.recv().await {
+            if tx.send(Message::Text(text.into())).await.is_err() {
+                break;
+            }
+        }
+    });
+
+    let http_client = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .unwrap_or_else(|_| reqwest::Client::new());
+    let mut pending_rpc: HashMap<String, PendingRpc> = HashMap::new();
+    let shells: Arc<Mutex<HashMap<String, ShellBridge>>> =
+        Arc::new(Mutex::new(HashMap::new()));
+
     let mut keepalive = tokio::time::interval(std::time::Duration::from_secs(20));
     // `--relay-auth`: track whether the paired viewer presented the PIN.
     // Plain `bool` per connection (single viewer per agent session in v1).
     let mut viewer_ok = relay_pin.is_none();
-    loop {
+    let res: anyhow::Result<()> = loop {
         tokio::select! {
             _ = keepalive.tick() => {
                 let ping = serde_json::to_string(&Ping { kind: "ping" })?;
-                tx.send(Message::Text(ping.into())).await?;
+                let _ = out_tx.send(ping);
             }
             msg = rx.next() => {
-                let Some(msg) = msg else { anyhow::bail!("relay closed") };
+                let Some(msg) = msg else { break Err(anyhow::anyhow!("relay closed")) };
                 let msg = msg.map_err(|e| anyhow::anyhow!("{e}"))?;
                 match msg {
                     Message::Text(text) => {
-                        on_text(&mut tx, &text, push_ui, token, &mut e2e, &mut peer_e2e, &relay_pin, &mut viewer_ok).await?
+                        if let Err(e) = on_text(
+                            &out_tx,
+                            &http_client,
+                            &local_base,
+                            &mut pending_rpc,
+                            shells.clone(),
+                            &text,
+                            push_ui,
+                            token,
+                            &mut e2e,
+                            &mut peer_e2e,
+                            &relay_pin,
+                            &mut viewer_ok,
+                        )
+                        .await
+                        {
+                            eprintln!("relay on_text error: {e:#}");
+                        }
                     }
                     Message::Binary(_) => {}
-                    Message::Close(_) => anyhow::bail!("relay closed"),
+                    Message::Close(_) => break Err(anyhow::anyhow!("relay closed")),
                     _ => {}
                 }
             }
+            else => break Err(anyhow::anyhow!("relay closed")),
         }
+    };
+    send_task.abort();
+    // Drop all shell bridges (their tasks notice the closed out_tx / abort).
+    shells.lock().await.clear();
+    pending_rpc.clear();
+    res
+}
     }
 }
 
