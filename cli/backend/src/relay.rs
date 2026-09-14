@@ -706,7 +706,8 @@ async fn proxy_rpc(
 fn short_path(path: &str) -> String {
     let root = path.split('?').next().unwrap_or(path);
     if root.len() > 64 {
-        format!("{}…", &root[..64])
+        let truncated: String = root.chars().take(64).collect();
+        format!("{truncated}…")
     } else {
         root.to_string()
     }
@@ -923,6 +924,10 @@ async fn handle_inner_rpc(
                     proxy_rpc(&out, &shared, &peer, e2e_on, &client, &base, &tok, req.id, req.method, req.path, req.headers, Vec::new()).await;
                 });
             } else {
+                if pending_rpc.len() >= MAX_PENDING_RPC {
+                    rpc_error_shared(out_tx, &shared, &peer, e2e_on, token, &req.id, 429, "too many pending rpc uploads").await;
+                    return;
+                }
                 if pending_rpc.contains_key(&req.id) {
                     rpc_error_shared(out_tx, &shared, &peer, e2e_on, token, &req.id, 400, "duplicate rpc id").await;
                     return;
