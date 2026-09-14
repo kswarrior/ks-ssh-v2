@@ -67,6 +67,7 @@ export default function LoginPage({ onLoggedIn }: { onLoggedIn: (user: string) =
     } catch {
       setError('Cannot reach the server — is it still running?')
     } finally {
+      busyRef.current = false
       setBusy(false)
     }
   }
