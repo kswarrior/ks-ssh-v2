@@ -1,484 +1,141 @@
-# KS SSH vs other web SSH tools
+# KS SSH vs Web SSH Tools — Codebase Comparison
 
-How KS SSH compares to `sshx.io` and the most popular web-first SSH / terminal-sharing tools.
+> Scope: browser-first remote shell access. Classic OpenSSH (`ssh user@host`,
+> `~/.ssh/config`, `scp`) is the baseline — this page compares what you get when
+> you want it **in a browser** and/or **without opening ports**.
 
-> Scope: browser-first remote shell access. Classic OpenSSH client workflows
-> (`ssh user@host`, `~/.ssh/config`, `scp`) are the baseline everything else builds on —
-> this page compares what you get when you want it **in a browser** and/or **without
-> opening ports**.
+Columns: **KS** = KS SSH (this repo) · **SSH** = OpenSSH baseline · **sshx** =
+sshx.io · **tmate** · **upterm** · **ttyd** · **wetty** = wetty/GoTTY ·
+**Sshw** = Sshwifty · **Guac** = Apache Guacamole · **Tele** = Teleport ·
+**Tail** = Tailscale SSH / CF Tunnel / ZeroTier · **VSCode** = VS Code tunnels.
 
-## How scoring works (100 pts total)
+## Identity
 
-Scores are opinionated but transparent, weighted for **this doc's scope**
-(browser + no-open-port + single-box management). Weights sum to 100:
+|  | KS SSH | SSH | sshx | tmate | upterm | ttyd | wetty | Sshw | Guac | Tele | Tail | VSCode |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| Stack | Rust axum + portable-pty + React/xterm.js + CF Worker/DO (`cli/backend/src/*.rs`, `cf/worker/room.ts`) | C OpenBSD client, 30y mature | Rust + SvelteKit + Fly.io/Redis mesh (7.6k★, 2022+) | C tmux fork + tmate.io relay (BSD) | Go SSH relay (OSS) | C + xterm.js (mature) | Node/Go + xterm (wetty/GoTTY) | Go + JS web client (OSS) | Java + guacd + MySQL/LDAP/OIDC (10y+ enterprise) | Go + Web UI, cluster (mature, OSS+Cloud) | WireGuard/QUIC + IdP (tailnet/Zero Trust) | TS/Rust CLI + MS cloud (`code tunnel`) |
+| Transport / relay | Outbound WSS agent, 5-char token, single-file UI push (`ui-begin/chunk/end`), `/v/TOKEN` | Direct TCP, needs reachable sshd (`-R` DIY) | Outbound to global mesh, `sshx.io/s/…` link | Outbound SSH, 4 endpoints (SSH ro/rw + web ro/rw) | Outbound SSH, viewers use `ssh` | Needs ingress (port/proxy/VPN) | Needs ingress (reverse proxy) | Needs reachable sshd | Gateway needs ingress | Reverse tunnel (no ingress) | Outbound WG/QUIC (no ingress) | Outbound to MS edge |
+| Crypto | AES-256-GCM `enc`, HKDF `ks-ssh-e2e-v1`, AAD=token, seq, `#k=` fragment only, `?k=` → 400 | SSH (host-key TOFU) | Argon2+AES, fragment key, relay sees ciphertext | None (relay sees plaintext) | SSH | TLS via proxy only | TLS via proxy only | SSH to target | TLS to gateway (gw decrypts) | Short-lived certs + MFA | WireGuard / Zero Trust | Encrypted via MS (trusts vendor) |
+| Terminal | Real PTY, multi-tab, reattach id + 256KB ring, 30min TTL, 64 sess, resize (`shell.rs`, `Terminal.tsx`) | Reference PTY + `tmux`/`mosh` | Canvas panes, cursors, predictive echo, ephemeral | tmux preserved | Plain shared session | Solid PTY, CJK/IME | Login/SSH wrapper | Web SSH | Gateway SSH | Joint sessions | Plain SSH over net | Full terminal + editor |
+| Files / ports / host | HOME-jailed files/editor (1/5/100MB caps) + `/proc` ports + kill + host metrics (`files.rs`, `ports.rs`, `host.rs`) | `scp`/`sftp` only | None | None | None | ZMODEM only | None | SFTP browser | SFTP browser | `scp`/SFTP, no health dash | SFTP/SCP | Full editor + port-fwd, no host dash |
+| Auth / audit | Opt `--user/--pass` + Users page + cookie; no SSO/RBAC/recording; relay link bearer-open | Keys/certs, no SSO/rec | Bearer link only | Bearer ro/rw links | SSH keys | Basic auth, `-R`, `-o` once | Login flags | Per-host SSH creds | LDAP/OIDC + recording | SSO/RBAC/MFA + recording (best) | IdP ACLs + recorder | MS/GitHub IdP + Live Share |
+| Frontend | Embedded single-file bundle + CF SPA (Home/SSH/View/Install/Settings, `App.tsx`) | Terminal client | Web canvas + chat | Basic web + SSH | None (SSH client) | Web xterm | Web login | Web client | HTML5 RDP/VNC/SSH | Web + `tsh` | Admin console + Serve | `vscode.dev` |
+| Routes / API | `/api/files\|ports\|host\|auth/*`, `/v1/shell`, `/v1/agent\|client`, `/v/TOKEN`, `/api/ui/*` | `ssh`/`scp`/`sftp` CLI | `sshx` → link; `… \| sh -s run` in CI | `tmate` → 4 endpoints | `upterm host -- bash` | `ttyd -p 7681 bash` | `wetty --ssh-host` / `gotty -w` | Host/user/key form | Connection mgmt API | Cluster API | Tailnet / Access policy | `code tunnel` |
+| Build / install | One static binary (`cli/release/ks-ssh`) + `wrangler` Worker; `curl …/ks-ssh -o ks-ssh && ./ks-ssh` | OS preinstall | `curl -sSf https://sshx.io/get \| sh` (self-host discouraged) | Package install; `tmate-server` self-host | Binary / `go install` | Single C binary | npm / binary / Docker | Docker / demo site | Servlet + DB + proxy | Cluster ops / Cloud | Account + enrol nodes | MS account, not self-host |
 
-| # | Criterion | Max | What earns full marks |
+## What KS SSH actually is (this repo, latest)
+
+- **Local:** `ks-ssh --port 8080` on `127.0.0.1`/`0.0.0.0`; PTY over `/v1/shell`
+  with reattach/scrollback/resize; tabs persist (`ks-ssh:terms*`).
+- **Login gate:** `--user/--pass` → login page + `ks_ssh_auth` cookie + Settings →
+  Users (salted SHA-256, `0600`, main-password gate). Local-UI only.
+- **Relay:** `--no-serve --token=` → outbound WSS + UI bundle push → `/v/TOKEN`,
+  `#/view/TOKEN`; `--e2e-key=` reuses `k`, `--no-ui` skips push, `--no-e2e` =
+  legacy plaintext. Thin SSH-page view = pairing/status; full shell = `/v/TOKEN`.
+- **Panel:** Files + Ports + Host are **local** (`/api/*`) — over relay they show
+  `Cannot reach the host …`.
+- **Limits:** relay `data` acked not PTY-bridged yet; token guessable (routing
+  only, `k` seals); UI bundle plaintext by design; no collab/recording/SSO; one
+  Worker/DO relay, not a mesh.
+
+## Scored Matrix (/100 per case)
+
+| # | Case | KS | SSH | sshx | tmate | upterm | ttyd | wetty | Sshw | Guac | Tele | Tail | VSCode |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| 1 | No-port / NAT traversal | 90 | 10 | **95** | 85 | 80 | 10 | 10 | 10 | 15 | 85 | 90 | 90 |
+| 2 | Browser + share link + mobile | **93** | 0 | **93** | 73 | 13 | 73 | 67 | 73 | 80 | 80 | 40 | 87 |
+| 3 | Terminal quality | 80 | **100** | 90 | 70 | 60 | 70 | 60 | 60 | 60 | 80 | 70 | 80 |
+| 4 | E2E / transport security | 80 | 80 | **93** | 13 | 67 | 20 | 20 | 67 | 27 | 87 | **93** | 80 |
+| 5 | File manager + editor | **100** | 30 | 0 | 0 | 0 | 20 | 0 | 40 | 40 | 40 | 30 | 90 |
+| 6 | Ports / process mgmt | **100** | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 10 | 0 | 10 |
+| 7 | Host monitoring | **100** | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 10 | 10 | 0 |
+| 8 | Multi-user collaboration | 0 | 0 | **100** | 80 | 60 | 20 | 0 | 0 | 40 | 80 | 0 | 70 |
+| 9 | Identity & audit (login/SSO/RBAC/recording) | 40 | 60 | 10 | 20 | 30 | 40 | 40 | 50 | 80 | **100** | 90 | 70 |
+| 10 | Self-host simplicity / lightweight | 90 | **100** | 20 | 70 | 70 | **100** | 80 | 80 | 30 | 30 | 60 | 20 |
+
+## Total Score
+
+| Rank | Tool | Sum | Final /100 |
 |---|---|---|---|
-| A | NAT traversal / no open port | 20 | Outbound-only, works behind NAT/CGNAT, auto-reconnect |
-| B | Browser access + share-by-link + mobile | 15 | Any browser opens it, one-tap share link, usable on a phone |
-| C | Terminal quality (PTY, tabs, reattach) | 10 | Real PTY, resize, scrollback/reattach, multi-tab |
-| D | E2E / transport security | 15 | Relay sees ciphertext only (or no relay to trust) |
-| E | Files / ports / host panel | 10 | Beyond a shell: files, processes/ports, health, editor |
-| F | Multi-user collaboration | 10 | Shared cursors / joint sessions / chat |
-| G | Identity & audit (login, SSO/RBAC, recording) | 10 | Login gate → SSO/RBAC + session recording |
-| H | Self-host simplicity | 10 | One binary / one container = done; no cluster ops |
-
-Every case below has its own indivisible-score table (A–H) plus the total,
-so you can verify each total yourself.
-Scores reflect the **latest codebase in this repo** (see "What KS SSH actually is")
-and the current public docs of each competitor (checked Sep 2026; `sshx` unchanged:
-canvas + E2E + Fly mesh, self-host still discouraged).
-
-## What KS SSH actually is (this repo)
-
-Single static Rust binary + embedded web UI + Cloudflare relay:
-
-- **Local mode:** `ks-ssh --port 8080` serves the UI on `127.0.0.1` (or `0.0.0.0`).
-  Real PTY shell over WebSocket (`cli/backend/src/shell.rs`): sessions outlive the
-  socket (reattach by id, 256 KB scrollback ring replay, 30 min detached TTL,
-  max 64 sessions, takeover close `4000`), resize via `{"type":"resize"}`, binary
-  PTY frames. Multi-tab xterm.js frontend with persisted tabs
-  (`cli/frontend/src/pages/Terminal.tsx`, `ks-ssh:terms*` in `localStorage`).
-- **Optional login gate (new vs older docs):** `--user/--pass` together protect the
-  **local** UI (`cli/backend/src/auth.rs`, `cli/backend/src/main.rs:90-149`).
-  Login page (`Login.tsx`), session cookie (`ks_ssh_auth`, 1 yr), extra users in
-  Settings → Users (`Users.tsx`, salted SHA-256 in
-  `$XDG_CONFIG_HOME/ks-ssh/users.json`, `0600`). Any logged-in user can create;
-  edit/delete requires the **main** password; main account can only change
-  password, never be renamed/deleted. Omit both flags = open access (previous
-  behaviour). Auth does **not** cover the relay share link (see below).
-- **Relay mode (no open port):** `ks-ssh --no-serve --token=ABCDE` dials **outbound
-  WSS** to the Worker (`cli/backend/src/relay.rs`), registers a 5-char token, and
-  pushes the whole frontend as a single-file HTML bundle (`ui-begin` / `ui-chunk` /
-  `ui-end`, cached per token in a Durable Object). Open it at `/v/ABCDE` or
-  `#/view/ABCDE` (`cf/worker/room.ts`, `cf/src/App.tsx`). `--token=` (empty)
-  generates a random token; `--no-ui` skips the push; `--e2e-key=` reuses `k`;
-  `--no-e2e` forces legacy plaintext. `?k=` in query is rejected (`400`) —
-  `k` lives in the fragment only.
-- **Beyond a shell:** Files (HOME-jailed browse / rename / mkdir / upload /
-  fetch-by-URL via `curl`/`wget` / download / text editor with binary + 1 MB
-  read-cap detection, 5 MB save cap, 100 MB upload/download cap), Ports (TCP/UDP
-  from `/proc/net` + `ss` fallback, inode→PID map, kill by PID with
-  TERM→KILL escalation, refuses PID 1/self), Host (hostname/OS/kernel/arch,
-  uptime/load/proc count, per-core CPU %, RAM+swap, `df -kP -T` disks with
-  pseudo-FS filtering, live graphs). See `cli/backend/src/files.rs`,
-  `cli/backend/src/ports.rs`, `cli/backend/src/host.rs` and
-  `cli/frontend/src/pages/Files.tsx`, `Ports.tsx`, `Host.tsx`.
-- **Local-first + relay list:** connection/token list + settings in `localStorage`
-  (`ks-ssh:ssh`, `ks-ssh:settings`), no account on the public site. CF site pages:
-  Home / SSH (token cards + presence + E2E badge) / View (fullscreen `/v/TOKEN`
-  iframe with WSS `srcdoc` fallback + live `ui-ready` reload) / Installation /
-  Settings (`cf/src/App.tsx`).
-- **One-line install:**
-  `curl -sSfL .../cli/release/ks-ssh -o ks-ssh && chmod +x ks-ssh && ./ks-ssh`.
-
-Honest limits (visible in code today):
-
-- Relay `data` messages are currently **acked, not bridged to a PTY**
-  (`cli/backend/src/relay.rs` `on_text` — `PTY bridging comes next`). Full interactive
-  shell over relay = open the pushed fullscreen UI (`/v/TOKEN`); the thin
-  SSH-page session view is pairing/status only.
-- Files / Ports / Host call the **local** backend (`/api/*`). Over the relay
-  fullscreen view they show `Cannot reach the host … not over the relay view`.
-  They work when the browser can reach the agent's HTTP port.
-- Token = 5-char room ID (`ABCDEFGHJKLMNPQRSTUVWXYZ23456789`,
-  `cli/backend/src/relay.rs:22`). Guessable by design — routing only.
-  Secrecy comes from `k` (256-bit, fragment-only `#k=...`, never sent to the
-  relay). Relay session payloads are `enc` (AES-256-GCM, AAD=token, HKDF-SHA256
-  `ks-ssh-e2e-v1`, 96-bit random nonce, seq from 0, strict increment).
-- Relay share link stays open to whoever holds it — `--user/--pass` protects the
-  local UI only (`main.rs:237-239`).
-- No multi-cursor collaboration, no session recording/audit, no SSO/RBAC.
-  One Cloudflare Worker/Durable Object relay (`pair:<TOKEN>` rooms), not a global mesh.
-
-## TL;DR comparison (with total score / 100)
-
-| Tool | Type | NAT / no open port | Browser access | E2E encrypted | Multi-user collab | Files / host mgmt | Self-host | Score / 100 | Pick it when… |
-|---|---|---|---|---|---|---|---|---|---|
-| **KS SSH (this repo)** | Rust agent + CF relay + local web UI | ✅ outbound WSS | ✅ local UI + `/v/TOKEN` fullscreen | ✅ AES-256-GCM, key in fragment (sshx-style) | ❌ | ✅ Files + Ports + Host + editor | ✅ binary + Worker | **75** | You want one binary = shell **plus** file/ports/host panel, with a no-port share link |
-| **OpenSSH baseline** | Classic client (`ssh`, `scp`) | ❌ needs reachable sshd | ❌ terminal client | ✅ SSH | ❌ (`tmux` DIY) | ⚠️ `scp`/`sftp` only | ✅ everywhere | **43** | Daily driving reachable hosts; the baseline everything else builds on |
-| **sshx.io** (`ekzhang/sshx`) | Rust collab terminal + Fly.io mesh | ✅ outbound | ✅ link | ✅ Argon2+AES, key in fragment | ✅ canvas, cursors, chat | ❌ terminal only | ⚠️ discouraged / non-trivial | **69** | 2+ people pairing / teaching on one terminal |
-| **tmate** | tmux fork + tmate.io relay | ✅ outbound SSH | ✅ web + SSH, ro/rw links | ❌ | ✅ shared tmux | ❌ | ✅ `tmate-server` | **54** | Fastest "look at this for 10 min" share, tmux-native |
-| **upterm** | SSH session relay | ✅ outbound SSH | ❌ SSH client needed | ✅ SSH | ✅ shared session | ❌ | ✅ | **50** | CI debugging / SSH-only sharing, no browser |
-| **ttyd** | C self-hosted web terminal | ❌ needs port/proxy | ✅ | ❌ (TLS via proxy) | ⚠️ view-only mirror | ❌ (+ZMODEM xfer) | ✅ trivial | **41** | LAN / VPS where you control ingress, simplest web shell |
-| **wetty / GoTTY** | Node/Go web terminal + login/SSH | ❌ needs port/proxy | ✅ | ❌ (TLS via proxy) | ❌ | ❌ | ✅ | **33** | `ssh` in a browser tab behind your own reverse proxy |
-| **Sshwifty** | Browser SSH/Telnet client | ❌ needs reachable sshd | ✅ + SFTP files | ✅ SSH | ❌ | ⚠️ SFTP files only | ✅ Docker | **46** | Emergency SSH from a borrowed browser, no agent install |
-| **Apache Guacamole** | RDP/SSH/VNC gateway | ❌ (gateway needs ingress) | ✅ | ❌ (TLS to gateway) | ⚠️ connection sharing | ⚠️ remote files via SFTP | ✅ heavy | **44** | Enterprise clientless desktop + SSH fleet |
-| **Teleport** | Identity access plane | ✅ reverse tunnel | ✅ | ✅ | ✅ joint sessions + recording | ⚠️ via SSH/SFTP/modes | ✅ heavy | **75** | Team SSO / RBAC / audit for SSH/K8s/DB |
-| **Tailscale SSH / CF Tunnel / ZeroTier** | Mesh / tunnel network | ✅ outbound WG/QUIC | ⚠️ via Serve/other | ✅ WireGuard | ❌ | ⚠️ SFTP/SCP | ✅ account | **63** | Private fleet access without public ports, all nodes enrolled |
-| **VS Code tunnels** | Editor + terminal tunnel | ✅ outbound to MS | ✅ vscode.dev | ✅ | ✅ Live Share | ✅ full editor | ☁️ MS-hosted | **76** | Full remote dev, not just a shell |
-
-Ranked by score: VS Code tunnels 76 · KS SSH 75 = Teleport 75 · sshx 69 ·
-Tailscale-family 63 · tmate 54 · upterm 50 · Sshwifty 46 · Guacamole 44 ·
-OpenSSH 43 · ttyd 41 · wetty/GoTTY 33.
-Weights favour browser + no-port (35/100), so pure-SSH tools score lower by design.
-
-## Details
-
-### 0. OpenSSH baseline — the reference (no browser, no relay)
-
-`ssh user@host`, `~/.ssh/config`, `scp`/`sftp`. Still the best daily driver for
-reachable hosts: mature keys/certs, multiplexing, `tmux`/`mosh` if you add them.
-
-- Nothing to open in a browser, nothing to share by link, no NAT help.
-- Security = SSH itself; identity = keys/certs you manage; no recording/audit
-  out of the box.
-
-| Criterion | Max | Score | Why |
-|---|---|---:|---|
-| A. NAT traversal / no open port | 20 | 2 | Needs reachable sshd; no relay (2 pts for reverse-`ssh -R` DIY) |
-| B. Browser + share link + mobile | 15 | 0 | Terminal client only, no link |
-| C. Terminal quality | 10 | 10 | The reference PTY: resize, multiplex, `tmux`/`mosh` |
-| D. E2E / transport security | 15 | 12 | SSH encryption; no relay to trust, minus host-key TOFU UX |
-| E. Files / ports / host panel | 10 | 3 | `scp`/`sftp` only, no dashboard |
-| F. Multi-user collaboration | 10 | 0 | None (`tmux` screen-share is DIY) |
-| G. Identity & audit | 10 | 6 | Keys/certs, no SSO/RBAC/recording out of the box |
-| H. Self-host simplicity | 10 | 10 | Preinstalled everywhere, zero infra |
-| **Total** | **100** | **43** | — |
-
-**KS SSH vs it:** keep OpenSSH for daily reachable-host work; use KS SSH when the
-box is behind NAT or the viewer only has a browser/phone.
-
-### 1. sshx.io — the closest comparison
-
-`curl -sSf https://sshx.io/get | sh` then `sshx` → shareable `https://sshx.io/s/...` link.
-
-- Infinite canvas, resizable panes, live cursors + names, chat, predictive echo
-  (Mosh-style), auto-reconnect + latency estimate, global Fly.io + Redis mesh.
-- Real E2E encryption: session key derived client-side (URL fragment never hits
-  the server), Argon2 + AES. Relay sees ciphertext.
-- Great for teaching / multi-person debugging / CI (`... | sh -s run` in Actions).
-- Trade-offs: terminal **only** (no file manager, port list, host stats),
-  ephemeral sessions (ends with the process), self-hosting officially
-  discouraged (needs gRPC + TLS + Redis + mesh ops), Windows PTY still maturing,
-  no recording/replay.
-
-| Criterion | Max | Score | Why |
-|---|---|---:|---|
-| A. NAT traversal / no open port | 20 | 19 | Outbound to global Fly mesh + auto-reconnect; −1 hosted-only |
-| B. Browser + share link + mobile | 15 | 14 | One link, canvas UI; −1 terminal-only view |
-| C. Terminal quality | 10 | 9 | Predictive echo, latency, panes; −1 ephemeral, Windows maturing |
-| D. E2E / transport security | 15 | 14 | Argon2+AES, fragment key; −1 mesh complexity |
-| E. Files / ports / host panel | 10 | 0 | Terminal only |
-| F. Multi-user collaboration | 10 | 10 | Canvas, cursors, chat — best in list |
-| G. Identity & audit | 10 | 1 | Bearer link only, no SSO/recording |
-| H. Self-host simplicity | 10 | 2 | Officially discouraged, gRPC+TLS+Redis+mesh ops |
-| **Total** | **100** | **69** | — |
-
-**KS SSH vs sshx:** pick sshx for multiplayer terminal collaboration
-(canvas, cursors, chat). Pick KS SSH when you want a personal server panel
-(files, ports, host health, editor, login gate + user management) plus a share
-link with the same E2E shape (token routes, `#k=...` fragment seals, relay sees
-ciphertext). KS SSH uses HKDF-SHA256 (not Argon2 — `k` is already 256-bit CSPRNG)
-+ AES-256-GCM via WebCrypto / `aes-gcm`; UI bundle stays plaintext (public build
-output). KS SSH outscores sshx here only because panel + self-host weigh 20 pts;
-flip those weights and sshx wins.
-
-### 2. tmate — the "just show someone" workhorse
-
-`tmate` forks tmux, dials out to `tmate.io`, prints 4 endpoints:
-SSH read-write, SSH read-only, web read-write, web read-only.
-
-- Zero firewall config, tmux semantics preserved, BSD-licensed, self-hostable
-  relay (`tmate-ssh-server` + `tmate-slash`).
-- No E2E (relay can theoretically see plaintext), terminal only, no server
-  health/file UI, links are bearer secrets.
-
-| Criterion | Max | Score | Why |
-|---|---|---:|---|
-| A. NAT traversal / no open port | 20 | 17 | Outbound SSH to tmate.io; −3 single-vendor relay |
-| B. Browser + share link + mobile | 15 | 11 | Web + SSH ro/rw links; basic web UI |
-| C. Terminal quality | 10 | 7 | tmux preserved; plain web terminal UX |
-| D. E2E / transport security | 15 | 2 | No E2E, relay sees plaintext |
-| E. Files / ports / host panel | 10 | 0 | Terminal only |
-| F. Multi-user collaboration | 10 | 8 | Shared tmux ro/rw; no cursors/chat canvas |
-| G. Identity & audit | 10 | 2 | Bearer links with ro/rw split only |
-| H. Self-host simplicity | 10 | 7 | `tmate-server` self-hostable, moderate ops |
-| **Total** | **100** | **54** | — |
-
-**KS SSH vs tmate:** tmate wins for instant ad-hoc pairing with tmux users.
-KS SSH wins when you need persistent local UI (reattachable tabs, file/port/host
-management, optional login) rather than a throwaway shared tmux.
-
-### 3. upterm — SSH-only relay
-
-`upterm host -- bash` shares over an SSH relay; viewers use `ssh`, no browser.
-
-- Smaller attack surface (no web renderer), scriptable, good for CI/RMA flows.
-- No browser viewer, no file/host dashboard.
-
-| Criterion | Max | Score | Why |
-|---|---|---:|---|
-| A. NAT traversal / no open port | 20 | 16 | Outbound SSH relay; −4 needs own server for privacy |
-| B. Browser + share link + mobile | 15 | 2 | SSH client required, no browser |
-| C. Terminal quality | 10 | 6 | Plain SSH session, no tabs/reattach UI |
-| D. E2E / transport security | 15 | 10 | SSH encryption end-to-end |
-| E. Files / ports / host panel | 10 | 0 | None |
-| F. Multi-user collaboration | 10 | 6 | Shared session, terminal-only |
-| G. Identity & audit | 10 | 3 | SSH keys, no SSO/recording |
-| H. Self-host simplicity | 10 | 7 | Single server binary, easy relay |
-| **Total** | **100** | **50** | — |
-
-**KS SSH vs upterm:** upterm if viewers live in terminals and you distrust web
-exposure. KS SSH if the viewer is a phone/browser.
-
-### 4. ttyd — simplest self-hosted web shell
-
-`ttyd -p 7681 bash` → `http://host:7681`. xterm.js, CJK/IME, SSL, basic auth,
-`-R` read-only, `-o` once, ZMODEM transfer.
-
-- One tiny binary, trivial behind nginx/Caddy/Traefik + Let's Encrypt.
-- **Needs inbound reachability** (port forward / reverse proxy / VPN). No relay,
-  no NAT traversal, no link sharing, no collaboration cursors, no
-  files/ports/host dashboard.
-
-| Criterion | Max | Score | Why |
-|---|---|---:|---|
-| A. NAT traversal / no open port | 20 | 2 | Needs ingress / reverse proxy / VPN |
-| B. Browser + share link + mobile | 15 | 11 | Good xterm + SSL/auth; no share link |
-| C. Terminal quality | 10 | 7 | Solid PTY, CJK/IME; no reattach tabs |
-| D. E2E / transport security | 15 | 3 | TLS via proxy only, no E2E story |
-| E. Files / ports / host panel | 10 | 2 | ZMODEM transfer only |
-| F. Multi-user collaboration | 10 | 2 | View-only mirror at best |
-| G. Identity & audit | 10 | 4 | Basic auth, `-R` read-only, `-o` once |
-| H. Self-host simplicity | 10 | 10 | One tiny C binary |
-| **Total** | **100** | **41** | — |
-
-**KS SSH vs ttyd:** ttyd if you already have ingress and only need a shell in a
-tab. KS SSH if the box is behind NAT/CGNAT/hotel Wi-Fi and you need outbound-only
-access plus management pages.
-
-### 5. wetty / GoTTY — web login / SSH frontends
-
-- **wetty** (Node): browser → `http(s)://host:3000` → `/bin/login` or `ssh
-  [user@]localhost|remote`. Force-SSH, custom host/port/user flags. Put behind a
-  reverse proxy for HTTPS.
-- **GoTTY** (Go): same idea, `gotty -w ssh remote`, share a command over HTTP(S).
-
-Like ttyd: no relay, no E2E sharing story, terminal only.
-
-| Criterion | Max | Score | Why |
-|---|---|---:|---|
-| A. NAT traversal / no open port | 20 | 2 | Needs ingress / reverse proxy |
-| B. Browser + share link + mobile | 15 | 10 | Browser login/SSH; no share link |
-| C. Terminal quality | 10 | 6 | Thin login/SSH wrapper |
-| D. E2E / transport security | 15 | 3 | TLS via proxy only |
-| E. Files / ports / host panel | 10 | 0 | Terminal only |
-| F. Multi-user collaboration | 10 | 0 | None |
-| G. Identity & audit | 10 | 4 | Login / force-SSH flags, no SSO/recording |
-| H. Self-host simplicity | 10 | 8 | Container / single binary, needs proxy for TLS |
-| **Total** | **100** | **33** | — |
-
-**KS SSH vs them:** wetty/GoTTY are thinner (just expose login/SSH). KS SSH is a
-fuller homelab panel (persistent tabs + relay fallback + file/port/host APIs +
-optional multi-user login).
-
-### 6. Sshwifty — browser SSH client (no agent)
-
-Go + JS client at `sshwifty-demo.nirui.org` or self-hosted Docker. You type
-host/user/password-or-key and get SSH + SFTP in the browser. Telnet too.
-
-- Perfect for "borrowed laptop / tablet, need to reach my VPS now". Nothing
-  installed on the server beyond `sshd`.
-- Server must already be **reachable** (public IP / port forward / VPN). No relay
-  for NAT boxes, no share-by-link, no host-metrics page.
-
-| Criterion | Max | Score | Why |
-|---|---|---:|---|
-| A. NAT traversal / no open port | 20 | 2 | Target sshd must be reachable |
-| B. Browser + share link + mobile | 15 | 11 | SSH+SFTP in browser; no share link |
-| C. Terminal quality | 10 | 6 | Usable web SSH, not a daily PTY |
-| D. E2E / transport security | 15 | 10 | Real SSH to the target |
-| E. Files / ports / host panel | 10 | 4 | SFTP file browser only |
-| F. Multi-user collaboration | 10 | 0 | None |
-| G. Identity & audit | 10 | 5 | SSH creds per host, no SSO/recording |
-| H. Self-host simplicity | 10 | 8 | One Docker container |
-| **Total** | **100** | **46** | — |
-
-**KS SSH vs Sshwifty:** Sshwifty connects *to* any sshd from the browser.
-KS SSH installs *on* the box and gives it a link + dashboard.
-
-### 7. Apache Guacamole — enterprise clientless gateway
-
-Java + `guacd`, MySQL/LDAP/OIDC, RDP+VNC+SSH in HTML5, connection sharing,
-recording, SFTP file browser.
-
-- Powerful for fleets/VDI, but heavy: servlet container, DB, proxy, hardening.
-- Gateway itself needs ingress; not a NAT-traversal agent.
-
-| Criterion | Max | Score | Why |
-|---|---|---:|---|
-| A. NAT traversal / no open port | 20 | 3 | Gateway itself needs ingress |
-| B. Browser + share link + mobile | 15 | 12 | Full RDP/VNC/SSH in HTML5 |
-| C. Terminal quality | 10 | 6 | Gateway SSH, fine but indirect |
-| D. E2E / transport security | 15 | 4 | TLS to gateway; gateway decrypts |
-| E. Files / ports / host panel | 10 | 4 | SFTP browser, no host health |
-| F. Multi-user collaboration | 10 | 4 | Connection sharing, no canvas |
-| G. Identity & audit | 10 | 8 | LDAP/OIDC + perms + recording; heavy setup |
-| H. Self-host simplicity | 10 | 3 | Java + guacd + DB + proxy |
-| **Total** | **100** | **44** | — |
-
-**KS SSH vs Guacamole:** Guacamole for org-wide browser access to many hosts.
-KS SSH for one box, one binary, zero infra (at the cost of no SSO/fleet story).
-
-### 8. Teleport — identity-aware access plane
-
-SSO/OIDC + short-lived certs, RBAC, per-session MFA (`tsh`), joint sessions,
-full session recording, `scp`/SFTP, K8s/DB/app proxy, browser UI.
-
-- Best audit story of the list. Cost: cluster ops (auth/proxy/nodes or Cloud),
-  agents on every node.
-
-| Criterion | Max | Score | Why |
-|---|---|---:|---|
-| A. NAT traversal / no open port | 20 | 17 | Reverse tunnel, no ingress; −3 cluster setup |
-| B. Browser + share link + mobile | 15 | 12 | Browser UI + `tsh`; invite flow heavier than a link |
-| C. Terminal quality | 10 | 8 | Joint sessions, `scp`/SFTP; opinionated shell |
-| D. E2E / transport security | 15 | 13 | Short-lived certs + MFA; trusts cluster CA |
-| E. Files / ports / host panel | 10 | 4 | SSH/SFTP/modes, no host-health dashboard |
-| F. Multi-user collaboration | 10 | 8 | Joint sessions + recording; no canvas |
-| G. Identity & audit | 10 | 10 | SSO/RBAC/MFA/recording — best in list |
-| H. Self-host simplicity | 10 | 3 | Cluster ops or Cloud dependency |
-| **Total** | **100** | **75** | — |
-
-**KS SSH vs Teleport:** Teleport when compliance / team access reviews matter
-(ties KS SSH here on points, wins outright once audit weight rises).
-KS SSH when you want `curl … && ./ks-ssh` and done — plus a HOME-jailed
-file editor and host panel Teleport doesn't try to be.
-
-### 9. Tailscale SSH / Cloudflare Tunnel / ZeroTier — private nets
-
-- **Tailscale SSH:** WireGuard tailnet + IdP identity, ACLs, check-mode step-up,
-  `tsrecorder` session recording, SFTP/SCP. No key juggling, no public ports —
-  but every viewer needs Tailscale enrolled.
-- **Cloudflare Tunnel (`cloudflared`):** outbound QUIC to Cloudflare edge, then
-  `cloudflare access ssh` / browser-rendered SSH with Access policies. Great
-  ingress-free sharing, tied to Cloudflare account/Zero Trust.
-- **ZeroTier / Netmaker / Pangolin:** same pattern — overlay net, then plain SSH.
-
-| Criterion | Max | Score | Why |
-|---|---|---:|---|
-| A. NAT traversal / no open port | 20 | 18 | Outbound WG/QUIC, NAT-proof; −2 enrolment friction |
-| B. Browser + share link + mobile | 15 | 6 | Via Serve/other; no public share link |
-| C. Terminal quality | 10 | 7 | Plain SSH over net, solid |
-| D. E2E / transport security | 15 | 14 | WireGuard / Zero Trust edge |
-| E. Files / ports / host panel | 10 | 3 | SFTP/SCP + policies, no dashboard |
-| F. Multi-user collaboration | 10 | 0 | None |
-| G. Identity & audit | 10 | 9 | IdP ACLs, check-mode, recording; −1 account lock-in |
-| H. Self-host simplicity | 10 | 6 | Account + enrol every node |
-| **Total** | **100** | **63** | — |
-
-**KS SSH vs them:** overlays win for a private fleet with identity policy.
-KS SSH wins for a public-style "send this link, open in any browser" flow with
-no client install and a built-in management UI.
-
-### 10. Native apps + editor tunnels
-
-- **Termius / Blink / JuiceSSH / Mobile SSH:** mature keyboards, keys on device,
-  Mosh support. Still need a reachable `sshd`.
-- **VS Code tunnels / code-server / Jupyter:** full editor + terminal over an
-  outbound tunnel (`vscode.dev`), heavier than a shell link.
-- **ShellHub / MeshCentral / RustDesk / Pangolin / bore / rathole:** device
-  management or raw TCP exposure — pair with ttyd/wetty when you need ingress.
-
-Scored as **VS Code tunnels** (the strongest of the group):
-
-| Criterion | Max | Score | Why |
-|---|---|---:|---|
-| A. NAT traversal / no open port | 20 | 18 | Outbound to MS edge; −2 vendor cloud |
-| B. Browser + share link + mobile | 15 | 13 | `vscode.dev` in any browser; −2 MS login |
-| C. Terminal quality | 10 | 8 | Full terminal + editor shell |
-| D. E2E / transport security | 15 | 12 | Encrypted via MS; trusts vendor |
-| E. Files / ports / host panel | 10 | 9 | Full editor + files; −1 no ports/host view |
-| F. Multi-user collaboration | 10 | 7 | Live Share; −3 session-based, not canvas |
-| G. Identity & audit | 10 | 7 | MS/GitHub IdP; no Teleport-grade RBAC/audit |
-| H. Self-host simplicity | 10 | 2 | MS-hosted, not self-hostable |
-| **Total** | **100** | **76** | — |
-
-**KS SSH vs them:** keep your native SSH app for daily driving reachable hosts;
-use KS SSH relay links for NAT boxes and phone-browser triage. VS Code tunnels
-top this table because "full editor + tunnel" covers the most criteria — at the
-price of a Microsoft account and zero self-host points.
-
-### KS SSH (this repo) — scored on the same rubric
-
-| Criterion | Max | Score | Why |
-|---|---|---:|---|
-| A. NAT traversal / no open port | 20 | 18 | Outbound WSS + reconnect + UI push; −2 single Worker relay, thin relay view is pairing-only |
-| B. Browser + share link + mobile | 15 | 14 | Local UI + `/v/TOKEN` fullscreen + mobile; −1 thin SSH view isn't a full shell |
-| C. Terminal quality | 10 | 8 | Real PTY, multi-tab, reattach ring, resize; −2 no predictive echo/canvas |
-| D. E2E / transport security | 15 | 12 | AES-256-GCM `enc`, fragment-only `k`, HKDF/AAD/seq, `?k=` reject; −3 UI bundle plaintext by design + `--no-e2e` escape hatch |
-| E. Files / ports / host panel | 10 | 10 | Files + Ports + Host + editor with caps and jails — best panel in list |
-| F. Multi-user collaboration | 10 | 0 | None by design |
-| G. Identity & audit | 10 | 4 | `--user/--pass` + Users page + session cookie; no SSO/RBAC/recording, relay link unaffected |
-| H. Self-host simplicity | 10 | 9 | One static binary + one Worker; −1 CF account for relay |
-| **Total** | **100** | **75** | — |
-
-Where the points come from: outbound WSS with reconnect + single-file UI push
-(A); local UI + `/v/TOKEN` fullscreen + mobile (B); real PTY with reattach ring
-+ multi-tab + resize (C); AES-256-GCM `enc` with fragment-only `k`, HKDF, AAD,
-seq, `?k=` rejection (D); full Files/Ports/Host + editor panel (E); optional
-`--user/--pass` login + Users page (part of G); one binary + one Worker (H).
-Where they leak: no collaboration (F = 0); no SSO/RBAC/recording and relay link
-unaffected by login (G = 4); single relay + PTY-not-yet-bridged over the thin
-relay view + plaintext UI bundle by design (small deductions in A/B/D).
-
-## When to choose KS SSH
-
-- Homelab / VPS / IoT behind NAT, and you want **one binary** for shell + files
-  + ports + host health without opening ports.
-- Phone-first triage: share link → fullscreen UI, no SSH client/keys on the phone.
-- Demos/support where the other side just opens a URL.
-- You already run Cloudflare and want the relay to see only ciphertext sizes.
-- You want a tiny login gate (`--user/--pass` + Users page) without SSO infra.
-
-## E2E (sshx-style)
-
-- `token` (5-char) routes; `k` (256-bit, `#k=...` fragment only) seals.
-  `hello` negotiates `{e2e:"aes-gcm-v1"}`; sensitive payloads are `enc`
-  (AES-256-GCM, nonce 96-bit random, AAD=token, seq from 0, strict increment).
-- Relay learns NOTHING except room existence + sizes/timing. UI bundle
-  (`ui-begin/chunk/end`, `/v/TOKEN`) stays PLAINTEXT (public build output).
-- Legacy peers (no `e2e` in `hello`) fall back to plaintext with a
-  `⚠️ relay-visible` banner; `--no-e2e` forces legacy. Missing `k` in the
-  browser prompts `Paste the full link with #k=...` (never fetched/stored).
-- `--e2e-key=` reuses a key across restarts; otherwise `--token=` generates a
-  fresh `k` per run. A `?k=` query is rejected — fragment only.
-
-## When not to
-
-- Multiplayer pairing with live cursors/chat → **sshx**.
-- Throwaway tmux share with SSH viewers → **tmate**.
-- Compliance (recording, SSO, RBAC, audit) → **Teleport / Tailscale SSH**.
-- Pure LAN web shell with existing ingress → **ttyd**.
-- SSH to arbitrary existing hosts from a random browser → **Sshwifty**.
-- Full remote dev (editor + terminal + Live Share) → **VS Code tunnels**.
-- Legacy `--no-e2e` sessions where the relay can see plaintext (use only for
-  debugging).
-
-## Quick start (KS SSH)
+| **1** | **KS SSH** | **773 / 1,000** | **77** |
+| 2 | Teleport | 602 / 1,000 | 60 |
+| 3 | VS Code tunnels | 597 / 1,000 | 60 |
+| 4 | sshx | 501 / 1,000 | 50 |
+| 5 | Tailscale SSH / CF Tunnel / ZeroTier | 483 / 1,000 | 48 |
+| 6 | tmate | 411 / 1,000 | 41 |
+| 7 | OpenSSH baseline | 380 / 1,000 | 38 |
+| 7 | upterm | 380 / 1,000 | 38 |
+| 7 | Sshwifty | 380 / 1,000 | 38 |
+| 10 | Apache Guacamole | 372 / 1,000 | 37 |
+| 11 | ttyd | 353 / 1,000 | 35 |
+| 12 | wetty / GoTTY | 277 / 1,000 | 28 |
+
+Scoring deltas 2026-09-14: new Identity table + 10-case /100 matrix (was 8 weighted
+criteria); KS re-verified against latest codebase — login gate (`auth.rs`,
+`main.rs:90-149`, `Login.tsx`, `Users.tsx`), PTY reattach ring/TTL
+(`shell.rs`), file caps 1/5/100MB (`files.rs`), ports TERM→KILL (`ports.rs`),
+per-core/df-filtered host (`host.rs`), `enc` HKDF/AAD/seq + `?k=` reject
+(`e2e.rs`, `worker/index.ts`), UI push/cache/replay (`relay.rs`, `room.ts`).
+`sshx` re-checked Sep 2026 (unchanged: canvas + E2E + Fly mesh, self-host
+discouraged). Panel split (cases 5–7) favours single-box managers by design —
+that is why KS leads; flip the weight to collab/audit and sshx/Teleport win.
+
+## Teleport in depth — why it ranks #2 (60/100) and where KS SSH wins
+
+Teleport = identity-aware access plane (Go, OSS+Cloud). SSO/OIDC + short-lived
+certs, RBAC, per-session MFA (`tsh`), joint sessions + full recording,
+`scp`/SFTP, K8s/DB/app proxy, browser UI. Reverse tunnel = no ingress, but
+cluster ops (auth/proxy/nodes or Cloud) + agents everywhere.
+
+Where Teleport wins (honest — best audit story in the matrix):
+- Identity & audit (case 9: **100**, best): SSO/RBAC/MFA/recording — KS has a
+  tiny login gate (40) and no SSO/recording.
+- Collaboration (case 8: 80): joint sessions + recording; KS has none (0).
+- Transport (cases 1/4: 85/87): reverse tunnel + cluster CA; KS matches on shape
+  (90/80) with simpler E2E (`k` fragment, relay sees sizes only).
+
+Where KS SSH wins vs Teleport (matrix deltas, same scoring):
+- Single-box panel sweep (cases 5–7: 100/100/100 vs 40/10/10): HOME-jailed
+  files + editor with caps, `/proc`+`ss` ports with PID kill, per-core/RAM/swap/
+  filtered-`df` host graphs — Teleport doesn't try to be a homelab panel.
+- Lightweight (case 10: 90 vs 30): one static binary + one Worker vs cluster
+  ops; `curl … && ./ks-ssh` and done.
+- Browser share-link (case 2: 93 vs 80): send-a-link phone triage with no client
+  enrolment; Teleport needs `tsh`/enrolled identity.
+- No licence/cloud dependency: KS is self-hosted OSS, unlimited boxes; Teleport
+  depth costs cluster/Cloud commitment.
+- Teleport's only outright wins over KS are cases 8–9 (collab/identity). Closest
+  gaps: NAT 90 vs 85, browser 93 vs 80, terminal 80 vs 80, E2E 80 vs 87 — all
+  within 13 points.
+
+Verdict: pick Teleport if compliance / team reviews matter (SSO, RBAC, MFA,
+recording, fleet). Pick KS SSH if you want one binary for shell + files + ports
++ host on a NAT box behind a share link, with a tiny optional login instead of
+SSO infra.
+
+Sources: `teleport.dev` (architecture, RBAC, recording, access plane),
+`ekzhang/sshx` + `sshx.io` (canvas, E2E, Fly mesh, self-host notes),
+this repo (`cli/backend/src/*.rs`, `cf/worker/*`, `cf/src/*`).
+
+## E2E (sshx-style) + quick start
+
+- `token` (5-char) routes; `k` (256-bit, `#k=...` fragment only) seals. `hello`
+  negotiates `{e2e:"aes-gcm-v1"}`; sensitive payloads are `enc` (AES-256-GCM,
+  96-bit nonce, AAD=token, seq from 0, strict increment). Relay learns room
+  existence + sizes/timing only. UI bundle stays PLAINTEXT (public build).
+  Legacy peers → `⚠️ relay-visible`; `--no-e2e` forces legacy; missing `k` →
+  paste-full-link prompt (never fetched/stored).
 
 ```sh
 curl -sSfL https://raw.githubusercontent.com/kswarrior/ks-ssh-v2/refs/heads/main/cli/release/ks-ssh -o ks-ssh \
-  && chmod +x ks-ssh \
-  && ./ks-ssh            # local UI at http://127.0.0.1:8080
-
-./ks-ssh --user admin --pass '…'        # local UI behind a login gate (+ Users page)
-./ks-ssh --no-serve --token=ABCDE   # relay only, prints share links with #k=...
-#   E2E: ON — Share link: https://<relay>/v/ABCDE#k=<SECRET>
-#                + https://<relay>/#/view/ABCDE#k=<SECRET>
-./ks-ssh --token=ABCDE              # local UI + relay agent together
-./ks-ssh --no-serve --token= --no-ui  # relay without pushing fullscreen UI
-./ks-ssh --no-serve --token=ABCDE --no-e2e  # legacy plaintext (relay-visible)
+  && chmod +x ks-ssh && ./ks-ssh            # local UI at http://127.0.0.1:8080
+./ks-ssh --user admin --pass '…'            # login gate + Users page (local only)
+./ks-ssh --no-serve --token=ABCDE           # relay only → /v/ABCDE#k=<SECRET>
+./ks-ssh --token=ABCDE                      # local UI + relay together
+./ks-ssh --no-serve --token= --no-ui        # relay without UI push
 ```
 
-Security notes: tokens are short-lived room IDs (guessable) — rotate by
-restarting with a fresh `--token=`; `k` is the real secret (fragment only,
-never query/log/store). `--user/--pass` protects the local UI only; the relay
-link stays bearer-open to whoever holds it. Manual check: share text over the
-relay, wipe Worker storage, confirm relay logs contain only `enc` sizes. Prefer
-`--host 127.0.0.1` unless you mean to expose the LAN; Files APIs are jailed
-to `$HOME` (1 MB editor read cap, 5 MB save cap, 100 MB transfer cap) and Ports
-kill is PID-scoped (refuses PID 1/self, TERM→KILL), but without `--user/--pass`
-the local UI itself has no auth gate, so don't bind `0.0.0.0` on untrusted
-networks without a reverse-proxy auth layer.
+Security: rotate guessable tokens via fresh `--token=`; `k` is the secret
+(fragment only). `--user/--pass` never covers the relay link. Prefer
+`--host 127.0.0.1`; Files jailed to `$HOME`, Ports kill PID-scoped (no PID
+1/self). Don't bind `0.0.0.0` on untrusted nets without proxy auth.

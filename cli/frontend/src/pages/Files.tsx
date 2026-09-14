@@ -777,6 +777,7 @@ export default function FilesPage() {
       if (previewing) setPreviewing(null)
       else if (propsEntry && !propsBusy) {
         setPropsEntry(null)
+        setPropsStat(null)
         setPropsError(null)
       } else if (transfer && !transferBusy) {
         setTransfer(null)
@@ -2258,6 +2259,7 @@ export default function FilesPage() {
           onClick={() => {
             if (!propsBusy) {
               setPropsEntry(null)
+              setPropsStat(null)
               setPropsError(null)
             }
           }}
@@ -2279,6 +2281,7 @@ export default function FilesPage() {
                 disabled={propsBusy}
                 onClick={() => {
                   setPropsEntry(null)
+                  setPropsStat(null)
                   setPropsError(null)
                 }}
               >
@@ -2390,6 +2393,7 @@ export default function FilesPage() {
                 disabled={propsBusy}
                 onClick={() => {
                   setPropsEntry(null)
+                  setPropsStat(null)
                   setPropsError(null)
                 }}
                 title="Close properties"
