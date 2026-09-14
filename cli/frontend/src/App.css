@@ -1435,6 +1435,68 @@
   background: var(--glass-border);
 }
 
+/* ---------- Shared host terminals (SQLite --db, anyone can attach) ---------- */
+
+.host-terms {
+  border: 1px solid var(--glass-border);
+  border-radius: 10px;
+  background: var(--card-bg);
+  padding: 10px 12px;
+  margin-bottom: 8px;
+}
+
+.page.terminal-blank .host-terms {
+  width: min(560px, 100%);
+  margin-top: 16px;
+}
+
+.host-terms-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  opacity: 0.75;
+}
+
+.host-terms-sub {
+  font-weight: 500;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.host-terms-list {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.host-term {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+}
+
+.host-term-id {
+  font-family: var(--mono, ui-monospace, monospace);
+  font-size: 12px;
+}
+
+.host-term-meta {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  opacity: 0.7;
+}
+
 /* ---------- Terminal close confirmation ---------- */
 
 .term-confirm-overlay {

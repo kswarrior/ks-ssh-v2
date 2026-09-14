@@ -130,6 +130,119 @@ function tabLabel(proc: string | null): string {
   return null
 }
 
+type HostTerm = {
+  id: string
+  alive: boolean
+  idle_secs: number
+  bytes: number
+}
+
+function timeAgo(idle: number): string {
+  if (!Number.isFinite(idle) || idle < 0) return ''
+  if (idle < 10) return 'just now'
+  if (idle < 60) return `${Math.floor(idle)}s ago`
+  const m = Math.floor(idle / 60)
+  if (m < 60) return `${m}m ago`
+  const h = Math.floor(m / 60)
+  if (h < 48) return `${h}h ago`
+  return `${Math.floor(h / 24)}d ago`
+}
+
+/**
+ * Terminals living on the host (SQLite `--db`, shared on purpose).
+ * Any visitor sees them here and can attach — live shells reattach,
+ * ended ones replay their saved output. Hidden when the backend has no
+ * list endpoint (relay view, old backend) or when the host has none yet.
+ */
+function HostTerms({
+  sessions,
+  onAttach,
+}: {
+  sessions: TermSession[]
+  onAttach: (sid: string) => void
+}) {
+  const [host, setHost] = useState<HostTerm[] | null>(null)
+
+  useEffect(() => {
+    let alive = true
+    let first = true
+    const load = async () => {
+      try {
+        const res = await fetch('/api/terms', {
+          cache: 'no-store',
+          credentials: 'same-origin',
+        })
+        if (!res.ok) {
+          // Endpoint missing (relay view) or logged out — hide on first
+          // load, keep the old list on later polls.
+          if (first && alive) setHost(null)
+          return
+        }
+        const data = (await res.json()) as {
+          sessions?: Partial<HostTerm>[]
+        }
+        const list = Array.isArray(data.sessions)
+          ? data.sessions.filter(
+              (s): s is HostTerm =>
+                !!s &&
+                typeof s.id === 'string' &&
+                typeof s.alive === 'boolean',
+            )
+          : []
+        if (alive) {
+          first = false
+          setHost(list)
+        }
+      } catch {
+        if (first && alive) setHost(null)
+      }
+    }
+    void load()
+    const id = window.setInterval(load, 15000)
+    return () => {
+      alive = false
+      window.clearInterval(id)
+    }
+  }, [])
+
+  if (!host || host.length === 0) return null
+  const attached = new Set(
+    sessions.map((t) => t.sid).filter((s): s is string => !!s),
+  )
+  return (
+    <div className="host-terms" aria-label="Terminals on this host">
+      <div className="host-terms-head">
+        <span>On this host</span>
+        <span className="host-terms-sub">shared — anyone can attach</span>
+      </div>
+      <ul className="host-terms-list">
+        {host.map((h) => (
+          <li key={h.id} className="host-term">
+            <span
+              className={`term-tab-dot${h.alive ? ' on' : ''}`}
+              title={h.alive ? 'live' : 'ended'}
+              aria-hidden="true"
+            />
+            <code className="host-term-id" title={h.id}>
+              {h.id.slice(0, 8)}
+            </code>
+            <span className="host-term-meta">
+              {h.alive ? 'live' : 'ended'} · {timeAgo(h.idle_secs)}
+            </span>
+            <button
+              type="button"
+              className="btn btn-sm"
+              onClick={() => onAttach(h.id)}
+            >
+              {attached.has(h.id) ? 'Open' : 'Attach'}
+            </button>
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
+}
+
 function ShellSession({
   id,
   active,
@@ -673,6 +786,21 @@ export default function TerminalPage({
     setActiveId(t.id)
   }
 
+  // Attach a shared host terminal (from On-this-host): reuse the local tab
+  // when it is already attached, otherwise open a new tab on its session id
+  // (the socket reattaches + replays, like after a refresh).
+  const attachHost = (sid: string) => {
+    const existing = sessions.find((t) => t.sid === sid)
+    if (existing) {
+      setActiveId(existing.id)
+      return
+    }
+    const t = { ...nextTerm(), sid }
+    setSessions((prev) => [...prev, t])
+    setStatuses((prev) => ({ ...prev, [t.id]: 'connecting' }))
+    setActiveId(t.id)
+  }
+
   const closeTerminal = (id: string) => {
     const next = sessions.filter((t) => t.id !== id)
     setSessions(next)
@@ -770,6 +898,7 @@ export default function TerminalPage({
           </svg>
           Terminal
         </button>
+        <HostTerms sessions={sessions} onAttach={attachHost} />
       </section>
     )
   }
@@ -835,6 +964,7 @@ export default function TerminalPage({
       <h1 id="page-title-terminal" className="sr-only">
         Terminal
       </h1>
+      <HostTerms sessions={sessions} onAttach={attachHost} />
       <div className="term-bar" role="tablist" aria-label="Terminals">
         {sessions.map((t, i) => {
           const isActive = t.id === active.id
