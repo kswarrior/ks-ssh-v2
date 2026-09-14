@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 export default function LoginPage({ onLoggedIn }: { onLoggedIn: (user: string) => void }) {
   const [username, setUsername] = useState('')
@@ -8,6 +8,7 @@ export default function LoginPage({ onLoggedIn }: { onLoggedIn: (user: string) =
   const [showPass, setShowPass] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const busyRef = useRef(false)
   const [ssoEnabled, setSsoEnabled] = useState(false)
 
   // SSO is optional behind --oidc-issuer/--oidc-client-id; only show the
@@ -29,7 +30,8 @@ export default function LoginPage({ onLoggedIn }: { onLoggedIn: (user: string) =
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (busy) return
+    if (busyRef.current) return
+    busyRef.current = true
     setError(null)
     setBusy(true)
     try {
