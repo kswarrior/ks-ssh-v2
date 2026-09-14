@@ -9,10 +9,13 @@ import { E2E_ALG, parseFragmentKey, type E2eStatus } from './e2e'
  * its own `wss://<host>/v1/client?token=…` for full-function rpc/shell.
  * The `/v/TOKEN` src path needs no injection (the shim parses the pathname).
  */
+/** Token pattern: 9 chars fresh, 5 chars legacy — both route. */
+const TOKEN_EXACT_RE = /^(?:[A-Za-z0-9]{5}|[A-Za-z0-9]{9})$/
+
 function withRelayGlobals(html: string, token: string, host: string): string {
-  const safeToken = token.replace(/[^A-Za-z0-9]/g, '').slice(0, 5)
+  const safeToken = token.replace(/[^A-Za-z0-9]/g, '').slice(0, 9)
   const safeHost = host.replace(/[^A-Za-z0-9.:-]/g, '').slice(0, 253)
-  if (!/^[A-Za-z0-9]{5}$/.test(safeToken) || !safeHost) return html
+  if (!TOKEN_EXACT_RE.test(safeToken) || !safeHost) return html
   const tag = `<script>window.__KS_RELAY_TOKEN__=${JSON.stringify(safeToken)};window.__KS_RELAY_HOST__=${JSON.stringify(safeHost)};</script>`
   const idx = html.indexOf('<head')
   if (idx >= 0) {
@@ -84,15 +87,15 @@ function hashToPage(hash: string): PageId | null {
   return found ? found.id : null
 }
 
-/** Extract a 5-char token from #/session/ABCDE or ?token=ABCDE. */
+/** Extract a session token from #/session/TOKEN or ?token=TOKEN. */
 function hashToSessionToken(hash: string): string | null {
   // Supports `#/session/ABCDE` and `#/session/ABCDE#k=...` (fragment key
   // ignored here; use parseFragmentKey() for `k` — never query/fetch).
-  const m = hash.match(/^#\/session\/([A-Za-z0-9]{0,5})/)
-  if (m?.[1] && /^[A-Za-z0-9]{5}$/.test(m[1])) return m[1].toUpperCase()
+  const m = hash.match(new RegExp(`^#/session/([A-Za-z0-9]{0,9})`))
+  if (m?.[1] && TOKEN_EXACT_RE.test(m[1])) return m[1].toUpperCase()
   try {
     const q = new URLSearchParams(window.location.search).get('token')
-    if (q && /^[A-Za-z0-9]{5}$/.test(q)) return q.toUpperCase()
+    if (q && TOKEN_EXACT_RE.test(q)) return q.toUpperCase()
   } catch {
     // URL parsing unavailable — ignore.
   }
@@ -450,8 +453,8 @@ function SSHPage({
   const attemptConnect = (entry: SshEntry) => {
     if (!entry || entry.online || connectingId) return
     const t = entry.token.trim().toUpperCase()
-    if (!/^[A-Z0-9]{5}$/.test(t)) {
-      setBanner('Token is 5 letters/numbers — run `ks-ssh --token=` to get one.')
+    if (!TOKEN_EXACT_RE.test(t)) {
+      setBanner('Token is 5 or 9 letters/numbers — run `ks-ssh --token=` to get one.')
       return
     }
     closeSocket(entry.id)
@@ -537,8 +540,8 @@ function SSHPage({
     const cleanName = name.trim()
     const cleanToken = token.trim().toUpperCase()
     if (!cleanName || !cleanToken) return
-    if (!/^[A-Z0-9]{5}$/.test(cleanToken)) {
-      setBanner('Token is 5 letters/numbers — run `ks-ssh --token=` to get one.')
+    if (!TOKEN_EXACT_RE.test(cleanToken)) {
+      setBanner('Token is 5 or 9 letters/numbers — run `ks-ssh --token=` to get one.')
       return
     }
     if (editingId) {
@@ -656,11 +659,11 @@ function SSHPage({
               <input
                 type="text"
                 value={token}
-                onChange={(e) => setToken(e.target.value.toUpperCase().slice(0, 5))}
+                onChange={(e) => setToken(e.target.value.toUpperCase().slice(0, 9))}
                 placeholder="A3K9Q"
                 autoComplete="off"
                 inputMode="text"
-                maxLength={5}
+                maxLength={9}
                 required
               />
             </label>
