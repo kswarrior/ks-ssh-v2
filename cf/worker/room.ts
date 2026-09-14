@@ -1,18 +1,34 @@
-// TunnelRoom — pairs one CLI agent with web clients by 5-char token.
-// The room name is `pair:<TOKEN>` (see worker/index.ts), so each token
-// gets its own isolated relay. Payloads are passed through untouched,
-// EXCEPT the agent UI bundle (ui-begin/ui-chunk/ui-end) which is cached
-// per room so CF can serve it fullscreen over HTTPS (/v/TOKEN) and replay
-// it to late-joining clients.
+// TunnelRoom — pairs one CLI agent with web clients by token (5-char legacy,
+// 9-char fresh). The room name is `pair:<TOKEN>` (see worker/index.ts), so
+// each token gets its own isolated relay. Payloads are passed through
+// untouched, EXCEPT the agent UI bundle (ui-begin/ui-chunk/ui-end) which is
+// cached per room so CF can serve it fullscreen over HTTPS (/v/TOKEN) and
+// replay it to late-joining clients.
 //
 // E2E: `{"type":"enc",...}` carries AES-256-GCM ciphertext (see
-// cli/backend/src/e2e.rs, cf/src/e2e.ts). The room routes by token only.
+// cli/backend/src/e2e.rs, cf/src/e2e.ts; AAD=`TOKEN|sess|dir|epoch`). The
+// room routes by token only — never parses `ct`, never stores payloads,
+// never logs bodies. Only the UI bundle (ui-begin/ui-chunk/ui-end, public
+// build output, zero secrets) is cached below.
+//
+// `--relay-auth` gating: the agent advertises `relay_auth:true` in `hello`.
+// The room records it and advertises `gated:true` in `paired`/`ui-ready` so
+// viewers prompt for the PIN. Enforcement stays agent-side (PIN travels
+// ONLY inside `enc`, never visible here): without a verified PIN the agent
+// denies every data/rpc/shell bridge with an audit row. The UI bundle
+// itself stays public (zero secrets, `no-store`) — gating it would force
+// the PIN into HTTP, which is worse.
+//
+// Flood guard: per-socket fixed window (200 msgs / 10s); violators get
+// closed with 4408. Token scans are 429'd one layer up (worker/index.ts).
 
 type Role = 'agent' | 'client'
 
 const MAX_UI_BYTES = 5 * 1024 * 1024
 const MAX_UI_CHUNKS = 256
 const UI_REPLAY_RAW = 48 * 1024
+const MAX_MSG_PER_WINDOW = 200
+const MSG_WINDOW_MS = 10_000
 
 export class TunnelRoom implements DurableObject {
   private state: DurableObjectState
@@ -25,6 +41,10 @@ export class TunnelRoom implements DurableObject {
   private uiLoaded = false
   // In-progress upload from the agent (base64 chunks, independently padded).
   private uiPending: (string | null)[] | null = null
+  // `--relay-auth`: agent gates data behind a PIN-inside-`enc`.
+  private authGated = false
+  // Per-socket flood guard.
+  private msgCount = new Map<WebSocket, { n: number; reset: number }>()
 
   constructor(state: DurableObjectState) {
     this.state = state
@@ -68,6 +88,7 @@ export class TunnelRoom implements DurableObject {
         headers: {
           'content-type': 'text/html; charset=utf-8',
           'cache-control': 'no-store',
+          ...(this.authGated ? { 'x-ks-gated': '1' } : {}),
         },
       })
     }
@@ -112,12 +133,14 @@ export class TunnelRoom implements DurableObject {
         agent: this.agent !== null,
         hasUi: this.uiHtml !== null,
         uiSize: this.uiHtml ? this.uiHtml.length : 0,
+        ...(this.authGated ? { gated: true } : {}),
       })
       if (this.uiHtml !== null) {
         this.send(server, {
           type: 'ui-ready',
           size: this.uiHtml.length,
           updatedAt: this.uiUpdatedAt,
+          ...(this.authGated ? { gated: true } : {}),
         })
       }
       if (this.agent) this.send(this.agent, { type: 'paired' })
@@ -126,6 +149,44 @@ export class TunnelRoom implements DurableObject {
   }
 
   async webSocketMessage(ws: WebSocket, message: ArrayBuffer | string) {
+    // Per-socket flood guard (token-scan / DoS backpressure).
+    const now = Date.now()
+    const bucket = this.msgCount.get(ws)
+    if (!bucket || now >= bucket.reset) {
+      this.msgCount.set(ws, { n: 1, reset: now + MSG_WINDOW_MS })
+    } else {
+      bucket.n += 1
+      if (bucket.n > MAX_MSG_PER_WINDOW) {
+        try {
+          ws.close(4408, 'rate limited')
+        } catch {
+          // Already gone — cleaned up on close/error.
+        }
+        return
+      }
+    }
+    // Agent capability advertisement (plaintext control, no secrets):
+    // `{type:hello, role:agent, token, e2e?, sess?, epoch?, fp?, relay_auth?}`.
+    // Records `--relay-auth` gating so viewers prompt for the PIN
+    // (enforcement stays agent-side; the PIN never appears here).
+    if (typeof message === 'string') {
+      try {
+        const hello = JSON.parse(message) as {
+          type?: string
+          role?: string
+          relay_auth?: boolean
+        }
+        if (hello?.type === 'hello' && this.roleOf(ws) === 'agent') {
+          if (hello.relay_auth === true && !this.authGated) {
+            this.authGated = true
+          } else if (hello.relay_auth !== true && this.authGated) {
+            this.authGated = false
+          }
+        }
+      } catch {
+        // Not hello-shaped — fall through to opaque relay below.
+      }
+    }
     // E2E opaque — do not inspect. `enc` envelopes are AES-256-GCM
     // ciphertext: forward by room only, never parse `ct`, never
     // storage.put() payloads, never log bodies. Only the UI bundle

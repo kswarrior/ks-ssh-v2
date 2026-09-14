@@ -84,6 +84,10 @@ export default {
     }
 
     // Fullscreen UI pushed by the CLI over WSS, cached per token.
+    // Public build output by design (zero secrets — proven by the
+    // `ui_bundle_carries_zero_secrets` Rust test + `no-store` below); all
+    // live session data inside it travels via `enc` and (with
+    // `--relay-auth`) only after a PIN-inside-`enc` the relay never sees.
     //   GET /v/ABCDE            -> single-file HTML (iframe / fullscreen)
     //   GET /api/ui/ABCDE/html  -> same HTML (fetch + srcdoc friendly)
     //   GET /api/ui/ABCDE/meta  -> { ok, hasUi, size, updatedAt }
@@ -91,8 +95,10 @@ export default {
       const token =
         pathToken(url.pathname + '/', '/v/') ?? validToken(url)
       if (!token) {
+        const miss = checkLimit(tokenMiss, `miss:${ip}`, now, RATE_MISS_LIMIT, RATE_MISS_WINDOW_MS)
+        if (!miss.allowed) return rateLimited(miss.retryAfter)
         return Response.json(
-          { ok: false, error: 'bad token (want /v/ABCDE)' },
+          { ok: false, error: 'bad token (want /v/ABCDE…; 5-9 letters/numbers)' },
           { status: 400 },
         )
       }
@@ -104,8 +110,10 @@ export default {
     if (url.pathname.startsWith('/api/ui/')) {
       const token = pathToken(url.pathname + '/', '/api/ui/')
       if (!token) {
+        const miss = checkLimit(tokenMiss, `miss:${ip}`, now, RATE_MISS_LIMIT, RATE_MISS_WINDOW_MS)
+        if (!miss.allowed) return rateLimited(miss.retryAfter)
         return Response.json(
-          { ok: false, error: 'bad token (want /api/ui/ABCDE/…)' },
+          { ok: false, error: 'bad token (want /api/ui/ABCDE…; 5-9 letters/numbers)' },
           { status: 400 },
         )
       }
