@@ -28,9 +28,6 @@ pub const MAX_PERSISTED: usize = 200;
 static DB: LazyLock<StdMutex<Option<rusqlite::Connection>>> =
     LazyLock::new(|| StdMutex::new(None));
 
-static DB_PATH: LazyLock<StdMutex<Option<PathBuf>>> =
-    LazyLock::new(|| StdMutex::new(None));
-
 pub fn now_secs() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -42,7 +39,6 @@ pub fn now_secs() -> u64 {
 pub struct PersistedSession {
     pub id: String,
     pub created_at: u64,
-    pub last_active: u64,
     pub dead: bool,
     pub scrollback: Vec<u8>,
 }
@@ -111,14 +107,7 @@ pub fn init(path: Option<&Path>) -> usize {
     if let Ok(mut slot) = DB.lock() {
         *slot = Some(conn);
     }
-    if let Ok(mut slot) = DB_PATH.lock() {
-        *slot = Some(path.to_path_buf());
-    }
     loaded
-}
-
-pub fn path() -> Option<PathBuf> {
-    DB_PATH.lock().ok()?.clone()
 }
 
 pub fn enabled() -> bool {
@@ -169,16 +158,15 @@ pub fn prune_expired() -> usize {
 pub fn load_all() -> Vec<PersistedSession> {
     with_db(|conn| {
         let mut stmt = conn.prepare(
-            "SELECT id, created_at, last_active, dead, scrollback
+            "SELECT id, created_at, dead, scrollback
              FROM sessions ORDER BY last_active DESC LIMIT ?1",
         )?;
         let rows = stmt.query_map([MAX_PERSISTED as i64], |r| {
             Ok(PersistedSession {
                 id: r.get(0)?,
                 created_at: r.get::<_, i64>(1)? as u64,
-                last_active: r.get::<_, i64>(2)? as u64,
-                dead: r.get::<_, i32>(3)? != 0,
-                scrollback: r.get(4)?,
+                dead: r.get::<_, i32>(2)? != 0,
+                scrollback: r.get(3)?,
             })
         })?;
         rows.collect::<rusqlite::Result<Vec<_>>>()
