@@ -279,7 +279,16 @@ export class TunnelRoom implements DurableObject {
         }
         if (role === 'agent' && msg?.type === 'ui-chunk') {
           if (!this.uiPending) return
-          const i = Math.floor(Number(msg.i) || -1)
+          // NOTE: `Number(0) || -1` is -1 (0 is falsy) — chunk 0 is valid,
+          // so parse explicitly or every UI upload fails as incomplete.
+          const rawI = (msg as { i?: unknown }).i
+          const numI =
+            typeof rawI === 'number'
+              ? rawI
+              : typeof rawI === 'string' && rawI.trim() !== ''
+                ? Number(rawI)
+                : NaN
+          const i = Number.isFinite(numI) ? Math.floor(numI) : -1
           const data = typeof msg.data === 'string' ? msg.data : ''
           if (
             !Number.isInteger(i) ||
