@@ -264,16 +264,18 @@ export class E2eSession {
   /** Seal inner JSON bytes/string into the next `enc` envelope. */
   async encryptNext(plaintext: string | Uint8Array): Promise<EncEnvelope> {
     const pt = typeof plaintext === 'string' ? utf8(plaintext) : plaintext
+    const bytes = pt instanceof Uint8Array ? pt : new Uint8Array(pt)
     const nonce = new Uint8Array(12)
     crypto.getRandomValues(nonce)
+    const aad = aadBytes(this.token, this.session, this.txDir, this.epoch)
     const ctBuf = await crypto.subtle.encrypt(
       {
         name: 'AES-GCM',
         iv: nonce.buffer as ArrayBuffer,
-        additionalData: utf8(this.token).buffer as ArrayBuffer,
+        additionalData: aad.buffer as ArrayBuffer,
       },
       this.aes,
-      (typeof plaintext === 'string' ? pt.buffer : (pt as Uint8Array).buffer) as ArrayBuffer,
+      bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer,
     )
     const env: EncEnvelope = {
       type: 'enc',
@@ -286,10 +288,18 @@ export class E2eSession {
     return env
   }
 
+  /** Seal a JSON value (with random `_pad`) into the next `enc` envelope. */
+  async encryptJson(value: Record<string, unknown>): Promise<EncEnvelope> {
+    const copy: Record<string, unknown> = { ...(value as Record<string, unknown>) }
+    addPadding(copy)
+    return this.encryptNext(JSON.stringify(copy))
+  }
+
   /**
    * Open the next `enc` envelope. Requires `seq === rxNext` (strict
    * increment); rejects replays/duplicates/out-of-order and wrong-key /
-   * tampered tags with a generic Error (caller shows "E2E decrypt failed").
+   * tampered / cross-session / cross-epoch / reflected tags with a generic
+   * Error (caller shows "E2E decrypt failed").
    */
   async decryptNext(env: EncEnvelope): Promise<Uint8Array> {
     if (env?.type !== 'enc' || env?.v !== E2E_VERSION) throw new Error('E2E decrypt failed')
@@ -303,15 +313,16 @@ export class E2eSession {
       throw new Error('E2E decrypt failed')
     }
     if (nonce.length !== 12) throw new Error('E2E decrypt failed')
+    const aad = aadBytes(this.token, this.session, this.rxDir, this.epoch)
     try {
       const ptBuf = await crypto.subtle.decrypt(
         {
           name: 'AES-GCM',
           iv: nonce.buffer as ArrayBuffer,
-          additionalData: utf8(this.token).buffer as ArrayBuffer,
+          additionalData: aad.buffer as ArrayBuffer,
         },
         this.aes,
-        ct.buffer as ArrayBuffer,
+        ct.buffer.slice(ct.byteOffset, ct.byteOffset + ct.byteLength) as ArrayBuffer,
       )
       this.rxNext += 1
       return new Uint8Array(ptBuf)

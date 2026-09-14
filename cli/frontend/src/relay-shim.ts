@@ -16,7 +16,6 @@ import {
   E2E_ALG,
   E2eChannel,
   fingerprint as e2eFingerprint,
-  isEncEnvelope,
   readRelayKey,
   type EncEnvelope,
 } from './relay-e2e.ts'
@@ -890,6 +889,22 @@ class RelaySocket {
     }
     this.readyState = RelaySocket.CLOSED
     this.emit('close', { code, reason, wasClean: false })
+  }
+
+  /** Fail before the bridge exists (E2E/PIN gates, unreachable relay). */
+  relayFailed(reason: string): void {
+    if (this.readyState === RelaySocket.CLOSED) return
+    if (this.openTimer !== undefined) {
+      window.clearTimeout(this.openTimer)
+      this.openTimer = undefined
+    }
+    this.readyState = RelaySocket.CLOSED
+    try {
+      this.emit('error', new Error(reason))
+    } catch {
+      // Ignore listener errors.
+    }
+    this.emit('close', { code: 4401, reason, wasClean: false })
   }
 
   send(data: string | ArrayBuffer | Uint8Array | Blob): void {
