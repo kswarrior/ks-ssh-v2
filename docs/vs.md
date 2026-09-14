@@ -72,11 +72,21 @@ sshx.io · **tmate** · **upterm** · **ttyd** · **wetty** = wetty/GoTTY ·
 - **Limits:** token addressing stays bearer-routed by default (routing only,
   `k` seals; 9-char fresh entropy + scan 429s); UI bundle is public build
   output by design (zero secrets proven by `ui_bundle_carries_zero_secrets`,
-  `no-store`, `room.ts:96`); one Worker/DO relay, not a mesh; no collab
-  (joint sessions). `--relay-auth` adds a one-time viewer PIN — sealed inside
-  `enc` (`auth`, `relay.rs:1086`), 15min TTL + mint-invalidates-previous
-  (`auth.rs:1561,1603`), constant-time verify (`auth.rs:1590`) — checked before
-  any `data`/`rpc`/`shell` bridge (never in query/logs).
+  `no-store`, `room.ts:96`); one Worker/DO relay, not a mesh. **Collab is
+  accounts + takeover + chat, not joint sessions:** multi-user accounts with
+  RBAC (admin/operator/viewer, `auth.rs:67,107`), host-shared shells that any
+  authed visitor can reattach to (`shared on purpose` `main.rs:53`,
+  `GET /api/terms` `shell.rs:607`, single `sub` `shell.rs:234`, takeover
+  `epoch` + `4000 attached elsewhere` `shell.rs:68,930,1022`, viewer read-only
+  `shell.rs:921`) + persistent global chat
+  (`GET|POST /api/chat` `chat.rs:47`, `chat_messages cap 1000` `db.rs:59`,
+  `poll 3s` `ChatWidget.tsx:71`, `clients Set` `room.ts:36` for N viewers per
+  token); no simultaneous co-typing/broadcast, no per-cursor/follow, no pane
+  broadcast, no file co-edit. `--relay-auth` adds a one-time viewer PIN —
+  sealed inside `enc` (`auth`, `relay.rs:1086`), 15min TTL +
+  mint-invalidates-previous (`auth.rs:1561,1603`), constant-time verify
+  (`auth.rs:1590`) — checked before any `data`/`rpc`/`shell` bridge (never in
+  query/logs).
 
 ## Scored Matrix (/100 per case)
 
@@ -89,7 +99,7 @@ sshx.io · **tmate** · **upterm** · **ttyd** · **wetty** = wetty/GoTTY ·
 | 5 | File manager + editor | **100** | 30 | 0 | 0 | 0 | 20 | 0 | 40 | 40 | 40 | 30 | 90 |
 | 6 | Ports / process mgmt | **100** | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 10 | 0 | 10 |
 | 7 | Host monitoring | **100** | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 10 | 10 | 0 |
-| 8 | Multi-user collaboration | 0 | 0 | **100** | 80 | 60 | 20 | 0 | 0 | 40 | 80 | 0 | 70 |
+| 8 | Multi-user collaboration | **35** | 0 | **100** | 80 | 60 | 20 | 0 | 0 | 40 | 80 | 0 | 70 |
 | 9 | Identity & audit (login/SSO/RBAC/recording) | **100** | 60 | 10 | 20 | 30 | 40 | 40 | 50 | 80 | **100** | 90 | 70 |
 | 10 | Self-host simplicity / lightweight | 90 | **100** | 20 | 70 | 70 | **100** | 80 | 80 | 30 | 30 | 60 | 20 |
 
@@ -97,7 +107,7 @@ sshx.io · **tmate** · **upterm** · **ttyd** · **wetty** = wetty/GoTTY ·
 
 | Rank | Tool | Sum | Final /100 |
 |---|---|---|---|
-| **1** | **KS SSH** | **873 / 1,000** | **87** |
+| **1** | **KS SSH** | **908 / 1,000** | **91** |
 | 2 | Teleport | 602 / 1,000 | 60 |
 | 3 | VS Code tunnels | 597 / 1,000 | 60 |
 | 4 | sshx | 501 / 1,000 | 50 |
@@ -300,7 +310,11 @@ Where Teleport wins (honest — best audit story in the matrix, now tied):
   scale (short-lived certs, per-session MFA, joint sessions, K8s/DB/app
   proxy) — KS matches the rubric at homelab scale (SSO/RBAC/TOTP + audit +
   recording, see scoring deltas above).
-- Collaboration (case 8: 80): joint sessions + recording; KS has none (0).
+- Collaboration (case 8: 80 vs 35): joint sessions + per-cursor follow +
+  pane broadcast + Live Share; KS has accounts + RBAC + host-shared shells
+  via takeover (single `sub`, `4000 attached elsewhere`) + global chat
+  (`/api/chat`, `clients Set`), but no simultaneous co-typing, no cursors,
+  no co-edit — see Case 8 re-score below.
 - Transport (cases 1/4: 85/87): reverse tunnel + cluster CA; KS matches on shape
   (90) and now leads on E2E (100) with strict session-bound sealing
   (`k` fragment, relay sees sizes only).
@@ -315,10 +329,10 @@ Where KS SSH wins vs Teleport (matrix deltas, same scoring):
   enrolment; Teleport needs `tsh`/enrolled identity.
 - No licence/cloud dependency: KS is self-hosted OSS, unlimited boxes; Teleport
   depth costs cluster/Cloud commitment.
-- Teleport's only outright win over KS is case 8 (collab). Closest
-  gaps: NAT 90 vs 85, browser 93 vs 80 — both
-  within 13 points; terminal leads 100 vs 80, identity is tied 100/100,
-  and E2E now leads 100 vs 87.
+- Teleport's biggest outright win over KS is case 8 (collab 80 vs 35, +45).
+  Closest gaps: NAT 90 vs 85, browser 93 vs 80 — both within 13 points;
+  terminal leads 100 vs 80, identity is tied 100/100, and E2E now leads
+  100 vs 87.
 
 Verdict: pick Teleport if fleet/compliance at scale matters (cluster CA,
 joint sessions, K8s/DB proxy, Cloud). Pick KS SSH if you want one binary for
