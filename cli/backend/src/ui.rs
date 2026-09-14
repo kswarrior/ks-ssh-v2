@@ -32,8 +32,8 @@ pub fn build_single_file() -> anyhow::Result<String> {
         }
     }
 
-    // Replace <script ... src="/assets/*.js"> with inline module.
-    // Vite emits exactly one module script; handle generically.
+    // Replace <script ... src="/assets/*.js"> with the inline module.
+    // All chunks are concatenated into one inline block (multi-chunk safe).
     if !js_inline.is_empty() {
         html = replace_asset_tag(
             &html,
@@ -64,12 +64,16 @@ pub fn build_single_file() -> anyhow::Result<String> {
     Ok(html)
 }
 
-/// Replace the first external asset tag of a given kind with inline content.
+/// Replace external asset tags with inline content (first tag) and strip
+/// any leftovers so the bundle keeps zero `/assets/` refs even if Vite
+/// ever emits multiple chunks or preload links.
 /// `script` -> replaces `<script ... src=...>...</script>`; `link` -> replaces
-/// `<link ... href=...stylesheet...>`.
+/// `<link ... href=...stylesheet...>` (other asset links are dropped).
 fn replace_asset_tag(html: &str, kind: &str, inline: &str, open: &str, close: &str) -> String {
     if kind == "script" {
-        // Find <script ... src="...assets..."> ... </script> and swap it.
+        // Find <script ... src="...assets..."> ... </script>: first one gets
+        // the concatenated inline bundle, the rest are dropped (already
+        // inlined above).
         let mut out = String::with_capacity(html.len() + inline.len());
         let mut rest = html;
         let mut replaced = false;
@@ -81,16 +85,19 @@ fn replace_asset_tag(html: &str, kind: &str, inline: &str, open: &str, close: &s
                 return out;
             };
             let tag = &tag_rest[..=tag_end];
-            if !replaced && tag.contains("/assets/") {
+            if tag.contains("/assets/") {
                 // Skip to matching </script>.
                 let after_tag = &tag_rest[tag_end + 1..];
                 if let Some(close_idx) = after_tag.find("</script>") {
                     out.push_str(head);
-                    out.push_str(open);
-                    out.push_str(inline);
-                    out.push_str(close);
+                    if !replaced {
+                        out.push_str(open);
+                        out.push_str(inline);
+                        out.push_str(close);
+                        replaced = true;
+                    }
+                    // Extra chunks: already concatenated into `inline`.
                     rest = &after_tag[close_idx + "</script>".len()..];
-                    replaced = true;
                     continue;
                 }
             }
@@ -101,7 +108,9 @@ fn replace_asset_tag(html: &str, kind: &str, inline: &str, open: &str, close: &s
         out.push_str(rest);
         out
     } else {
-        // link stylesheet -> inline <style>.
+        // link stylesheet -> inline <style> once; any other /assets/ link
+        // (preload, modulepreload, fonts) is dropped — its target is
+        // already inlined or unneeded for the single-file bundle.
         let mut out = String::with_capacity(html.len() + inline.len());
         let mut rest = html;
         let mut replaced = false;
@@ -113,13 +122,15 @@ fn replace_asset_tag(html: &str, kind: &str, inline: &str, open: &str, close: &s
                 return out;
             };
             let tag = &tag_rest[..=tag_end];
-            if !replaced && tag.contains("/assets/") {
+            if tag.contains("/assets/") {
                 out.push_str(head);
-                out.push_str(open);
-                out.push_str(inline);
-                out.push_str(close);
+                if !replaced {
+                    out.push_str(open);
+                    out.push_str(inline);
+                    out.push_str(close);
+                    replaced = true;
+                }
                 rest = &tag_rest[tag_end + 1..];
-                replaced = true;
                 continue;
             }
             out.push_str(head);
@@ -142,5 +153,23 @@ mod tests {
         // No external /assets/ references should remain.
         assert!(!html.contains("/assets/"), "assets must be inlined");
         assert!(html.contains("<script type=\"module\">"));
+    }
+
+    #[test]
+    fn strips_extra_asset_tags() {
+        // Multi-chunk Vite output: first script gets the inline bundle,
+        // extra chunks + preload links are dropped (already concatenated).
+        let html = r#"<html><head>
+<script type="module" crossorigin src="/assets/a.js"></script>
+<script type="module" crossorigin src="/assets/b.js"></script>
+<link rel="stylesheet" href="/assets/a.css">
+<link rel="modulepreload" href="/assets/b.js">
+</head></html>"#;
+        let out = replace_asset_tag(html, "script", "JS", "<script>", "</script>");
+        assert!(!out.contains("/assets/a.js") && !out.contains("/assets/b.js"));
+        assert_eq!(out.matches("<script>").count(), 1);
+        let out = replace_asset_tag(out, "link", "CSS", "<style>", "</style>");
+        assert!(!out.contains("/assets/"), "all asset links stripped");
+        assert_eq!(out.matches("<style>").count(), 1);
     }
 }
