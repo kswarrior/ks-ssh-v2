@@ -166,7 +166,9 @@ mod tests {
 <link rel="modulepreload" href="/assets/b.js">
 </head></html>"#;
         let out = replace_asset_tag(html, "script", "JS", "<script>", "</script>");
-        assert!(!out.contains("/assets/a.js") && !out.contains("/assets/b.js"));
+        // Script pass strips <script src="/assets/…"> tags; the modulepreload
+        // <link> below still names b.js until the link pass runs next.
+        assert!(!out.contains("src=\"/assets/"), "script srcs stripped");
         assert_eq!(out.matches("<script>").count(), 1);
         let out = replace_asset_tag(&out, "link", "CSS", "<style>", "</style>");
         assert!(!out.contains("/assets/"), "all asset links stripped");
