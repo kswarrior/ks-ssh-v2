@@ -17,7 +17,7 @@ sshx.io · **tmate** · **upterm** · **ttyd** · **wetty** = wetty/GoTTY ·
 | Transport / relay | Outbound WSS agent, 9-char token (5-char legacy routes), single-file UI push (`ui-begin/chunk/end`), `/v/TOKEN`, full `rpc-*`/`shell-*` bridge to a loopback server with the same auth/RBAC, per-IP/scan rate-limit with 429 | Direct TCP, needs reachable sshd (`-R` DIY) | Outbound to global mesh, `sshx.io/s/…` link | Outbound SSH, 4 endpoints (SSH ro/rw + web ro/rw) | Outbound SSH, viewers use `ssh` | Needs ingress (port/proxy/VPN) | Needs ingress (reverse proxy) | Needs reachable sshd | Gateway needs ingress | Reverse tunnel (no ingress) | Outbound WG/QUIC (no ingress) | Outbound to MS edge |
 | Crypto | AES-256-GCM `enc` (strict, session-bound AAD `TOKEN\|sess\|dir\|epoch`, TOFU fingerprint), HKDF `ks-ssh-e2e-v1`, `#k=` fragment only, `?k=` → 400, PIN inside `enc` | SSH (host-key TOFU) | Argon2+AES, fragment key, relay sees ciphertext | None (relay sees plaintext) | SSH | TLS via proxy only | TLS via proxy only | SSH to target | TLS to gateway (gw decrypts) | Short-lived certs + MFA | WireGuard / Zero Trust | Encrypted via MS (trusts vendor) |
 | Terminal | Real PTY, multi-tab + vertical split, v2 seq/ack gap-free resume + ping RTT, predictive echo, CJK/IME + search + export, touch bar, bell/unread/latency (`shell.rs`, `Terminal.tsx`) | Reference PTY + `tmux`/`mosh` | Canvas panes, cursors, predictive echo, ephemeral | tmux preserved | Plain shared session | Solid PTY, CJK/IME | Login/SSH wrapper | Web SSH | Gateway SSH | Joint sessions | Plain SSH over net | Full terminal + editor |
-| Files / ports / host | HOME-jailed files/editor (1/5/100MB caps) + `/proc` ports + kill + host metrics (`files.rs`, `ports.rs`, `host.rs`) | `scp`/`sftp` only | None | None | None | ZMODEM only | None | SFTP browser | SFTP browser | `scp`/SFTP, no health dash | SFTP/SCP | Full editor + port-fwd, no host dash |
+| Files / ports / host | HOME-jailed files/editor (1/5/100MB caps, lexical for missing paths — planted symlink could bypass without `RESOLVE_IN_ROOT`) + `/proc` ports + kill + host metrics (`files.rs:101,162,307`, `ports.rs`, `host.rs`) | `scp`/`sftp` only | None | None | None | ZMODEM only | None | SFTP browser | SFTP browser | `scp`/SFTP, no health dash | SFTP/SCP | Full editor + port-fwd, no host dash |
 | Auth / audit | Argon2id + RBAC (admin/operator/viewer) + TOTP/SSO + audit log + recording + opt relay PIN (`auth.rs`, `db.rs`, `shell.rs`, Audit/Recordings pages) | Keys/certs, no SSO/rec | Bearer link only | Bearer ro/rw links | SSH keys | Basic auth, `-R`, `-o` once | Login flags | Per-host SSH creds | LDAP/OIDC + recording | SSO/RBAC/MFA + recording (best) | IdP ACLs + recorder | MS/GitHub IdP + Live Share |
 | Frontend | Embedded single-file bundle + CF SPA (Home/SSH/Session/Install/Settings, `App.tsx`); SSH `Visit` opens raw full-page CLI at `/v/TOKEN#k=…` (no CF chrome, `#k` preserved) | Terminal client | Web canvas + chat | Basic web + SSH | None (SSH client) | Web xterm | Web login | Web client | HTML5 RDP/VNC/SSH | Web + `tsh` | Admin console + Serve | `vscode.dev` |
 | Routes / API | `/api/files\|ports\|host\|auth/*`, `/v1/shell`, `/v1/agent\|client`, `/v/TOKEN`, `/api/ui/*`, live relay status `/api/ssh/status?token=` + `/api/relay/<TOKEN>/status` (`?ui=status` → `agentOnline/hasUi/gated`), `/api/health` (now with `now`); `/api/ssh/*` stub removed (404 points to status API) | `ssh`/`scp`/`sftp` CLI | `sshx` → link; `… \| sh -s run` in CI | `tmate` → 4 endpoints | `upterm host -- bash` | `ttyd -p 7681 bash` | `wetty --ssh-host` / `gotty -w` | Host/user/key form | Connection mgmt API | Cluster API | Tailnet / Access policy | `code tunnel` |
@@ -28,13 +28,15 @@ sshx.io · **tmate** · **upterm** · **ttyd** · **wetty** = wetty/GoTTY ·
 - **Local:** `ks-ssh --port 8080` on `127.0.0.1`/`0.0.0.0`; PTY over `/v1/shell`
   with reattach/scrollback/resize; tabs persist (`ks-ssh:terms*`).
 - **Login gate:** `--user/--pass` → login page + `ks_ssh_auth` cookie (HttpOnly +
-  Secure + SameSite=Lax, 12h absolute + 30min idle, `auth.rs:46-48,2713`) +
-  Settings → Users (Argon2id, `0600`, main-password gate, `auth.rs:246`). Legacy
-  unsalted SHA-256 `users.json` still logs in once, then upgrades to Argon2id
-  (`auth.rs:786`). Roles admin/operator/viewer enforced per route
-  (`auth.rs:67,107,194,2820`); TOTP 2FA + recovery codes (`auth.rs:372,2001`);
-  optional OIDC SSO behind `--oidc-issuer/--oidc-client-id` (auto-provision as
-  viewer, `auth.rs:1477,2425,2456`); 5 fails → 5min lockout (`auth.rs:57`).
+  Secure + SameSite=Lax, 12h absolute + 30min idle, `auth.rs:46-48,2722`) +
+  Settings → Users (Argon2id, `0600` `auth.rs:1741`, main-password gate for
+  edit/delete `auth.rs:1082,1194`, `auth.rs:254`). Legacy unsalted SHA-256
+  `users.json` still logs in once, then upgrades to Argon2id (`auth.rs:793`).
+  Roles admin/operator/viewer enforced per route (`auth.rs:67,107,194,2845`);
+  TOTP 2FA + recovery codes (`auth.rs:372,2001`); optional OIDC SSO behind
+  `--oidc-issuer/--oidc-client-id` (auto-provision as viewer,
+  `auth.rs:1477,2432,2603` — homelab fallback parses `id_token` unverified over
+  TLS); 5 fails → 5min lockout (`auth.rs:57`).
   Enforced on the shared router, so login/RBAC/audit apply over the relay
   too (agent proxies to a loopback server with the same middleware,
   forwarding the viewer's cookie, `main.rs:293`, `relay.rs:560,719`).
@@ -143,35 +145,36 @@ Totals 873 → **908**, Final 87 → **91**.
 
 Case 9 re-scored 2026-09-14: KS 40 → **100** (Teleport parity at homelab
 scale). Evidence per rubric item:
-- **Strong auth:** Argon2id per-user salts (`auth.rs:246`), legacy SHA-256
-  migrates on login (`auth.rs:786`); min-12 password policy + strength meter
-  (`auth.rs:52,2745`, `Users.tsx`); 5 fails → 5min lockout per IP+user with
-  audit (`auth.rs:57,672` + `lockout_after_five_fails` test); HttpOnly+Secure+
-  SameSite=Lax cookie, 12h absolute + 30min sliding idle, rotated on privilege
-  change (`auth.rs:46-48,2713`, `change_own_password`/`totp_verify` session
+- **Strong auth:** Argon2id per-user salts (`auth.rs:254`), legacy SHA-256
+  migrates on login (`auth.rs:793`); min-12 password policy + strength meter
+  (`auth.rs:52`, `Users.tsx`); 5 fails → 5min lockout per IP+user with audit
+  (`auth.rs:57,672` + `lockout_after_five_fails` test); HttpOnly+Secure+
+  SameSite=Lax cookie, 12h absolute + 30min sliding idle (`auth.rs:46-48,2722`),
+  rotated on privilege change (`change_own_password`/`totp_verify` session
   rotation); self-service change-password (`auth.rs:1963`, `POST
   /api/auth/change-password`).
 - **Least-privilege RBAC:** admin/operator/viewer (`auth.rs:67`), per-route
   matrix (`auth.rs:107,194`) enforced in middleware with 403 + audit row
-  (`auth.rs:2820`); viewer = read files/host/ports + read-only shell attach
-  (`shell.rs:855,1057`); operator = + shell write/upload/mkdir, no
-  kill/delete/chmod/users; admin = all. Owner always admin, legacy users
-  default operator. Role picker + lockout status + session revoke in `Users.tsx`
-  (admin only); `GET /api/auth/me` reports role + 2FA (`auth.rs:1838`).
-  Covered by the `rbac_matrix` unit test.
+  (`auth.rs:2845`); viewer = read files/host/ports + read-only shell attach
+  (`shell.rs:921,1057`); operator = + shell write/upload/mkdir + **kill shell
+  sessions** `DELETE /api/terms/:id` `auth.rs:170` (no ports kill / file delete /
+  chmod / user mgmt); admin = all. Owner always admin, legacy users default
+  operator. Role picker + lockout status + session revoke in `Users.tsx` (admin
+  only); `GET /api/auth/me` reports role + 2FA (`auth.rs:1838`). Covered by the
+  `rbac_matrix` unit test.
 - **SSO/2FA option:** TOTP enroll/verify with otpauth URI + single-use recovery
   codes (`auth.rs:372,2001`, `totp_enroll_verify_roundtrip` test, Login 2FA
   field + Users self-service); OIDC authorization-code + PKCE behind
-  `--oidc-issuer/--oidc-client-id` (`main.rs:73-88`, `auth.rs:1477,2425,2456`),
+  `--oidc-issuer/--oidc-client-id` (`main.rs:82-93`, `auth.rs:1477,2432,2603`),
   auto-provision as viewer, `--oidc-allow-domain` whitelist, tokens never
-  logged.
+  logged (homelab fallback parses `id_token` unverified over TLS).
 - **Full audit trail:** append-only SQLite `(ts, actor, ip, action, target,
   result)` (`db.rs:335,377`) for login/logout, user CRUD, file
   write/delete/chmod/zip/unzip (`files.rs:21`), ports kill (`ports.rs:18`),
-  shell attach/detach, recording playback/delete (`shell.rs:724,786`), relay
-  register/push/data (`relay.rs`, token only, never `k`/PIN). `GET
+  shell attach/detach, recording playback/delete (`shell.rs:724,790`), relay
+  register/push/data (`relay.rs:179,424`, token only, never `k`/PIN). `GET
   /api/audit?limit&since` + `GET /api/audit/export?format=json|csv` (admin
-  only, `auth.rs:2334,2364`); Audit page with filter + JSON/CSV export
+  only, `auth.rs:2341,2372`); Audit page with filter + JSON/CSV export
   (`Audit.tsx`); retention `--audit-retain-days` (`db.rs:79`). Covered by the
   `audit_write_and_list` test.
 - **Session recording/replay:** per-shell timestamped in/out frames capped at
@@ -364,7 +367,7 @@ Where KS SSH wins vs Teleport (matrix deltas, same scoring):
 - Single-box panel sweep (cases 5–7: 100/100/100 vs 40/10/10): HOME-jailed
   files + editor with caps, `/proc`+`ss` ports with PID kill, per-core/RAM/swap/
   filtered-`df` host graphs — Teleport doesn't try to be a homelab panel.
-- Lightweight (case 10: 90 vs 30): one static binary + one Worker vs cluster
+- Lightweight (case 10: 90 vs 30): one single binary + one Worker vs cluster
   ops; `curl … && ./ks-ssh` and done.
 - Browser share-link (case 2: 93 vs 80): send-a-link phone triage with no client
   enrolment; Teleport needs `tsh`/enrolled identity.
