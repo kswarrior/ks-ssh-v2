@@ -128,6 +128,96 @@ function SparkGraph({ values, label, tone }: { values: number[]; label: string; 
   )
 }
 
+/** Stylish host-aware loading state: mirrors the real System / CPU / RAM /
+ * Disks layout so an open or refresh is clearly "about this host". */
+function HostSkeleton() {
+  return (
+    <div className="host-loading" aria-busy="true" aria-label="Probing host">
+      <div className="card host-load-hero" aria-hidden="true">
+        <span className="host-orb">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <rect x="2" y="3" width="20" height="7" rx="2" />
+            <rect x="2" y="14" width="20" height="7" rx="2" />
+            <path d="M6 6.5h.01M6 17.5h.01" />
+          </svg>
+        </span>
+        <span className="host-load-text">
+          <span className="host-load-title">Probing this host…</span>
+          <span className="host-load-sub">CPU · memory · disks</span>
+        </span>
+        <span className="host-pulse-dot" />
+      </div>
+
+      <div className="host-grid">
+        <div className="card host-card host-skel-card" aria-hidden="true">
+          <h2>System</h2>
+          <div className="host-skel-kv">
+            {Array.from({ length: 7 }, (_, i) => (
+              <div key={i} className="host-skel-row">
+                <span className="skeleton host-skel-dt" />
+                <span
+                  className="skeleton host-skel-dd"
+                  style={{ width: `${[62, 78, 70, 34, 48, 66, 28][i]}%` }}
+                />
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="card host-card host-skel-card" aria-hidden="true">
+          <div className="host-card-head">
+            <h2>CPU</h2>
+            <span className="skeleton host-skel-stat" />
+          </div>
+          <span className="skeleton host-skel-line" style={{ width: '82%' }} />
+          <div className="skeleton host-skel-graph" />
+          <ul className="host-skel-cores">
+            {Array.from({ length: 8 }, (_, i) => (
+              <li key={i}>
+                <span className="host-skel-core">
+                  <span style={{ height: `${[38, 62, 48, 74, 30, 55, 68, 42][i]}%` }} />
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+
+        <div className="card host-card host-skel-card" aria-hidden="true">
+          <div className="host-card-head">
+            <h2>RAM</h2>
+            <span className="skeleton host-skel-stat" />
+          </div>
+          <span className="skeleton host-skel-line" style={{ width: '88%' }} />
+          <div className="skeleton host-skel-graph host-skel-graph-ram" />
+          <div className="skeleton host-skel-bar" />
+          <span className="skeleton host-skel-line" style={{ width: '46%' }} />
+        </div>
+      </div>
+
+      <div className="card host-card host-disks host-skel-card" aria-hidden="true">
+        <div className="host-card-head">
+          <h2>Disks</h2>
+          <span className="skeleton host-skel-line" style={{ width: '110px' }} />
+        </div>
+        {Array.from({ length: 2 }, (_, i) => (
+          <div key={i} className="host-skel-disk">
+            <div className="host-skel-disk-top">
+              <span className="skeleton" style={{ width: '64px' }} />
+              <span className="skeleton" style={{ width: '150px' }} />
+            </div>
+            <div className="skeleton host-skel-bar" />
+            <span className="skeleton host-skel-line" style={{ width: '72%' }} />
+          </div>
+        ))}
+      </div>
+
+      <span className="sr-only" role="status">
+        Probing host — reading CPU, memory and disks…
+      </span>
+    </div>
+  )
+}
+
 export default function HostPage() {
   const [data, setData] = useState<HostResponse | null>(null)
   const [loading, setLoading] = useState(true)
@@ -185,13 +275,18 @@ export default function HostPage() {
         </h1>
         <div className="row-actions ports-actions">
           <p className="files-sub host-live" aria-live="polite">
-            {loading && !data
-              ? 'Reading host info…'
-              : error
-                ? 'Could not read host info.'
-                : data
-                  ? `${data.hostname} · up ${formatUptime(data.uptime_secs)} · live`
-                  : ''}
+            {loading && !data ? (
+              <span className="host-probing">
+                <span className="host-pulse-dot" aria-hidden="true" />
+                <span>Probing this host…</span>
+              </span>
+            ) : error ? (
+              'Could not read host info.'
+            ) : data ? (
+              `${data.hostname} · up ${formatUptime(data.uptime_secs)} · live`
+            ) : (
+              ''
+            )}
           </p>
           <div className="ports-right">
             <button
@@ -201,11 +296,11 @@ export default function HostPage() {
               disabled={loading}
               title="Refresh host info now"
             >
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <svg className={loading ? 'spin' : undefined} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                 <path d="M21 12a9 9 0 1 1-2.64-6.36" />
                 <path d="M21 3v6h-6" />
               </svg>
-              <span className="btn-label">{loading ? 'Reading…' : 'Refresh'}</span>
+              <span className="btn-label">{loading ? (data ? 'Refreshing…' : 'Probing…') : 'Refresh'}</span>
             </button>
           </div>
         </div>
@@ -231,22 +326,15 @@ export default function HostPage() {
             </div>
           </div>
         ) : loading && !data ? (
-          <ul className="file-grid" aria-label="Reading host info" aria-busy="true">
-            {Array.from({ length: 4 }, (_, i) => (
-              <li key={i} className="file-card ports-skeleton" aria-hidden="true">
-                <div className="file-card-top">
-                  <span className="skeleton skeleton-icon" />
-                  <span className="skeleton skeleton-title" />
-                </div>
-                <div className="file-meta">
-                  <span className="skeleton skeleton-meta" />
-                </div>
-              </li>
-            ))}
-            <span className="sr-only" role="status">Reading host info…</span>
-          </ul>
+          <HostSkeleton />
         ) : data ? (
           <>
+            {loading && (
+              <div className="host-refresh-bar" aria-hidden="true">
+                <span />
+              </div>
+            )}
+            <div className={loading ? 'host-stale' : undefined} aria-busy={loading || undefined}>
             <div className="host-grid">
               {/* System card */}
               <div className="card host-card">
@@ -352,6 +440,7 @@ export default function HostPage() {
                   ))}
                 </ul>
               )}
+            </div>
             </div>
           </>
         ) : null}
