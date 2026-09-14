@@ -868,9 +868,13 @@ function SessionPage({
   const [fragKey, setFragKey] = useState<string | null>(() => parseFragmentKey())
   const [paste, setPaste] = useState('')
   const [pasteError, setPasteError] = useState<string | null>(null)
-  const [fp, setFp] = useState<string | null>(null)
-  const [tofuChanged, setTofuChanged] = useState(false)
-  const [tofuFirst, setTofuFirst] = useState(false)
+  // Fingerprint resolved for exactly `fpKey` (never stored — fp only).
+  const [fpState, setFpState] = useState<{
+    k: string
+    fp: string
+    changed: boolean
+    first: boolean
+  } | null>(null)
   const [gated, setGated] = useState(false)
 
   // Keep `k` in sync with the fragment (back/forward, paste-apply below).
@@ -880,28 +884,30 @@ function SessionPage({
     return () => window.removeEventListener('hashchange', onHash)
   }, [])
 
-  // Fingerprint + TOFU from the fragment key (never stored — fp only).
+  // Fingerprint + TOFU from the fragment key (async continuation only, so
+  // no cascading render; stale keys never display — render gates on `k`).
   useEffect(() => {
-    let alive = true
-    setFp(null)
-    setTofuChanged(false)
-    setTofuFirst(false)
     if (!fragKey || !activeToken) return
-    void fingerprintK(fragKey)
+    let alive = true
+    const k = fragKey
+    const t = activeToken
+    void fingerprintK(k)
       .then((f) => {
         if (!alive) return
-        setFp(f)
-        const t = checkTofu(activeToken, f)
-        setTofuChanged(t.changed)
-        setTofuFirst(t.first)
+        const tofu = checkTofu(t, f)
+        setFpState({ k, fp: f, changed: tofu.changed, first: tofu.first })
       })
       .catch(() => {
-        if (alive) setFp(null)
+        if (alive) setFpState(null)
       })
     return () => {
       alive = false
     }
   }, [fragKey, activeToken])
+
+  const fp = fpState && fpState.k === fragKey ? fpState.fp : null
+  const tofuChanged = fpState !== null && fpState.k === fragKey && fpState.changed
+  const tofuFirst = fpState !== null && fpState.k === fragKey && fpState.first
 
   const applyPaste = () => {
     const k = extractKeyFromText(paste)

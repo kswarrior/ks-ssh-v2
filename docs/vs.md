@@ -309,25 +309,36 @@ this repo (`cli/backend/src/*.rs`, `cf/worker/*`, `cf/src/*`).
 
 ## E2E (sshx-style) + quick start
 
-- `token` (5-char) routes; `k` (256-bit, `#k=...` fragment only) seals. `hello`
-  negotiates `{e2e:"aes-gcm-v1"}`; sensitive payloads are `enc` (AES-256-GCM,
-  96-bit nonce, AAD=token, seq from 0, strict increment). Relay learns room
-  existence + sizes/timing only. UI bundle stays PLAINTEXT (public build).
-  Legacy peers → `⚠️ relay-visible`; `--no-e2e` forces legacy; missing `k` →
-  paste-full-link prompt (never fetched/stored).
+- `token` (9-char fresh, 5-char legacy routes) addresses; `k` (256-bit,
+  `#k=...` fragment only, never query/fetch/logs/storage) seals. `hello`
+  negotiates `{e2e:"aes-gcm-v1", sess, epoch, fp, relay_auth?}` and the agent
+  answers every client `hello` (plus the room replays caps to late joiners),
+  so viewers always learn the session binding. Sensitive payloads are `enc`
+  (AES-256-GCM, 96-bit nonce, AAD=`TOKEN|sess|dir|epoch` with mirrored
+  `a2c`/`c2a`, strict seq per direction, random `_pad`). Relay learns room
+  existence + sizes/timing only. UI bundle stays PLAINTEXT (public build,
+  zero-secrets proof, `no-store`). Legacy peers → hard `E2E error` + audit
+  (no silent downgrade); `--no-e2e` forces legacy (explicit hatch only);
+  missing `k` → paste-full-link prompt; wrong `k` → decrypt-failed; viewer
+  PIN (when `--relay-auth`) travels inside `enc` only, 15min TTL, one-time.
+  Agent fingerprint (`E2E fingerprint: …` at startup) is TOFU-verified by
+  viewers. Token scans hit 429 budgets.
 
 ```sh
 curl -sSfL https://raw.githubusercontent.com/kswarrior/ks-ssh-v2/refs/heads/main/cli/release/ks-ssh -o ks-ssh \
   && chmod +x ks-ssh && ./ks-ssh            # local UI at http://127.0.0.1:8080
 ./ks-ssh --user admin --pass '…'            # login gate + Users page (local only)
-./ks-ssh --no-serve --token=ABCDE           # relay only → /v/ABCDE#k=<SECRET>
-./ks-ssh --token=ABCDE                      # local UI + relay together
+./ks-ssh --no-serve --token=                # relay only → /v/9CHARTOK#k=<SECRET> (fresh 9-char)
+./ks-ssh --token=ABCDE1234                  # local UI + relay together (or reuse a token)
 ./ks-ssh --no-serve --token= --no-ui        # relay without UI push
 ```
 
-Security: rotate guessable tokens via fresh `--token=`; `k` is the secret
-(fragment only). Token addressing is bearer-routed, but with `--user/--pass`
-the relay is login-gated too (same loopback router/RBAC/audit); add
-`--relay-auth` for the one-time viewer PIN on top. Prefer
+Security: fresh `--token=` per session (9-char routing entropy + scan 429s);
+`k` is the secret (fragment only — compare the viewer's fingerprint with the
+CLI's on first connect). Token addressing is bearer-routed, but with
+`--user/--pass` the relay is login-gated too (same loopback router/RBAC/audit);
+add `--relay-auth` for the one-time viewer PIN on top. Prefer
 `--host 127.0.0.1`; Files jailed to `$HOME`, Ports kill PID-scoped (no PID
-1/self). Don't bind `0.0.0.0` on untrusted nets without proxy auth.
+1/self). Don't bind `0.0.0.0` on untrusted nets without proxy auth. No ECDH
+yet: `k` is long-lived per link, so rotate links per session if that matters
+to you.
