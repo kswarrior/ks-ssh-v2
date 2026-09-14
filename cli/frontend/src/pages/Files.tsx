@@ -721,6 +721,24 @@ export default function FilesPage() {
     return () => document.removeEventListener('keydown', onKey)
   }, [uploading, uploadBusy])
 
+  // Escape closes preview / properties / transfer dialogs (when idle).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return
+      if (previewing) setPreviewing(null)
+      else if (propsEntry && !propsBusy) {
+        setPropsEntry(null)
+        setPropsError(null)
+      } else if (transfer && !transferBusy) {
+        setTransfer(null)
+        setTransferError(null)
+      }
+    }
+    if (!previewing && !propsEntry && !transfer) return
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [previewing, propsEntry, propsBusy, transfer, transferBusy])
+
   const base = useMemo(
     () =>
       (data?.entries ?? []).filter(
@@ -819,14 +837,208 @@ export default function FilesPage() {
     }
   }
 
-  // Click a card: folders open, files open in the editor.
+  // Click a card: folders open, media previews, other files open in the editor.
   const openEntry = (e: FileEntry) => {
     if (renaming === e.path || confirmDelete === e.path) return
     if (e.is_dir) {
       void load(e.path)
+    } else if (!e.is_symlink && previewKindOf(e.name)) {
+      setPreviewing(e)
     } else {
       void openEditor(e)
     }
+  }
+
+  /* ---------- Selection + bulk actions ---------- */
+
+  const toggleSelect = (path: string) => {
+    setSelected((prev) =>
+      prev.includes(path) ? prev.filter((p) => p !== path) : [...prev, path],
+    )
+  }
+
+  const selectedEntries = useMemo(
+    () => (data?.entries ?? []).filter((e) => selected.includes(e.path)),
+    [data, selected],
+  )
+
+  const submitBulkDelete = async () => {
+    if (selectedEntries.length === 0) return
+    setBusy(true)
+    setActionError(null)
+    const failed: string[] = []
+    for (const e of selectedEntries) {
+      try {
+        const res = await fetch(
+          `/api/files?path=${encodeURIComponent(e.path)}`,
+          { method: 'DELETE' },
+        )
+        if (!res.ok) {
+          const text = await res.text().catch(() => '')
+          throw new Error(text || `delete failed (${res.status})`)
+        }
+      } catch (err) {
+        failed.push(`${e.name}: ${err instanceof Error ? err.message : 'failed'}`)
+      }
+    }
+    await load(data?.path)
+    setBusy(false)
+    if (failed.length > 0) {
+      setActionError(`Could not delete ${failed.length} item(s):\n${failed.join('\n')}`)
+    }
+  }
+
+  const submitBulkDownload = () => {
+    const files = selectedEntries.filter((e) => !e.is_dir)
+    if (files.length === 0) return
+    // Sequential trigger so the browser keeps every download.
+    files.forEach((e, i) => {
+      window.setTimeout(() => {
+        const a = document.createElement('a')
+        a.href = downloadUrl(e.path)
+        a.download = e.name
+        document.body.appendChild(a)
+        a.click()
+        a.remove()
+      }, i * 400)
+    })
+  }
+
+  /* ---------- Copy / move / duplicate ---------- */
+
+  const openTransfer = (entry: FileEntry, mode: TransferMode) => {
+    setMenuOpen(null)
+    setConfirmDelete(null)
+    setActionError(null)
+    setTransfer({ entry, mode })
+    setTransferDir(data?.path ?? '')
+    setTransferName(entry.name)
+    setTransferError(null)
+  }
+
+  const transferValid = (() => {
+    const n = transferName.trim()
+    const d = transferDir.trim()
+    if (!transfer || !n || !d) return false
+    if (n === '.' || n === '..') return false
+    if (n.includes('/') || n.includes('\\')) return false
+    return true
+  })()
+
+  const submitTransfer = async () => {
+    if (!transfer || !transferValid) return
+    const to = `${transferDir.trim().replace(/\/+$/, '')}/${transferName.trim()}`
+    if (to === transfer.entry.path) {
+      setTransferError('Destination is the same file.')
+      return
+    }
+    setTransferBusy(true)
+    setTransferError(null)
+    try {
+      const res = await fetch(
+        transfer.mode === 'copy' ? '/api/files/copy' : '/api/files/rename',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ from: transfer.entry.path, to }),
+        },
+      )
+      if (!res.ok) {
+        const text = await res.text().catch(() => '')
+        throw new Error(text || `transfer failed (${res.status})`)
+      }
+      setTransfer(null)
+      await load(data?.path)
+    } catch (err) {
+      setTransferError(err instanceof Error ? err.message : 'Transfer failed.')
+    } finally {
+      setTransferBusy(false)
+    }
+  }
+
+  const submitDuplicate = async (e: FileEntry) => {
+    if (!data) return
+    setMenuOpen(null)
+    setActionError(null)
+    const taken = new Set((data.entries ?? []).map((x) => x.name))
+    const name = suggestCopyName(e.name, taken)
+    setBusy(true)
+    try {
+      const res = await fetch('/api/files/copy', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ from: e.path, to: `${data.path}/${name}` }),
+      })
+      if (!res.ok) {
+        const text = await res.text().catch(() => '')
+        throw new Error(text || `duplicate failed (${res.status})`)
+      }
+      await load(data.path)
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'Duplicate failed.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  /* ---------- Properties + permissions ---------- */
+
+  const openProps = (e: FileEntry) => {
+    setMenuOpen(null)
+    setConfirmDelete(null)
+    setActionError(null)
+    setPropsEntry(e)
+    setPropsMode(e.mode != null ? e.mode.toString(8) : '')
+    setPropsError(null)
+  }
+
+  const submitChmod = async () => {
+    if (!propsEntry) return
+    const m = Number.parseInt(propsMode.trim(), 8)
+    if (!Number.isInteger(m) || m < 0 || m > 0o7777) {
+      setPropsError('Mode must be octal 0..7777 (e.g. 644).')
+      return
+    }
+    setPropsBusy(true)
+    setPropsError(null)
+    try {
+      const res = await fetch('/api/files/chmod', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: propsEntry.path, mode: m }),
+      })
+      if (!res.ok) {
+        const text = await res.text().catch(() => '')
+        throw new Error(text || `chmod failed (${res.status})`)
+      }
+      setPropsEntry({ ...propsEntry, mode: m })
+      await load(data?.path)
+    } catch (err) {
+      setPropsError(err instanceof Error ? err.message : 'Chmod failed.')
+    } finally {
+      setPropsBusy(false)
+    }
+  }
+
+  /* ---------- Drag & drop upload ---------- */
+
+  const dropHasFiles = (e: React.DragEvent) =>
+    Array.from(e.dataTransfer?.types ?? []).includes('Files')
+
+  const onDropFiles = (e: React.DragEvent) => {
+    e.preventDefault()
+    dragDepth.current = 0
+    setDropActive(false)
+    if (uploading || !data || error) return
+    const files = Array.from(e.dataTransfer?.files ?? []).filter((f) => f.size > 0 || f.name)
+    if (files.length === 0) return
+    setUploadFiles(files)
+    setUploadUrl('')
+    setUploadName('')
+    setUploadError(null)
+    setUploadDone([])
+    setUploadProgress('')
+    setUploading('local')
   }
 
   const openEditor = async (e: FileEntry) => {
@@ -1043,7 +1255,26 @@ export default function FilesPage() {
   }
 
   return (
-    <section className="page files-page" aria-labelledby="page-title-files">
+    <section
+      className={`page files-page${dropActive ? ' files-drop-active' : ''}`}
+      aria-labelledby="page-title-files"
+      onDragEnter={(e) => {
+        if (!dropHasFiles(e)) return
+        e.preventDefault()
+        dragDepth.current += 1
+        setDropActive(true)
+      }}
+      onDragOver={(e) => {
+        if (!dropHasFiles(e)) return
+        e.preventDefault()
+      }}
+      onDragLeave={(e) => {
+        if (!dropHasFiles(e)) return
+        dragDepth.current = Math.max(0, dragDepth.current - 1)
+        if (dragDepth.current === 0) setDropActive(false)
+      }}
+      onDrop={onDropFiles}
+    >
       <div className="page-head files-head">
         <h1 id="page-title-files" className="sr-only">
           Files
@@ -1191,15 +1422,71 @@ export default function FilesPage() {
               </ol>
             )}
           </nav>
-          <label className="files-toggle">
-            <input
-              type="checkbox"
-              checked={showHidden}
-              onChange={(e) => setShowHidden(e.target.checked)}
-            />
-            Hidden
-          </label>
+          <div className="files-path-tools">
+            <label className="ports-select-wrap" title="Sort order">
+              <span className="sr-only">Sort files</span>
+              <select
+                className="ports-select"
+                value={sortKey}
+                onChange={(e) => setSortKey(e.target.value as SortKey)}
+                aria-label="Sort files"
+              >
+                <option value="name">Name</option>
+                <option value="size">Size</option>
+                <option value="modified">Date</option>
+              </select>
+              <svg className="ports-select-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="m6 9 6 6 6-6" />
+              </svg>
+            </label>
+            <button
+              type="button"
+              className="btn btn-sm"
+              onClick={() => setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'))}
+              title={sortDir === 'asc' ? 'Ascending — switch to descending' : 'Descending — switch to ascending'}
+              aria-label={sortDir === 'asc' ? 'Sort ascending' : 'Sort descending'}
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                {sortDir === 'asc' ? (
+                  <path d="M12 19V5m-7 7 7-7 7 7" />
+                ) : (
+                  <path d="M12 5v14m7-7-7 7-7-7" />
+                )}
+              </svg>
+              <span className="btn-label">{sortDir === 'asc' ? 'Asc' : 'Desc'}</span>
+            </button>
+            <button
+              type="button"
+              className="btn btn-sm"
+              onClick={() => setView((v) => (v === 'grid' ? 'list' : 'grid'))}
+              title={view === 'grid' ? 'Switch to list view' : 'Switch to grid view'}
+              aria-label={view === 'grid' ? 'List view' : 'Grid view'}
+              aria-pressed={view === 'list'}
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                {view === 'grid' ? (
+                  <path d="M8 6h13M8 12h13M8 18h13M3.5 6h.01M3.5 12h.01M3.5 18h.01" />
+                ) : (
+                  <path d="M3 3h7v7H3zM14 3h7v7h-7zM3 14h7v7H3zM14 14h7v7h-7z" />
+                )}
+              </svg>
+              <span className="btn-label">{view === 'grid' ? 'List' : 'Grid'}</span>
+            </button>
+            <label className="files-toggle">
+              <input
+                type="checkbox"
+                checked={showHidden}
+                onChange={(e) => setShowHidden(e.target.checked)}
+              />
+              Hidden
+            </label>
+          </div>
         </div>
+        {dropActive && (
+          <div className="files-drop-hint" aria-hidden="true">
+            <p>Drop files to upload them here</p>
+          </div>
+        )}
         <p className="files-sub">
           {loading
             ? 'Loading…'
