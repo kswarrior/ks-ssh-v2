@@ -50,10 +50,10 @@ pub struct DownloadQuery {
 }
 
 fn inline_requested(q: &DownloadQuery) -> bool {
-    match q.inline.as_deref().map(str::trim) {
-        Some("1") | Some("true") | Some("yes") | Some("inline") => true,
-        _ => false,
-    }
+    matches!(
+        q.inline.as_deref().map(str::trim),
+        Some("1") | Some("true") | Some("yes") | Some("inline")
+    )
 }
 
 #[derive(Deserialize)]

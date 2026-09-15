@@ -848,13 +848,12 @@ impl AuthState {
         drop(g);
         // Role lookup after unlock (owner = admin).
         let role = self.role_of(&user).unwrap_or(Role::Viewer);
-        Some(LoginOutcome::Ok(LoginInfo {
+        LoginOutcome::Ok(LoginInfo {
             token,
             username: user,
             is_owner,
             role,
-        }))
-        .unwrap_or(LoginOutcome::BadCredentials)
+        })
     }
 
     /// Back-compat login without IP/TOTP (tests + internal callers).

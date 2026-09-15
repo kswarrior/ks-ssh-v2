@@ -351,7 +351,7 @@ fn parse_df(text: &str) -> Vec<DiskInfo> {
         });
     }
     // Biggest filesystem first.
-    out.sort_by(|a, b| b.total_kb.cmp(&a.total_kb));
+    out.sort_by_key(|a| std::cmp::Reverse(a.total_kb));
     out
 }
 
@@ -396,7 +396,7 @@ fn disk_info() -> Vec<DiskInfo> {
                     });
                 }
                 if !disks.is_empty() {
-                    disks.sort_by(|a: &DiskInfo, b: &DiskInfo| b.total_kb.cmp(&a.total_kb));
+                    disks.sort_by_key(|a: &DiskInfo| std::cmp::Reverse(a.total_kb));
                     return disks;
                 }
             }

@@ -729,7 +729,6 @@ pub struct RecordingQuery {
 /// GET /api/terms/:id/recording?from&limit — timestamped input+output frames
 /// for replay (viewer+; middleware enforces, handler audits playback).
 /// `data` is base64 (standard). Frames are oldest-first from `seq >= from`.
-
 async fn api_get_recording_inner(
     opt_ctx: Option<Extension<auth::AuthContext>>,
     headers: HeaderMap,
