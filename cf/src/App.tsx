@@ -1801,11 +1801,6 @@ export default function App() {
         ? hashToPage(window.location.hash)
         : null) ?? 'home',
   )
-  const [sessionToken, setSessionToken] = useState<string | null>(() =>
-    typeof window !== 'undefined'
-      ? hashToSessionToken(window.location.hash)
-      : null,
-  )
   const isMobile = useIsMobile(768)
   const btnRef = useRef<HTMLButtonElement>(null)
   const asideRef = useRef<HTMLElement>(null)
@@ -1849,16 +1844,13 @@ export default function App() {
     const onHash = () => {
       const next = hashToPage(window.location.hash)
       if (next) setPage(next)
-      setSessionToken(hashToSessionToken(window.location.hash))
     }
     window.addEventListener('hashchange', onHash)
     return () => window.removeEventListener('hashchange', onHash)
   }, [])
 
   // Browser tab title follows the active page.
-  // (The session page sets its own title with the connection name.)
   useEffect(() => {
-    if (page === 'session') return
     const label = NAV.find((p) => p.id === page)?.label
     document.title = label && label !== 'Home' ? `KS SSH — ${label}` : 'KS SSH'
   }, [page])
@@ -1932,13 +1924,6 @@ export default function App() {
     }
   }
 
-  const sessionName =
-    sessionToken != null
-      ? (entries.find(
-          (x) => x.token.trim().toUpperCase() === sessionToken,
-        )?.name ?? null)
-      : null
-
   const onNavClick = () => {
     if (isMobile) {
       setOpen(false)
@@ -1986,18 +1971,6 @@ export default function App() {
                 </a>
               )
             })}
-            {page === 'session' && sessionToken && (
-              <a
-                key="session"
-                href={`#/session/${sessionToken}`}
-                className="active"
-                aria-current="page"
-                tabIndex={drawerHidden ? -1 : undefined}
-                onClick={onNavClick}
-              >
-                {sessionName ?? `Session ${sessionToken}`}
-              </a>
-            )}
           </nav>
         </aside>
 
