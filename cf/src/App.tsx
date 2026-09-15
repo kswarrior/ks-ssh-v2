@@ -757,23 +757,9 @@ function SSHPage({
       )}
 
       {entries.length === 0 && !formOpen ? (
-        <div className="card" style={{ textAlign: 'center', padding: '48px 24px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '20px' }}>
-          <h2 style={{ margin: 0 }}>No connections yet</h2>
-          <svg
-            width="120"
-            height="120"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            aria-hidden="true"
-            style={{ opacity: 0.18 }}
-          >
-            <rect x="3" y="4" width="18" height="16" rx="2" />
-            <path d="M7 9l3 3-3 3M12 15h5" />
-          </svg>
+        <div className="card">
+          <h2>No connections yet</h2>
+          <p>Press Connect to add your first one.</p>
         </div>
       ) : (
         <ul className="ssh-list">
