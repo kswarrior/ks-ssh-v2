@@ -25,12 +25,12 @@
 //! `fp` = fingerprint of `k`). Sensitive payloads travel ONLY as
 //! `{"type":"enc",...}` (AES-256-GCM, AAD=`TOKEN|sess|dir|epoch`, strict
 //! seq, random `_pad`). A peer without E2E is hard-failed with `E2E error`
-//!   + audit deny — no plaintext is sent. `--no-e2e` is the only escape hatch
-//!   (explicit, loud warning + audit row). The relay sees only sizes/timing.
-//!   UI bundle + `paired`/`agent` presence + `ping`/`pong` + `ui-*` control
-//!   stay plaintext by design (public build output / no secrets); the viewer
-//!   PIN travels ONLY inside `enc` (`{"type":"auth","pin":"..."}`) when both
-//!   sides do E2E.
+//! and an audit deny — no plaintext is sent. `--no-e2e` is the only escape
+//! hatch (explicit, loud warning + audit row). The relay sees only
+//! sizes/timing. UI bundle + `paired`/`agent` presence + `ping`/`pong` +
+//! `ui-*` control stay plaintext by design (public build output / no
+//! secrets); the viewer PIN travels ONLY inside `enc`
+//! (`{"type":"auth","pin":"..."}`) when both sides do E2E.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -474,6 +474,7 @@ fn peer_e2e_now(peer: &SharedPeer) -> bool {
     peer.load(Ordering::SeqCst)
 }
 
+#[allow(clippy::too_many_arguments)] // relay RPC plumbing: explicit params keep call sites readable
 async fn rpc_error_shared(
     out_tx: &OutTx,
     shared: &SharedE2e,
@@ -562,6 +563,7 @@ fn b64_decode(s: &str) -> Option<Vec<u8>> {
 /// response back chunked (`rpc-begin` / `rpc-chunk` / `rpc-end`).
 /// Responses follow the strict router: sealed via `enc` when E2E is on,
 /// refused (deny) when the peer lacks E2E, plaintext only for `--no-e2e`.
+#[allow(clippy::too_many_arguments)] // relay plumbing: explicit params keep call sites readable
 async fn proxy_rpc(
     out_tx: &OutTx,
     shared: &SharedE2e,
@@ -717,6 +719,7 @@ fn short_path(path: &str) -> String {
 /// loop. PTY bytes (text + binary, v1/v2 frames, resize/ping/ack) pass
 /// through untouched as base64 `shell-recv` / `shell-send` — sealed via
 /// `enc` when E2E is on (strict: refused when the peer lacks E2E).
+#[allow(clippy::too_many_arguments)] // relay plumbing: explicit params keep call sites readable
 async fn spawn_shell_bridge(
     out_tx: OutTx,
     shared: SharedE2e,
@@ -888,6 +891,7 @@ struct RpcBeginMsg {
 
 /// Sealed inner `rpc-*` (decrypted `enc` payload): same validation as the
 /// plaintext path, responses sealed via `enc` (strict).
+#[allow(clippy::too_many_arguments)] // relay plumbing: explicit params keep call sites readable
 async fn handle_inner_rpc(
     out_tx: &OutTx,
     http_client: &reqwest::Client,
@@ -993,6 +997,7 @@ async fn handle_inner_rpc(
 
 /// Sealed inner `shell-*` (decrypted `enc` payload): same bridge as the
 /// plaintext path, PTY bytes sealed via `enc` on the way back.
+#[allow(clippy::too_many_arguments)] // relay plumbing: explicit params keep call sites readable
 async fn handle_inner_shell(
     out_tx: &OutTx,
     shells: Arc<Mutex<HashMap<String, ShellBridge>>>,
@@ -1043,6 +1048,7 @@ async fn handle_inner_shell(
     }
 }
 
+#[allow(clippy::too_many_arguments)] // relay plumbing: explicit params keep call sites readable
 async fn on_text(
     out_tx: &OutTx,
     http_client: &reqwest::Client,
