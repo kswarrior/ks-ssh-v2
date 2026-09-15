@@ -16,6 +16,7 @@ type PortsResponse = {
 }
 
 type ProtoFilter = 'all' | 'tcp' | 'udp'
+type ViewMode = 'grid' | 'list'
 
 const KNOWN_SERVICES: Record<number, string> = {
   20: 'FTP-data',
@@ -73,6 +74,7 @@ export default function PortsPage() {
   const [error, setError] = useState<string | null>(null)
   const [filter, setFilter] = useState<ProtoFilter>('all')
   const [query, setQuery] = useState('')
+  const [view, setView] = useState<ViewMode>('grid')
   const [confirmKill, setConfirmKill] = useState<string | null>(null)
   const [killing, setKilling] = useState<string | null>(null)
   const [killError, setKillError] = useState<string | null>(null)
