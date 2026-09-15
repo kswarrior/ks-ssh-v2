@@ -191,16 +191,18 @@ Debug: open empty terminal → wait 15s → reload → Network `v1/shell?v=2&fro
 
 ---
 
-## 6. Debugging Playbook (Main Agent Only)
+## 6. Debugging Playbook (Main Agent Only) — Strict Order: Read → Understand → Fix → Build
 
 **Template to copy-paste**
 
 ```md
 Task: Debug <symptom>
-Steps in main agent:
-1. Grep/Read cf/... for <CF part> — note files:lines
-2. Grep/Read cli/... for <CLI part> — note files:lines
-3. Edit directly, then verify: `tsc -b && vite build` + `bash rebuild.sh`
+Steps in main agent (MUST be in this order):
+1. READ ALL — Read all files fully: cf/src/App.tsx, cf/worker/room.ts, cf/worker/index.ts, cli/frontend/src/App.tsx, cli/frontend/src/relay-shim.ts, cli/frontend/src/relay-e2e.ts, cli/frontend/src/pages/Terminal.tsx, cli/backend/src/relay.rs, cli/backend/src/e2e.rs, cli/backend/src/shell.rs, cli/backend/src/ui.rs + §3/§8 files:lines
+2. UNDERSTAND — Trace flows end-to-end (Visit/Add/Edit/Online/WSS/E2E/shell replay), note file:line for every finding, explain root cause before editing
+3. FIX — Only after 1+2, edit directly in main
+4. BUILD & VERIFY — Then go to build: `tsc -b && vite build` + `bash rebuild.sh` + `wrangler dev` / `RUST_LOG=debug` + §7 smoke
+Do NOT fix or build before completing 1+2.
 ```
 
 **Current fixes as examples**
@@ -212,19 +214,26 @@ Steps in main agent:
 | `2nd open 4-5s` | `cli/backend/src/e2e.rs` `cli/backend/src/relay.rs` `cli/frontend/src/relay-e2e.ts` | `reset_seq` missing |
 | `terminal 60s` | `cli/frontend/src/pages/Terminal.tsx:40,1528` | `STALE 12s + backoff 36.5s` |
 
-**How to debug next bug (main only)**
+**How to debug next bug (main only) — Read → Understand → Fix → Build**
 
 ```bash
-# All in main agent, sequential:
-grep -rn "pattern" cf/src/App.tsx cli/frontend/src/pages/Terminal.tsx
-# Read files, edit, then verify:
+# Phase 1 — READ ALL & UNDERSTAND (no edits/builds yet):
+grep -rn "pattern" cf/src/App.tsx cf/worker/room.ts cli/frontend/src/App.tsx cli/frontend/src/relay-shim.ts cli/backend/src/relay.rs
+# Read every file in §8 fully, trace CF+CLI flows end-to-end
+
+# Phase 2 — FIX (only after Phase 1):
+# edit cf/src/App.tsx, cli/frontend/src/pages/Terminal.tsx ...
+
+# Phase 3 — BUILD & VERIFY (only after Phase 2):
 cd cf && npm run build
 cd cli && bash rebuild.sh
 ```
 
 ---
 
-## 7. Verify
+## 7. Verify (only after Read → Understand → Fix)
+
+> Do NOT run builds until you have completed Phase 1 (Read all) + Phase 2 (Fix). Verify is Phase 3.
 
 ```bash
 # CF
