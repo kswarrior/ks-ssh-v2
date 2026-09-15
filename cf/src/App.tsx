@@ -453,36 +453,37 @@ function SSHPage({
   const [e2eKey, setE2eKey] = useState('')
   const [e2eError, setE2eError] = useState<string | null>(null)
   const [showKey, setShowKey] = useState(false)
-  const [keyFp, setKeyFp] = useState<string | null>(null)
+  // Fingerprint cache for exactly one key (fp only — never the key itself
+  // beyond `k` as the cache key, matching the SessionPage TOFU pattern).
+  const [keyFp, setKeyFp] = useState<{ k: string; fp: string } | null>(null)
   // Memory-only E2E keys by entry id (cleared on reload — never persisted).
   const [e2eKeys, setE2eKeys] = useState<Record<string, string>>({})
   const [connectingId, setConnectingId] = useState<string | null>(null)
   const [banner, setBanner] = useState<string | null>(null)
   const socketsRef = useRef(new Map<string, WebSocket>())
 
-  // Fingerprint preview for the typed key (fp only, key never leaves memory).
+  // Parsed key for the form (derived during render — no cascading render).
+  const parsedFormKey = e2eOn ? extractKeyFromText(e2eKey) : null
+  const formFp = parsedFormKey && keyFp && keyFp.k === parsedFormKey ? keyFp.fp : null
+
+  // Fingerprint preview for the typed key (async continuation only, so no
+  // cascading render; stale keys never display — render gates on `k`).
   useEffect(() => {
-    if (!e2eOn) {
-      setKeyFp(null)
-      return
-    }
-    const k = extractKeyFromText(e2eKey)
-    if (!k) {
-      setKeyFp(null)
-      return
-    }
+    if (!parsedFormKey) return
+    if (keyFp && keyFp.k === parsedFormKey) return
     let alive = true
+    const k = parsedFormKey
     void fingerprintK(k)
       .then((f) => {
-        if (alive) setKeyFp(f)
+        if (alive) setKeyFp({ k, fp: f })
       })
       .catch(() => {
-        if (alive) setKeyFp(null)
+        // Invalid key — preview stays empty (render already gates on `k`).
       })
     return () => {
       alive = false
     }
-  }, [e2eOn, e2eKey])
+  }, [parsedFormKey, keyFp])
 
   useEffect(
     () => () => {
@@ -860,9 +861,9 @@ function SSHPage({
                   <span className="session-status" role="alert">
                     {e2eError}
                   </span>
-                ) : keyFp ? (
+                ) : formFp ? (
                   <span className="session-status session-hint">
-                    🔒 fingerprint <code>{keyFp}</code> (memory-only — re-enter after reload)
+                    🔒 fingerprint <code>{formFp}</code> (memory-only — re-enter after reload)
                   </span>
                 ) : (
                   <span className="session-status session-hint">
