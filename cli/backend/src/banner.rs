@@ -117,7 +117,8 @@ fn collect_rows(b: &StartupBanner) -> Vec<Row> {
             });
         }
     }
-    // Share links (contain the secret when E2E is on — send directly).
+    // Share link (contains the secret when E2E is on — send directly).
+    // Single canonical URL: /v/TOKEN#k=… (the SPA #/session/… lobby is removed).
     if let (Some(http), Some(t)) = (b.relay_http.as_deref(), b.token.as_deref()) {
         let base = http.trim_end_matches('/');
         if b.e2e_on {
@@ -126,11 +127,6 @@ fn collect_rows(b: &StartupBanner) -> Vec<Row> {
                     label: Some("Link"),
                     value: format!("{base}/v/{t}#k={k}"),
                     style: C_YELLOW,
-                });
-                rows.push(Row {
-                    label: Some("Link"),
-                    value: format!("{base}/#/session/{t}#k={k}"),
-                    style: "",
                 });
             }
         } else {

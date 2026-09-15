@@ -9,7 +9,7 @@
 //!
 //! On connect the agent also pushes its whole embedded frontend as a
 //! single-file HTML bundle (`ui-begin` / `ui-chunk` / `ui-end`), so CF can
-//! cache it per token and open it fullscreen (`/v/TOKEN`, `#/session/TOKEN`).
+//! cache it per token and open it fullscreen (`/v/TOKEN`).
 //!
 //! Full-function relay (Visit == `--port`): the pushed bundle runs in relay
 //! mode inside CF and tunnels everything over this same WSS:
