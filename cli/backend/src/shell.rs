@@ -437,10 +437,15 @@ async fn get_or_create_session(want: Option<String>) -> Arc<Session> {
     let id = want
         .filter(|t| valid_session_id(t))
         .unwrap_or_else(new_session_id);
-    let mut map = SESSIONS.lock().await;
-    if let Some(s) = map.get(&id) {
-        return s.clone();
+    // Fast path: already exists — no spawn needed.
+    {
+        let map = SESSIONS.lock().await;
+        if let Some(s) = map.get(&id) {
+            return s.clone();
+        }
     }
+    // Spawn outside the lock — `openpty`/`spawn_command` are blocking and
+    // would stall other `api_list_terms` / concurrent attaches if held.
     let session = match spawn_session(id.clone()) {
         Ok(s) => s,
         Err(e) => {
@@ -472,11 +477,15 @@ async fn get_or_create_session(want: Option<String>) -> Arc<Session> {
             return s;
         }
     };
+    let mut map = SESSIONS.lock().await;
+    // Double-check: another task may have created it while we were spawning.
+    if let Some(existing) = map.get(&id) {
+        // Our fresh PTY would orphan — reap it and reuse the winner.
+        reap_child(&session);
+        return existing.clone();
+    }
     map.insert(id, session.clone());
-    // Mirror the new shell into SQLite so visitors (and restarts) see it.
-    // (Only the DB lock is taken — brief, no SESSIONS recursion.)
-    persist_session(&session);
-    // Enforce the cap outside the lock (reaping blocks).
+    // Enforce the cap while still holding the map lock (collect victims).
     let victims: Vec<Arc<Session>> = if map.len() > MAX_SESSIONS {
         let mut cands: Vec<(Instant, bool, Arc<Session>)> = map
             .values()
@@ -506,6 +515,9 @@ async fn get_or_create_session(want: Option<String>) -> Arc<Session> {
         map.remove(vid);
     }
     drop(map);
+    // Persist the new shell without holding the SESSIONS lock (was blocking
+    // `api_list_terms` and concurrent attaches, making the terminal feel slow).
+    persist_session(&session);
     for s in victims {
         reap_child(&s);
         db::delete(&s.id);
