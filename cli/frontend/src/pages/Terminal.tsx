@@ -1942,7 +1942,7 @@ export default function TerminalPage({
   const [menuAnchor, setMenuAnchor] = useState<{
     top: number | null
     bottom: number | null
-    right: number
+    left: number
   } | null>(null)
   // Live session actions per tab, registered by each ShellSession.
   const handlesRef = useRef(new Map<string, TermHandle>())
@@ -2273,18 +2273,27 @@ export default function TerminalPage({
       return
     }
     const r = anchor.getBoundingClientRect()
+    // Left-align the menu card with the tab's left edge: measure the owning
+    // `.term-tab` (the button sits at its right end) and anchor `left` to it.
+    // Clamped so the card never runs off the viewport's right edge.
+    const tabRect =
+      anchor.closest?.('.term-tab')?.getBoundingClientRect() ?? r
     // Drop down by default; drop upward when there is not enough room
     // below but more room above (short landscape phones, zoomed pages).
     // The menu itself also caps at viewport height and scrolls inside.
     const MENU_EST = 280
+    const MENU_WIDTH = 260
     const spaceBelow = window.innerHeight - r.bottom
-    const right = Math.max(8, window.innerWidth - r.right)
+    const left = Math.max(
+      8,
+      Math.min(tabRect.left, window.innerWidth - MENU_WIDTH - 8),
+    )
     setMenuId(t.id)
     if (spaceBelow >= MENU_EST || r.top <= spaceBelow) {
       setMenuAnchor({
         top: Math.max(8, Math.min(r.bottom + 6, window.innerHeight - MENU_EST)),
         bottom: null,
-        right,
+        left,
       })
     } else {
       setMenuAnchor({
@@ -2293,7 +2302,7 @@ export default function TerminalPage({
           8,
           Math.min(window.innerHeight - r.top + 6, window.innerHeight - MENU_EST),
         ),
-        right,
+        left,
       })
     }
   }
@@ -2483,8 +2492,8 @@ export default function TerminalPage({
                 aria-label={`Actions for ${menuTerm.name}`}
                 style={
                   menuAnchor.top != null
-                    ? { top: menuAnchor.top, right: menuAnchor.right }
-                    : { bottom: menuAnchor.bottom ?? 8, right: menuAnchor.right }
+                    ? { top: menuAnchor.top, left: menuAnchor.left }
+                    : { bottom: menuAnchor.bottom ?? 8, left: menuAnchor.left }
                 }
                 onClick={(e) => e.stopPropagation()}
               >
