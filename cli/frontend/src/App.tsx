@@ -255,20 +255,19 @@ export default function App() {
       if (isRelay) {
         bump(76, 'Syncing tunnel…')
         // Short settle — shim conn.ensure() already warming since main.tsx; don't block 1-3 min
-        await new Promise((res) => setTimeout(res, 180))
+        // Keep minimal to avoid perceived slow load.
+        await new Promise((res) => setTimeout(res, 60))
         if (!alive) return
         // Verify WSS is still not error-gated; if hello already failed we would have returned
         bump(86, 'Tunnel ready')
       } else {
         bump(78, 'Local ready')
       }
-      bump(94, 'Loading workspace…')
-      await new Promise((res) => setTimeout(res, 120))
-      if (!alive) return
       bump(100, 'Ready')
-      window.setTimeout(() => {
-        if (alive) setBootReady(true)
-      }, 180)
+      // No artificial 120+180ms stall — terminal should appear instantly after
+      // auth+hello. Previous 300ms delay was the main "takes a lot of time"
+      // complaint for local --port.
+      if (alive) setBootReady(true)
     }
     void load()
     return () => {
