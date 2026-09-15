@@ -263,6 +263,11 @@ impl E2e {
         }
     }
 
+    pub fn reset_seq(&mut self) {
+        self.tx_seq = 0;
+        self.rx_next = 0;
+    }
+
     /// Session-bound endpoint. `is_agent` picks direction labels:
     /// agent tx=`a2c`/rx=`c2a`, client mirrored. Both sides must agree on
     /// the agent-minted `(session, epoch)` from `hello`.
