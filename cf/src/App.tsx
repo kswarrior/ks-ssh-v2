@@ -1990,7 +1990,7 @@ export default function App() {
               settings={settings}
             />
           )}
-          {page === 'installation' && <InstallationPage settings={settings} />}
+          {page === 'installation' && <InstallationPage />}
           {page === 'settings' && (
             <SettingsPage
               settings={settings}
