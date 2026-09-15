@@ -592,6 +592,47 @@ function HomePage() {
           text="The same interface on phone and desktop, with offline-first data."
         />
         </Reveal>
+        <Reveal delay={330} className="home-tile">
+        <FeatureTile
+          icon={
+            <>
+              <rect x="3" y="3" width="7" height="7" rx="1" />
+              <rect x="14" y="3" width="7" height="7" rx="1" />
+              <rect x="3" y="14" width="7" height="7" rx="1" />
+              <rect x="14" y="14" width="7" height="7" rx="1" />
+            </>
+          }
+          title="Everything in one panel"
+          text="Terminal, Files, Ports and Host in a single UI — a real PTY with tabs and splits, a HOME-jailed file editor, live ports with per-port kill, and per-core host metrics."
+        />
+        </Reveal>
+        <Reveal delay={440} className="home-tile">
+        <FeatureTile
+          icon={
+            <>
+              <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+              <circle cx="9" cy="7" r="4" />
+              <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+              <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+            </>
+          }
+          title="Identity and audit"
+          text="Multi-user login with Argon2id passwords, admin/operator/viewer roles plus TOTP and optional SSO — every shell recorded for replay and every action kept in an exportable audit log."
+        />
+        </Reveal>
+        <Reveal delay={550} className="home-tile">
+        <FeatureTile
+          icon={
+            <>
+              <circle cx="12" cy="12" r="10" />
+              <path d="M2 12h20" />
+              <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
+            </>
+          }
+          title="Local, relay, or both"
+          text="Serve the UI on your own port, reach it with no open ports over the relay, or run both together from one command — the same UI everywhere."
+        />
+        </Reveal>
       </div>
     </section>
   )
