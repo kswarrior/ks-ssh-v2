@@ -946,14 +946,6 @@ function SSHPage({
     onChange((prev) => prev.filter((x) => x.id !== id))
   }
 
-  // Visit URL: saved per-entry key first, then the URL fragment — so E2E
-  // survives reloads and the navigation to raw /v/TOKEN.
-  const visitUrl = (entry: SshEntry): string => {
-    const t = entry.token.trim().toUpperCase()
-    const k = e2eKeys[entry.id] ?? parseFragmentKey()
-    return k ? `${relayBase}/v/${t}#k=${k}` : `${relayBase}/v/${t}`
-  }
-
   const total = entries.length
   const online = entries.filter((x) => x.online).length
 
