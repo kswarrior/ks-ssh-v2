@@ -427,6 +427,11 @@ export default function PortsPage() {
               on port <strong>{confirmKill.port.port}</strong>? This frees
               the port.
             </p>
+            {killError && (
+              <div className="banner-error" role="alert">
+                <p>{killError}</p>
+              </div>
+            )}
             <div className="term-confirm-actions">
               <button
                 type="button"

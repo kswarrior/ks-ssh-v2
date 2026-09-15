@@ -3146,6 +3146,131 @@ export default function FilesPage() {
           </div>
         </div>
       )}
+
+      {confirmDelete && (
+        <div
+          className="term-confirm-overlay"
+          onClick={() => {
+            if (!busy) setConfirmDelete(null)
+          }}
+        >
+          <div
+            className="term-confirm"
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="files-confirm-title"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <svg
+              className="term-confirm-icon"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <path d="M3 6h18" />
+              <path d="M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2" />
+              <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V6" />
+              <path d="M10 11v6M14 11v6" />
+            </svg>
+            <h2 id="files-confirm-title">Delete {confirmDelete.name}?</h2>
+            <p>
+              Delete <strong>{confirmDelete.name}</strong>
+              {confirmDelete.is_dir
+                ? ' and everything inside it?'
+                : ' permanently?'}
+            </p>
+            <div className="term-confirm-actions">
+              <button
+                type="button"
+                className="btn btn-sm"
+                disabled={busy}
+                onClick={() => setConfirmDelete(null)}
+                autoFocus
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn btn-sm btn-danger"
+                disabled={busy}
+                onClick={() => void submitDelete(confirmDelete)}
+              >
+                {busy ? 'Deleting…' : 'Delete'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {confirmBulkDelete && (
+        <div
+          className="term-confirm-overlay"
+          onClick={() => {
+            if (!busy) setConfirmBulkDelete(false)
+          }}
+        >
+          <div
+            className="term-confirm"
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="files-bulk-confirm-title"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <svg
+              className="term-confirm-icon"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <path d="M3 6h18" />
+              <path d="M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2" />
+              <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V6" />
+              <path d="M10 11v6M14 11v6" />
+            </svg>
+            <h2 id="files-bulk-confirm-title">
+              Delete {selected.length} selected item
+              {selected.length === 1 ? '' : 's'}?
+            </h2>
+            <p>
+              {selectedEntries.slice(0, 3).map((e) => e.name).join(', ')}
+              {selectedEntries.length > 3
+                ? ` and ${selectedEntries.length - 3} more`
+                : ''}{' '}
+              will be deleted permanently.
+            </p>
+            <div className="term-confirm-actions">
+              <button
+                type="button"
+                className="btn btn-sm"
+                disabled={busy}
+                onClick={() => setConfirmBulkDelete(false)}
+                autoFocus
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn btn-sm btn-danger"
+                disabled={busy}
+                onClick={() => {
+                  setConfirmBulkDelete(false)
+                  void submitBulkDelete()
+                }}
+              >
+                {busy ? 'Deleting…' : `Delete (${selected.length})`}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </section>
   )
 }
