@@ -290,23 +290,26 @@ function newSid(): string {
 }
 
 /**
- * Shared `GET /api/terms` poll for the Other-sessions UI (block + dropdown).
+ * Other terminals living on this host (SQLite `--db`, shared on purpose).
  *
- * `refreshKey` forces an immediate re-list (bumped by the parent after local
- * mutations — tab close, attach, split toggle — so a killed/attached session
- * never lingers as a stale row until the next 15s poll). Failures keep the
- * previous list; only a failure before the very first success hides the UI
- * (relay view / old backend without the endpoint).
+ * Your own open tabs are hidden here — this lists only sessions you have
+ * NOT attached in this browser, so a fresh page no longer scares you with
+ * "anyone can attach" rows that are actually your own tabs. Live shells
+ * reattach, ended ones replay their saved output. Hidden when the backend
+ * has no list endpoint (relay view, old backend) or when there is nothing
+ * else on the host.
  */
-function useHostList(refreshKey: number): {
-  host: HostTerm[] | null
-  killing: string | null
-  load: () => Promise<HostTerm[] | null>
-  onKill: (sid: string) => Promise<void>
-} {
+function HostTerms({
+  sessions,
+  splits,
+  onAttach,
+}: {
+  sessions: TermSession[]
+  splits: Record<string, TermSession>
+  onAttach: (sid: string) => void
+}) {
   const [host, setHost] = useState<HostTerm[] | null>(null)
   const [killing, setKilling] = useState<string | null>(null)
-  const seenOk = useRef(false)
 
   const load = useCallback(async () => {
     try {
@@ -329,7 +332,6 @@ function useHostList(refreshKey: number): {
               typeof s.alive === 'boolean',
           )
         : []
-      seenOk.current = true
       setHost(list)
       return list
     } catch {
@@ -340,6 +342,7 @@ function useHostList(refreshKey: number): {
 
   useEffect(() => {
     let alive = true
+    let first = true
     const tick = async () => {
       try {
         const res = await fetch('/api/terms', {
@@ -347,9 +350,9 @@ function useHostList(refreshKey: number): {
           credentials: 'same-origin',
         })
         if (!res.ok) {
-          // Endpoint missing (relay view) or logged out — hide only when
-          // nothing ever loaded, keep the old list on later polls.
-          if (!seenOk.current && alive) setHost(null)
+          // Endpoint missing (relay view) or logged out — hide on first
+          // load, keep the old list on later polls.
+          if (first && alive) setHost(null)
           return
         }
         const data = (await res.json()) as {
@@ -364,11 +367,11 @@ function useHostList(refreshKey: number): {
             )
           : []
         if (alive) {
-          seenOk.current = true
+          first = false
           setHost(list)
         }
       } catch {
-        if (!seenOk.current && alive) setHost(null)
+        if (first && alive) setHost(null)
       }
     }
     void tick()
@@ -377,170 +380,7 @@ function useHostList(refreshKey: number): {
       alive = false
       window.clearInterval(id)
     }
-  }, [refreshKey])
-
-  const onKill = useCallback(
-    async (sid: string) => {
-      setKilling(sid)
-      try {
-        await killHostTerm(sid)
-        await load()
-      } finally {
-        setKilling((cur) => (cur === sid ? null : cur))
-      }
-    },
-    [load],
-  )
-
-  return { host, killing, load, onKill }
-}
-
-// Cross-window presence: tabs live in shared localStorage, so two windows
-// of the same browser each hold the same tab sids in their own React state.
-// Without this, window B lists window A's own open tabs as scary "shared —
-// anyone can attach" rows. Every live page heartbeats the sids it currently
-// has attached; readers exclude sids claimed by *other* live pages.
-const PRESENCE_KEY = 'ks-ssh:term-presence'
-const PRESENCE_TTL_MS = 15000
-const PRESENCE_BEAT_MS = 5000
-
-function readForeignSids(selfId: string): Set<string> {
-  try {
-    const raw = localStorage.getItem(PRESENCE_KEY)
-    if (!raw) return new Set()
-    const obj = JSON.parse(raw) as Record<
-      string,
-      { ts?: unknown; sids?: unknown } | null
-    >
-    const now = Date.now()
-    const out = new Set<string>()
-    for (const [id, v] of Object.entries(obj ?? {})) {
-      if (id === selfId || !v || typeof v !== 'object') continue
-      if (typeof v.ts !== 'number' || now - v.ts > PRESENCE_TTL_MS) continue
-      if (!Array.isArray(v.sids)) continue
-      for (const s of v.sids) {
-        if (typeof s === 'string' && s) out.add(s)
-      }
-    }
-    return out
-  } catch {
-    return new Set()
-  }
-}
-
-function sameStrSet(a: Set<string>, b: Set<string>): boolean {
-  if (a.size !== b.size) return false
-  for (const s of a) {
-    if (!b.has(s)) return false
-  }
-  return true
-}
-
-/** Sids currently attached by *other* live pages of this browser. */
-function useForeignSids(ownKey: string): Set<string> {
-  const selfRef = useRef<string | null>(null)
-  if (selfRef.current === null) {
-    try {
-      const b = new Uint8Array(8)
-      crypto.getRandomValues(b)
-      selfRef.current = Array.from(b, (x) =>
-        x.toString(16).padStart(2, '0'),
-      ).join('')
-    } catch {
-      selfRef.current = `p-${Date.now().toString(36)}${Math.floor(Math.random() * 1e9).toString(36)}`
-    }
-  }
-  const [foreign, setForeign] = useState<Set<string>>(() =>
-    readForeignSids(selfRef.current as string),
-  )
-
-  useEffect(() => {
-    const self = selfRef.current as string
-    const sync = () => {
-      try {
-        let obj: Record<string, { ts: number; sids: string[] }> = {}
-        try {
-          obj =
-            (JSON.parse(
-              localStorage.getItem(PRESENCE_KEY) ?? '{}',
-            ) as Record<string, { ts: number; sids: string[] }>) ?? {}
-        } catch {
-          obj = {}
-        }
-        const now = Date.now()
-        for (const [id, v] of Object.entries(obj)) {
-          if (!v || typeof v.ts !== 'number' || now - v.ts > PRESENCE_TTL_MS) {
-            delete obj[id]
-          }
-        }
-        obj[self] = { ts: now, sids: ownKey ? ownKey.split('\n') : [] }
-        try {
-          localStorage.setItem(PRESENCE_KEY, JSON.stringify(obj))
-        } catch {
-          // Storage unavailable — presence just won't filter.
-        }
-      } catch {
-        // Malformed presence map — the read below still filters by TTL.
-      }
-      setForeign((prev) => {
-        const next = readForeignSids(self)
-        return sameStrSet(prev, next) ? prev : next
-      })
-    }
-    sync()
-    const iv = window.setInterval(sync, PRESENCE_BEAT_MS)
-    const onStorage = (e: StorageEvent) => {
-      if (e.key === PRESENCE_KEY || e.key === null) {
-        setForeign((prev) => {
-          const next = readForeignSids(self)
-          return sameStrSet(prev, next) ? prev : next
-        })
-      }
-    }
-    window.addEventListener('storage', onStorage)
-    return () => {
-      window.clearInterval(iv)
-      window.removeEventListener('storage', onStorage)
-      try {
-        const raw = localStorage.getItem(PRESENCE_KEY)
-        if (raw) {
-          const obj = JSON.parse(raw) as Record<string, unknown>
-          if (obj && typeof obj === 'object' && self in obj) {
-            delete obj[self]
-            localStorage.setItem(PRESENCE_KEY, JSON.stringify(obj))
-          }
-        }
-      } catch {
-        // Best effort only.
-      }
-    }
-  }, [ownKey])
-
-  return foreign
-}
-
-/**
- * Other terminals living on this host (SQLite `--db`, shared on purpose).
- *
- * Your own open tabs are hidden here — this lists only sessions you have
- * NOT attached in this browser, so a fresh page no longer scares you with
- * "anyone can attach" rows that are actually your own tabs. Live shells
- * reattach, ended ones replay their saved output. Hidden when the backend
- * has no list endpoint (relay view, old backend) or when there is nothing
- * else on the host.
- */
-function HostTerms({
-  sessions,
-  splits,
-  onAttach,
-  refreshKey,
-}: {
-  sessions: TermSession[]
-  splits: Record<string, TermSession>
-  onAttach: (sid: string) => void
-  refreshKey: number
-}) {
-  const { host, killing, load, onKill } = useHostList(refreshKey)
+  }, [])
 
   const attached = new Set(
     [
@@ -550,14 +390,19 @@ function HostTerms({
   )
   // Hide your own open tabs — only show *other* host sessions. This is the
   // fix for "I didn't open these": previously your own tabs appeared here
-  // as scary "shared — anyone can attach" rows. `foreign` extends the same
-  // hiding to tabs owned by other live windows of this browser.
-  const foreign = useForeignSids([...attached].sort().join('\n'))
-  const others = (host ?? []).filter(
-    (h) => !attached.has(h.id) && !foreign.has(h.id),
-  )
+  // as scary "shared — anyone can attach" rows.
+  const others = (host ?? []).filter((h) => !attached.has(h.id))
   if (!host) return null
   if (others.length === 0) return null
+  const onKill = async (sid: string) => {
+    setKilling(sid)
+    try {
+      await killHostTerm(sid)
+      await load()
+    } finally {
+      setKilling((cur) => (cur === sid ? null : cur))
+    }
+  }
   return (
     <div className="host-terms" aria-label="Other terminals on this host">
       <div className="host-terms-head">
@@ -631,20 +476,88 @@ function HostTermsMenu({
   sessions,
   splits,
   onAttach,
-  refreshKey,
 }: {
   sessions: TermSession[]
   splits: Record<string, TermSession>
   onAttach: (sid: string) => void
-  refreshKey: number
 }) {
-  const { host, killing, load, onKill } = useHostList(refreshKey)
+  const [host, setHost] = useState<HostTerm[] | null>(null)
+  const [killing, setKilling] = useState<string | null>(null)
   const [open, setOpen] = useState(false)
   const [anchor, setAnchor] = useState<{
     top: number | null
     bottom: number | null
     right: number
   } | null>(null)
+
+  const load = useCallback(async () => {
+    try {
+      const res = await fetch('/api/terms', {
+        cache: 'no-store',
+        credentials: 'same-origin',
+      })
+      if (!res.ok) {
+        setHost((prev) => prev ?? null)
+        return null
+      }
+      const data = (await res.json()) as {
+        sessions?: Partial<HostTerm>[]
+      }
+      const list = Array.isArray(data.sessions)
+        ? data.sessions.filter(
+            (s): s is HostTerm =>
+              !!s &&
+              typeof s.id === 'string' &&
+              typeof s.alive === 'boolean',
+          )
+        : []
+      setHost(list)
+      return list
+    } catch {
+      setHost((prev) => prev ?? null)
+      return null
+    }
+  }, [])
+
+  useEffect(() => {
+    let alive = true
+    let first = true
+    const tick = async () => {
+      try {
+        const res = await fetch('/api/terms', {
+          cache: 'no-store',
+          credentials: 'same-origin',
+        })
+        if (!res.ok) {
+          if (first && alive) setHost(null)
+          return
+        }
+        const data = (await res.json()) as {
+          sessions?: Partial<HostTerm>[]
+        }
+        const list = Array.isArray(data.sessions)
+          ? data.sessions.filter(
+              (s): s is HostTerm =>
+                !!s &&
+                typeof s.id === 'string' &&
+                typeof s.alive === 'boolean',
+            )
+          : []
+        if (alive) {
+          first = false
+          setHost(list)
+        }
+      } catch {
+        if (first && alive) setHost(null)
+      }
+    }
+    void tick()
+    const id = window.setInterval(tick, 15000)
+    return () => {
+      alive = false
+      window.clearInterval(id)
+    }
+  }, [])
 
   // Escape closes the dropdown.
   useEffect(() => {
@@ -659,34 +572,27 @@ function HostTermsMenu({
     return () => window.removeEventListener('keydown', onKey)
   }, [open])
 
-  // Navigation (e.g. Replay → #/recordings) must not leave a ghost dropdown
-  // + overlay floating over the new page.
-  useEffect(() => {
-    if (!open) return
-    const onHash = () => {
-      setOpen(false)
-      setAnchor(null)
-    }
-    window.addEventListener('hashchange', onHash)
-    return () => window.removeEventListener('hashchange', onHash)
-  }, [open])
-
   const attached = new Set(
     [
       ...sessions.map((t) => t.sid),
       ...Object.values(splits).map((t) => t.sid),
     ].filter((s): s is string => !!s),
   )
-  // Same own-tab hiding as `HostTerms`, extended to tabs owned by other
-  // live windows of this browser (see `useForeignSids`).
-  const foreign = useForeignSids([...attached].sort().join('\n'))
-  const others = (host ?? []).filter(
-    (h) => !attached.has(h.id) && !foreign.has(h.id),
-  )
+  const others = (host ?? []).filter((h) => !attached.has(h.id))
   // Hide only when the backend has no list endpoint (relay view, old
   // backend). When the endpoint exists but there is nothing else, keep the
   // header button with a 0 badge so the header layout stays stable.
   if (!host) return null
+
+  const onKill = async (sid: string) => {
+    setKilling(sid)
+    try {
+      await killHostTerm(sid)
+      await load()
+    } finally {
+      setKilling((cur) => (cur === sid ? null : cur))
+    }
+  }
 
   const close = () => {
     setOpen(false)
@@ -796,10 +702,7 @@ function HostTermsMenu({
                       <button
                         type="button"
                         className="btn btn-sm"
-                        onClick={() => {
-                          close()
-                          requestReplay(h.id)
-                        }}
+                        onClick={() => requestReplay(h.id)}
                         title="Read-only replay of this session's recording"
                       >
                         Replay
@@ -2039,7 +1942,7 @@ export default function TerminalPage({
   const [menuAnchor, setMenuAnchor] = useState<{
     top: number | null
     bottom: number | null
-    left: number
+    right: number
   } | null>(null)
   // Live session actions per tab, registered by each ShellSession.
   const handlesRef = useRef(new Map<string, TermHandle>())
@@ -2062,11 +1965,6 @@ export default function TerminalPage({
   // never persisted — a refresh drops them, the main tabs reattach.
   const [splits, setSplits] = useState<Record<string, TermSession>>({})
   const splitCounter = useRef(0)
-  // Bumped after local mutations (tab close, attach, split toggle) so the
-  // Other-sessions list re-lists immediately instead of showing stale rows
-  // until the next 15s poll.
-  const [hostRefresh, setHostRefresh] = useState(0)
-  const pokeHost = useCallback(() => setHostRefresh((n) => n + 1), [])
 
   // Persist the font + prediction preferences.
   useEffect(() => {
@@ -2120,7 +2018,6 @@ export default function TerminalPage({
     setSessions((prev) => [...prev, t])
     setStatuses((prev) => ({ ...prev, [t.id]: 'connecting' }))
     setActiveId(t.id)
-    pokeHost()
   }
 
   // Vertical split: a second live shell beside this tab's own (own backend
@@ -2146,7 +2043,6 @@ export default function TerminalPage({
       }
       return { ...prev, [tabId]: pane }
     })
-    pokeHost()
   }
 
   const closeTerminal = (id: string) => {
@@ -2199,8 +2095,6 @@ export default function TerminalPage({
       delete next[id]
       return next
     })
-    // The killed backend session must drop out of Other-sessions at once.
-    pokeHost()
   }
 
   const requestClose = (id: string) => {
@@ -2357,7 +2251,7 @@ export default function TerminalPage({
           </svg>
           Terminal
         </button>
-        <HostTerms sessions={sessions} splits={splits} onAttach={attachHost} refreshKey={hostRefresh} />
+        <HostTerms sessions={sessions} splits={splits} onAttach={attachHost} />
       </section>
     )
   }
@@ -2379,27 +2273,18 @@ export default function TerminalPage({
       return
     }
     const r = anchor.getBoundingClientRect()
-    // Left-align the menu card with the tab's left edge: measure the owning
-    // `.term-tab` (the button sits at its right end) and anchor `left` to it.
-    // Clamped so the card never runs off the viewport's right edge.
-    const tabRect =
-      anchor.closest?.('.term-tab')?.getBoundingClientRect() ?? r
     // Drop down by default; drop upward when there is not enough room
     // below but more room above (short landscape phones, zoomed pages).
     // The menu itself also caps at viewport height and scrolls inside.
     const MENU_EST = 280
-    const MENU_WIDTH = 260
     const spaceBelow = window.innerHeight - r.bottom
-    const left = Math.max(
-      8,
-      Math.min(tabRect.left, window.innerWidth - MENU_WIDTH - 8),
-    )
+    const right = Math.max(8, window.innerWidth - r.right)
     setMenuId(t.id)
     if (spaceBelow >= MENU_EST || r.top <= spaceBelow) {
       setMenuAnchor({
         top: Math.max(8, Math.min(r.bottom + 6, window.innerHeight - MENU_EST)),
         bottom: null,
-        left,
+        right,
       })
     } else {
       setMenuAnchor({
@@ -2408,7 +2293,7 @@ export default function TerminalPage({
           8,
           Math.min(window.innerHeight - r.top + 6, window.innerHeight - MENU_EST),
         ),
-        left,
+        right,
       })
     }
   }
@@ -2565,7 +2450,7 @@ export default function TerminalPage({
           +
         </button>
         </div>
-        <HostTermsMenu sessions={sessions} splits={splits} onAttach={attachHost} refreshKey={hostRefresh} />
+        <HostTermsMenu sessions={sessions} splits={splits} onAttach={attachHost} />
       </div>
       <div className="term-opened">
         {sessions.map((t) => {
@@ -2598,8 +2483,8 @@ export default function TerminalPage({
                 aria-label={`Actions for ${menuTerm.name}`}
                 style={
                   menuAnchor.top != null
-                    ? { top: menuAnchor.top, left: menuAnchor.left }
-                    : { bottom: menuAnchor.bottom ?? 8, left: menuAnchor.left }
+                    ? { top: menuAnchor.top, right: menuAnchor.right }
+                    : { bottom: menuAnchor.bottom ?? 8, right: menuAnchor.right }
                 }
                 onClick={(e) => e.stopPropagation()}
               >
