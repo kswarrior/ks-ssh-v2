@@ -1522,6 +1522,46 @@ mod tests {
     }
 
     #[test]
+    fn loopback_shell_request_carries_full_handshake() {
+        // Regression: tungstenite 0.30 rejects hand-built dial requests
+        // missing any of Host/Connection/Upgrade/Sec-WebSocket-Version/
+        // Sec-WebSocket-Key (`sec-websocket-key`), which broke EVERY relay
+        // terminal (shell-closed 1011 "loopback unreachable" -> the client's
+        // "connection lost — retrying…" loop) while rpc kept working.
+        for cookie in [None, Some("ks_ssh_auth=abc123")] {
+            let req = loopback_shell_request("ws://127.0.0.1:8080/v1/shell?v=2&from=0", cookie)
+                .expect("dial request builds");
+            let h = req.headers();
+            assert!(h.contains_key("host"), "Host header present");
+            assert!(h.contains_key("connection"), "Connection header present");
+            assert!(h.contains_key("upgrade"), "Upgrade header present");
+            assert!(
+                h.contains_key("sec-websocket-version"),
+                "Sec-WebSocket-Version present"
+            );
+            let key = h
+                .get("sec-websocket-key")
+                .expect("Sec-WebSocket-Key present");
+            // 16 random bytes as base64 (24 chars) — accept validation key.
+            assert_eq!(key.len(), 24, "fresh WS key per dial");
+            match cookie {
+                Some(c) => assert_eq!(
+                    h.get("cookie").expect("cookie forwarded").to_str().unwrap(),
+                    c
+                ),
+                None => assert!(!h.contains_key("cookie"), "no cookie when absent"),
+            }
+        }
+        // Two dials mint different keys (no accept mismatch across bridges).
+        let a = loopback_shell_request("ws://127.0.0.1:8080/v1/shell?v=2&from=0", None).unwrap();
+        let b = loopback_shell_request("ws://127.0.0.1:8080/v1/shell?v=2&from=0", None).unwrap();
+        assert_ne!(
+            a.headers()["sec-websocket-key"],
+            b.headers()["sec-websocket-key"]
+        );
+    }
+
+    #[test]
     fn ui_bundle_carries_zero_secrets() {
         // The pushed bundle is public build output served with `no-store`.
         // Prove it embeds no E2E secret / PIN material: no `#k=<43-char key>`
