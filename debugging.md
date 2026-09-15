@@ -201,7 +201,7 @@ Debug: open empty terminal → wait 15s → reload → Network `v1/shell?v=2&fro
 
 ---
 
-## 6. Debugging Playbook (Main Agent Only) — Strict Order: Read → Understand → Fix → Build
+## 6. Debugging Playbook (Main Agent Only) — Strict Order: Read → Understand → Find Problem → Fix → Build
 
 **Template to copy-paste**
 
@@ -209,10 +209,11 @@ Debug: open empty terminal → wait 15s → reload → Network `v1/shell?v=2&fro
 Task: Debug <symptom>
 Steps in main agent (MUST be in this order):
 1. READ ALL — Read all files fully: cf/src/App.tsx, cf/worker/room.ts, cf/worker/index.ts, cli/frontend/src/App.tsx, cli/frontend/src/relay-shim.ts, cli/frontend/src/relay-e2e.ts, cli/frontend/src/pages/Terminal.tsx, cli/backend/src/relay.rs, cli/backend/src/e2e.rs, cli/backend/src/shell.rs, cli/backend/src/ui.rs + §3/§8 files:lines
-2. UNDERSTAND — Trace flows end-to-end (Visit/Add/Edit/Online/WSS/E2E/shell replay), note file:line for every finding, explain root cause before editing
-3. FIX — Only after 1+2, edit directly in main
-4. BUILD & VERIFY — Then go to build: `tsc -b && vite build` + `bash rebuild.sh` + `wrangler dev` / `RUST_LOG=debug` + §7 smoke
-Do NOT fix or build before completing 1+2.
+2. UNDERSTAND — Trace flows end-to-end (Visit/Add/Edit/Online/WSS/E2E/shell replay), note file:line for every finding, explain flow before finding problem
+3. FIND PROBLEM — Pinpoint root cause with evidence file:line + log/repro (no edit yet)
+4. FIX — Only after 1+2+3, edit directly in main (fix the found problem)
+5. BUILD & VERIFY — Only after fixed (4), then go to build: `tsc -b && vite build` + `bash rebuild.sh` + `wrangler dev` / `RUST_LOG=debug` + §7 smoke
+Do NOT find/fix or build before completing 1+2. Do NOT build before completing 3+4 (after fixed, then build).
 ```
 
 **Current fixes as examples**
@@ -224,26 +225,32 @@ Do NOT fix or build before completing 1+2.
 | `2nd open 4-5s` | `cli/backend/src/e2e.rs` `cli/backend/src/relay.rs` `cli/frontend/src/relay-e2e.ts` | `reset_seq` missing |
 | `terminal 60s` | `cli/frontend/src/pages/Terminal.tsx:40,1528` | `STALE 12s + backoff 36.5s` |
 
-**How to debug next bug (main only) — Read → Understand → Fix → Build**
+**How to debug next bug (main only) — Read → Understand → Find Problem → Fix → Build**
 
 ```bash
-# Phase 1 — READ ALL & UNDERSTAND (no edits/builds yet):
+# Phase 1 — READ ALL (no edits/builds yet):
 grep -rn "pattern" cf/src/App.tsx cf/worker/room.ts cli/frontend/src/App.tsx cli/frontend/src/relay-shim.ts cli/backend/src/relay.rs
-# Read every file in §8 fully, trace CF+CLI flows end-to-end
+# Read every file in §8 fully
 
-# Phase 2 — FIX (only after Phase 1):
+# Phase 2 — UNDERSTAND (only after Phase 1):
+# trace CF+CLI flows end-to-end
+
+# Phase 3 — FIND PROBLEM (only after Phase 2):
+# pinpoint file:line + repro, e.g. STALE_MS 12s kill -> backoff 36.5s
+
+# Phase 4 — FIX (only after problem found):
 # edit cf/src/App.tsx, cli/frontend/src/pages/Terminal.tsx ...
 
-# Phase 3 — BUILD & VERIFY (only after Phase 2):
+# Phase 5 — BUILD & VERIFY (only after fixed):
 cd cf && npm run build
 cd cli && bash rebuild.sh
 ```
 
 ---
 
-## 7. Verify (only after Read → Understand → Fix)
+## 7. Verify (only after Read → Understand → Find Problem → Fix — after fixed, then build)
 
-> Do NOT run builds until you have completed Phase 1 (Read all) + Phase 2 (Fix). Verify is Phase 3.
+> Do NOT run builds until you have completed Phase 1 (Read all) + Phase 2 (Understand) + Phase 3 (Find problem) + Phase 4 (Fix). Verify is Phase 5 — after fixed, then build.
 
 ```bash
 # CF
