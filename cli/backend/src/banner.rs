@@ -191,7 +191,7 @@ pub fn render(b: &StartupBanner, color: bool) -> String {
     let mut inner = visible_len(title);
     for r in &rows {
         let content_len = match r.label {
-            Some(l) => LABEL_W + 1 + visible_len(&r.value),
+            Some(_) => LABEL_W + 1 + visible_len(&r.value),
             None => visible_len(&r.value),
         };
         inner = inner.max(content_len);
@@ -222,7 +222,7 @@ pub fn render(b: &StartupBanner, color: bool) -> String {
 
     let mut line = |label: Option<&str>, value: &str, style: &str| {
         let content_pad = match label {
-            Some(l) => inner - (LABEL_W + 1 + visible_len(value)),
+            Some(_) => inner - (LABEL_W + 1 + visible_len(value)),
             None => inner - visible_len(value),
         };
         if color {
