@@ -225,6 +225,8 @@ function timeAgo(idle: number): string {
  */
 function RecordBanner() {
   const [on, setOn] = useState<boolean | null>(null)
+  // Dismiss hides the notice only — recording keeps running on the backend.
+  const [dismissed, setDismissed] = useState(false)
 
   useEffect(() => {
     let alive = true
@@ -242,8 +244,18 @@ function RecordBanner() {
   }, [])
 
   if (on !== true) return null
+  if (dismissed) return null
   return (
     <div className="rec-banner" role="status">
+      <button
+        type="button"
+        className="rec-banner-dismiss"
+        aria-label="Dismiss recording notice (recording stays on)"
+        title="Dismiss notice — recording stays on"
+        onClick={() => setDismissed(true)}
+      >
+        ✕
+      </button>
       <span>● Session recording is ON — input + output are stored for replay.</span>
       <a className="btn btn-sm" href="#/recordings">
         View recordings
@@ -447,6 +459,254 @@ function HostTerms({
           </li>
         ))}
       </ul>
+    </div>
+  )
+}
+
+/**
+ * Other host sessions as a header ⋯ dropdown (terminal tab bar).
+ *
+ * Same data as `HostTerms` (other sessions on this host, own open tabs
+ * hidden) but collapsed behind a 3-dot button in the terminal header so a
+ * long host list never pushes the terminal down. The dropdown panel has a
+ * fixed max-height and scrolls vertically (`host-menu-list`) when there
+ * are many rows.
+ */
+function HostTermsMenu({
+  sessions,
+  splits,
+  onAttach,
+}: {
+  sessions: TermSession[]
+  splits: Record<string, TermSession>
+  onAttach: (sid: string) => void
+}) {
+  const [host, setHost] = useState<HostTerm[] | null>(null)
+  const [killing, setKilling] = useState<string | null>(null)
+  const [open, setOpen] = useState(false)
+  const [anchor, setAnchor] = useState<{ top: number; right: number } | null>(null)
+
+  const load = useCallback(async () => {
+    try {
+      const res = await fetch('/api/terms', {
+        cache: 'no-store',
+        credentials: 'same-origin',
+      })
+      if (!res.ok) {
+        setHost((prev) => prev ?? null)
+        return null
+      }
+      const data = (await res.json()) as {
+        sessions?: Partial<HostTerm>[]
+      }
+      const list = Array.isArray(data.sessions)
+        ? data.sessions.filter(
+            (s): s is HostTerm =>
+              !!s &&
+              typeof s.id === 'string' &&
+              typeof s.alive === 'boolean',
+          )
+        : []
+      setHost(list)
+      return list
+    } catch {
+      setHost((prev) => prev ?? null)
+      return null
+    }
+  }, [])
+
+  useEffect(() => {
+    let alive = true
+    let first = true
+    const tick = async () => {
+      try {
+        const res = await fetch('/api/terms', {
+          cache: 'no-store',
+          credentials: 'same-origin',
+        })
+        if (!res.ok) {
+          if (first && alive) setHost(null)
+          return
+        }
+        const data = (await res.json()) as {
+          sessions?: Partial<HostTerm>[]
+        }
+        const list = Array.isArray(data.sessions)
+          ? data.sessions.filter(
+              (s): s is HostTerm =>
+                !!s &&
+                typeof s.id === 'string' &&
+                typeof s.alive === 'boolean',
+            )
+          : []
+        if (alive) {
+          first = false
+          setHost(list)
+        }
+      } catch {
+        if (first && alive) setHost(null)
+      }
+    }
+    void tick()
+    const id = window.setInterval(tick, 15000)
+    return () => {
+      alive = false
+      window.clearInterval(id)
+    }
+  }, [])
+
+  // Escape closes the dropdown.
+  useEffect(() => {
+    if (!open) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setOpen(false)
+        setAnchor(null)
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [open ])
+
+  const attached = new Set(
+    [
+      ...sessions.map((t) => t.sid),
+      ...Object.values(splits).map((t) => t.sid),
+    ].filter((s): s is string => !!s),
+  )
+  const others = (host ?? []).filter((h) => !attached.has(h.id))
+  if (!host) return null
+  if (others.length === 0) return null
+
+  const onKill = async (sid: string) => {
+    setKilling(sid)
+    try {
+      await killHostTerm(sid)
+      await load()
+    } finally {
+      setKilling((cur) => (cur === sid ? null : cur))
+    }
+  }
+
+  const close = () => {
+    setOpen(false)
+    setAnchor(null)
+  }
+
+  const toggle = (btn: HTMLElement) => {
+    if (open) {
+      close()
+      return
+    }
+    const r = btn.getBoundingClientRect()
+    setAnchor({
+      top: Math.min(r.bottom + 6, Math.max(8, window.innerHeight - 80)),
+      right: Math.max(8, window.innerWidth - r.right),
+    })
+    setOpen(true)
+  }
+
+  return (
+    <div className="host-menu-wrap">
+      <button
+        type="button"
+        className="term-tab-add host-menu-btn"
+        aria-label={`Other sessions on this host (${others.length})`}
+        title={`Other sessions on this host (${others.length}) — shared, anyone can attach`}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        onClick={(e) => toggle(e.currentTarget)}
+      >
+        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+          <circle cx="12" cy="5" r="1.8" />
+          <circle cx="12" cy="12" r="1.8" />
+          <circle cx="12" cy="19" r="1.8" />
+        </svg>
+        <span className="host-menu-count" aria-hidden="true">
+          {others.length}
+        </span>
+      </button>
+      {open && anchor
+        ? createPortal(
+            <>
+              <div
+                className="term-menu-overlay"
+                onClick={close}
+                aria-hidden="true"
+              />
+              <div
+                className="host-menu-dropdown"
+                role="menu"
+                aria-label="Other sessions on this host"
+                style={{ top: anchor.top, right: anchor.right }}
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="host-menu-head">
+                  <span>Other sessions ({others.length})</span>
+                  <span className="host-terms-sub">shared — anyone can attach</span>
+                  <button
+                    type="button"
+                    className="btn btn-sm"
+                    onClick={() => void load()}
+                    title="Refresh the host session list"
+                  >
+                    Refresh
+                  </button>
+                </div>
+                <ul className="host-menu-list">
+                  {others.map((h) => (
+                    <li key={h.id} className="host-term">
+                      <span
+                        className={`term-tab-dot${h.alive ? ' on' : ''}`}
+                        title={h.alive ? 'live' : 'ended'}
+                        aria-hidden="true"
+                      />
+                      <code className="host-term-id" title={h.id}>
+                        {h.id.slice(0, 8)}
+                      </code>
+                      <span className="host-term-meta">
+                        {h.alive ? 'live' : 'ended'} · {timeAgo(h.idle_secs)}
+                      </span>
+                      <button
+                        type="button"
+                        className="btn btn-sm"
+                        onClick={() => requestReplay(h.id)}
+                        title="Read-only replay of this session's recording"
+                      >
+                        Replay
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-sm"
+                        onClick={() => {
+                          close()
+                          onAttach(h.id)
+                        }}
+                        title={
+                          h.alive
+                            ? 'Take over this live shell (the other view is detached)'
+                            : 'Open this ended session’s saved output'
+                        }
+                      >
+                        Attach
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-sm btn-danger"
+                        disabled={killing === h.id}
+                        onClick={() => void onKill(h.id)}
+                        title="Kill this host shell and delete its history"
+                      >
+                        {killing === h.id ? '…' : 'Kill'}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </>,
+            document.body,
+          )
+        : null}
     </div>
   )
 }
@@ -2048,8 +2308,8 @@ export default function TerminalPage({
         Terminal
       </h1>
       <RecordBanner />
-      <HostTerms sessions={sessions} splits={splits} onAttach={attachHost} />
-      <div className="term-bar" role="tablist" aria-label="Terminals">
+      <div className="term-header">
+        <div className="term-bar" role="tablist" aria-label="Terminals">
         {sessions.map((t, i) => {
           const isActive = t.id === active.id
           const st = statuses[t.id] ?? 'connecting'
@@ -2156,6 +2416,8 @@ export default function TerminalPage({
         >
           +
         </button>
+        </div>
+        <HostTermsMenu sessions={sessions} splits={splits} onAttach={attachHost} />
       </div>
       <div className="term-opened">
         {sessions.map((t) => {
