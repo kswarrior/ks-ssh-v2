@@ -446,7 +446,6 @@ function SSHPage({
 }) {
   const relayBase = relayHttpBase(settings)
   const wsHost = relayWsHost(settings)
-  const hasFragKey = parseFragmentKey() !== null
   const [formOpen, setFormOpen] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [name, setName] = useState('')
@@ -647,27 +646,6 @@ function SSHPage({
     onChange((prev) => prev.filter((x) => x.id !== id))
   }
 
-  const [refreshing, setRefreshing] = useState(false)
-  const refreshAll = async () => {
-    if (refreshing || entries.length === 0) return
-    setRefreshing(true)
-    setBanner(null)
-    try {
-      const results = await Promise.all(
-        entries.map(async (e) => {
-          const tok = e.token.trim().toUpperCase()
-          if (!TOKEN_EXACT_RE.test(tok)) return { id: e.id, online: false }
-          const st = await fetchRelayStatus(relayBase, tok)
-          return { id: e.id, online: st?.agentOnline === true }
-        }),
-      )
-      const map = new Map(results.map((r) => [r.id, r.online]))
-      onChange((prev) => prev.map((x) => (map.has(x.id) ? { ...x, online: map.get(x.id) === true } : x)))
-    } finally {
-      setRefreshing(false)
-    }
-  }
-
   const total = entries.length
   const online = entries.filter((x) => x.online).length
 
@@ -708,31 +686,6 @@ function SSHPage({
           <span>Offline</span>
         </div>
       </div>
-
-      <div className="row-actions">
-        <button
-          type="button"
-          className="btn btn-sm"
-          disabled={refreshing || entries.length === 0}
-          onClick={() => void refreshAll()}
-        >
-          {refreshing ? 'Checking…' : 'Refresh live status'}
-        </button>
-        <span className="session-status session-hint">
-          Live via <code>/api/ssh/status</code> on {wsHost} · timeout {Math.round(settings.connectTimeoutMs / 1000)}s
-        </span>
-      </div>
-
-      {settings.requireE2E && !hasFragKey && (
-        <div className="card" role="note" aria-label="E2E key hint">
-          <h2>End-to-end encryption is required</h2>
-          <p>
-            Open this app from a full share link with <code>#k=…</code> (printed by{' '}
-            <code>ks-ssh --token=</code>). Presence checks work without it, but live
-            terminal and files stay sealed until the key is in the fragment.
-          </p>
-        </div>
-      )}
 
       {banner && (
         <div className="banner-error" role="alert">
