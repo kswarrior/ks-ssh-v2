@@ -174,7 +174,7 @@ export default function App() {
       setBootPhase(phase)
     }
     const load = async () => {
-      const FAST_TIMEOUT = 3800
+      setBootError(null)
       const isRelay = (() => {
         try {
           return /^\/v\/[A-Za-z0-9]{5,9}(?:\/|$)/.test(window.location.pathname)
@@ -182,10 +182,13 @@ export default function App() {
           return false
         }
       })()
+      // Relay needs longer warmth than direct port (port 2-4s, relay WSS handshake + RPC)
+      const AUTH_TIMEOUT = isRelay ? 8500 : 3800
+      const HELLO_TIMEOUT = isRelay ? 7500 : 3200
       bump(12, 'Checking login…')
       if (isRelay) bump(16, 'Warming relay…')
 
-      // Fast parallel: auth + hello with hard timeout race so relay RPC 120s never blocks boot (port is 2-4s, relay must match).
+      // Fast parallel: auth + hello with hard timeout race so relay RPC 120s never blocks boot 1-3 min
       const authFetch = fetch('/api/auth/status', { cache: 'no-store', credentials: 'same-origin' })
         .then(async (r) => {
           if (!r.ok) return { ok: false as const, data: null as Partial<AuthStatus> | null }
@@ -200,12 +203,12 @@ export default function App() {
         })
         .catch(() => ({ ok: false }))
 
-      // Race each against FAST_TIMEOUT so a hung relay RPC (120s) can't stall boot 1-3 min
+      // Race each against timeout so a hung relay RPC (120s) can't stall boot 1-3 min
       const timeoutAuth = new Promise<{ ok: false; data: null; timedOut: true }>((res) =>
-        setTimeout(() => res({ ok: false, data: null, timedOut: true }), FAST_TIMEOUT),
+        setTimeout(() => res({ ok: false, data: null, timedOut: true }), AUTH_TIMEOUT),
       )
       const timeoutHello = new Promise<{ ok: false; timedOut: true }>((res) =>
-        setTimeout(() => res({ ok: false, timedOut: true }), 3400),
+        setTimeout(() => res({ ok: false, timedOut: true }), HELLO_TIMEOUT),
       )
 
       bump(22, 'Auth…')
@@ -214,7 +217,12 @@ export default function App() {
         | { ok: false; data: null; timedOut: true }
       if (!alive) return
       if ('timedOut' in authRes && authRes.timedOut) {
-        // Fast fallback: don't wait 120s — assume open and continue, background will revalidate
+        if (isRelay) {
+          // Don't fake open — relay timed out means agent/room unreachable; show retry instead of broken pages
+          setBootError('Relay auth timed out — is the CLI running with --token=...? Check token and retry.')
+          bump(30, 'Relay timeout')
+          return
+        }
         setAuth({ protected: false, authenticated: true })
         bump(34, 'Auth open (fast)')
       } else if (!authRes.ok || !authRes.data) {
@@ -235,14 +243,21 @@ export default function App() {
       const helloRes = (await Promise.race([helloFetch, timeoutHello])) as { ok: boolean; timedOut?: boolean }
       if (!alive) return
       if (helloRes.ok) bump(68, 'Server reachable')
-      else if ('timedOut' in helloRes && helloRes.timedOut) bump(60, 'Server check fast-fallback…')
-      else bump(60, 'Server unreachable — continuing…')
+      else if ('timedOut' in helloRes && helloRes.timedOut) {
+        if (isRelay) {
+          setBootError('Server not reachable over relay — WSS handshake timed out. Retry or check Worker/Room.')
+          bump(60, 'Relay timeout')
+          return
+        }
+        bump(60, 'Server check fast-fallback…')
+      } else bump(60, 'Server unreachable — continuing…')
 
       if (isRelay) {
         bump(76, 'Syncing tunnel…')
-        // Don't block on WSS handshake — shim already warming in main.tsx; short settle only
+        // Short settle — shim conn.ensure() already warming since main.tsx; don't block 1-3 min
         await new Promise((res) => setTimeout(res, 180))
         if (!alive) return
+        // Verify WSS is still not error-gated; if hello already failed we would have returned
         bump(86, 'Tunnel ready')
       } else {
         bump(78, 'Local ready')
@@ -466,6 +481,35 @@ export default function App() {
               <span className="app-boot-phase">{bootPhase}</span>
               <span className="app-boot-pct">{pct}%</span>
             </div>
+            {bootError && (
+              <div className="banner-error" role="alert" style={{ width: '100%', marginTop: '4px' }}>
+                <p>{bootError}</p>
+                <div className="row-actions" style={{ justifyContent: 'center' }}>
+                  <button type="button" className="btn btn-sm btn-primary" onClick={() => window.location.reload()}>
+                    Retry
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-sm"
+                    onClick={() => {
+                      setBootError(null)
+                      setBootProgress(6)
+                      setBootPhase('Retrying…')
+                      // Re-trigger boot by resetting auth to null so effect re-runs via reload would also work;
+                      // simplest: reload page to restart WSS handshake cleanly.
+                      window.location.reload()
+                    }}
+                  >
+                    Reload
+                  </button>
+                </div>
+              </div>
+            )}
+            {!bootError && pct < 100 && (
+              <p className="app-boot-hint" style={{ fontSize: '12px', color: 'var(--text)', margin: '4px 0 0' }}>
+                WSS + HTTP in parallel — relay shows same 2-4s as local --port when token is live.
+              </p>
+            )}
           </div>
         </main>
       </div>
