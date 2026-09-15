@@ -17,7 +17,7 @@
 //!   loopback-only server in this process (same router, auth, DB, shells).
 //! * `shell-open` / `shell-send` / `shell-close` — `/v1/shell` PTY proxied
 //!   transparently (text + binary) to the same loopback server.
-//! The Worker relays these opaquely by room; `k`/PINs are never logged.
+//!   The Worker relays these opaquely by room; `k`/PINs are never logged.
 //!
 //! E2E (sshx-style), strict-by-default: `token` routes, `k` (256-bit,
 //! fragment-only) seals. When E2E is on (default) both sides advertise
@@ -25,12 +25,12 @@
 //! `fp` = fingerprint of `k`). Sensitive payloads travel ONLY as
 //! `{"type":"enc",...}` (AES-256-GCM, AAD=`TOKEN|sess|dir|epoch`, strict
 //! seq, random `_pad`). A peer without E2E is hard-failed with `E2E error`
-//! + audit deny — no plaintext is sent. `--no-e2e` is the only escape hatch
-//! (explicit, loud warning + audit row). The relay sees only sizes/timing.
-//! UI bundle + `paired`/`agent` presence + `ping`/`pong` + `ui-*` control
-//! stay plaintext by design (public build output / no secrets); the viewer
-//! PIN travels ONLY inside `enc` (`{"type":"auth","pin":"..."}`) when both
-//! sides do E2E.
+//!   + audit deny — no plaintext is sent. `--no-e2e` is the only escape hatch
+//!   (explicit, loud warning + audit row). The relay sees only sizes/timing.
+//!   UI bundle + `paired`/`agent` presence + `ping`/`pong` + `ui-*` control
+//!   stay plaintext by design (public build output / no secrets); the viewer
+//!   PIN travels ONLY inside `enc` (`{"type":"auth","pin":"..."}`) when both
+//!   sides do E2E.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -262,6 +262,7 @@ enum ShellLocalIn {
     Close,
 }
 
+#[allow(clippy::too_many_arguments)] // relay session wiring: explicit params avoid mega-struct churn
 async fn agent_session(
     url: &str,
     token: &str,

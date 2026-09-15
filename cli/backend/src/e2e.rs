@@ -373,6 +373,7 @@ pub fn encrypt_with_seq(
 }
 
 /// Session-bound one-shot encrypt (explicit `seq`, `sess`, `dir`, `epoch`).
+#[allow(clippy::too_many_arguments)] // crypto API: explicit params keep vectors byte-identical
 pub fn encrypt_bound(
     key: &E2eKey,
     token: &str,

@@ -2,9 +2,9 @@
 //!
 //! - `GET /api/chat?since=<id>&limit=<n>` — oldest-first messages.
 //! - `POST /api/chat {"message":"..."}` — append one message.
-//! Username comes from the session (`AuthContext`) when the login gate is
-//! on, else `"guest"`. Works with or without `--user/--pass` (same
-//! `Option<Extension<AuthContext>>` pattern as `files.rs`).
+//!   Username comes from the session (`AuthContext`) when the login gate is
+//!   on, else `"guest"`. Works with or without `--user/--pass` (same
+//!   `Option<Extension<AuthContext>>` pattern as `files.rs`).
 
 use axum::{
     Extension, Json,
