@@ -1,4 +1,5 @@
 mod auth;
+mod banner;
 mod chat;
 mod db;
 mod e2e;
@@ -271,13 +272,26 @@ async fn serve(
     auth: Option<Arc<AuthState>>,
     oidc: Option<Arc<auth::OidcState>>,
     relay_pin: Option<Arc<auth::RelayPinState>>,
+    viewer_pin: Option<String>,
 ) {
-    let app = build_router(auth, oidc, relay_pin);
+    let app = build_router(auth.clone(), oidc, relay_pin);
     let addr = format!("{host}:{port}");
     let listener = tokio::net::TcpListener::bind(&addr)
         .await
         .expect("bind port");
-    println!("KS SSH serving at http://{addr}");
+    banner::print(&banner::StartupBanner {
+        local_url: Some(format!("http://{addr}")),
+        loopback: None,
+        relay_http: None,
+        token: None,
+        e2e_on: false,
+        e2e_key: None,
+        e2e_fp: None,
+        viewer_pin,
+        auth_on: auth.is_some(),
+        relay_auth_on: false,
+        push_ui: true,
+    });
     shell::spawn_reaper();
     shell::spawn_persister();
     axum::serve(listener, app.into_make_service())
@@ -311,7 +325,6 @@ async fn serve_loopback(
             eprintln!("loopback relay server error: {e:#}");
         }
     });
-    println!("Relay loopback: {base} (local only, proxied over WSS)");
     base
 }
 
@@ -419,15 +432,15 @@ async fn main() {
         };
 
     // Relay viewer PIN (`--relay-auth` closes the bearer-open bypass honestly).
-    let relay_pin: Option<Arc<auth::RelayPinState>> = if cli.relay_auth {
-        let st = Arc::new(auth::RelayPinState::new());
-        let pin = st.mint();
-        println!("Relay auth: ON — viewer PIN required for relay data bridge.");
-        println!("Viewer PIN (one-time — share out-of-band, never in query/logs): {pin}");
-        Some(st)
-    } else {
-        None
-    };
+    // Minted here, displayed once in the startup panel (never in query/logs).
+    let (relay_pin, viewer_pin_str): (Option<Arc<auth::RelayPinState>>, Option<String>) =
+        if cli.relay_auth {
+            let st = Arc::new(auth::RelayPinState::new());
+            let pin = st.mint();
+            (Some(st), Some(pin))
+        } else {
+            (None, None)
+        };
 
     let token: Option<String> = cli.token.map(|t| {
         if t.is_empty() {
@@ -509,7 +522,7 @@ async fn main() {
         // CF Visit gets the exact same UI + functionality as `--port`
         // with nothing exposed.
         (true, Some(t)) => {
-            let loopback = serve_loopback(auth, oidc, relay_pin).await;
+            let loopback = serve_loopback(auth.clone(), oidc, relay_pin).await;
             relay::run_agent(
                 &relay_ws_base(&cli.relay),
                 &t,
@@ -517,6 +530,9 @@ async fn main() {
                 e2e_key,
                 relay_pin_for_agent,
                 loopback,
+                viewer_pin_str,
+                None,
+                auth.is_some(),
             )
             .await
         }
