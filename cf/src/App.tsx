@@ -7,6 +7,7 @@ import {
   parseFragmentKey,
   type E2eStatus,
 } from './e2e'
+import docsVsMdRaw from '../../docs/vs.md?raw'
 
 /**
  * Inject relay globals into a WSS-fetched UI bundle before rendering it as
@@ -300,6 +301,76 @@ type SshEntry = {
   online: boolean
 }
 
+const FEATURE_ICONS: Record<string, ReactNode> = {
+  'Token auth': (
+    <>
+      <rect x="3" y="11" width="18" height="11" rx="2" />
+      <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+    </>
+  ),
+  'Live status': <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />,
+  'Local-first': (
+    <>
+      <path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z" />
+      <path d="M6 16h.01M10 16h.01" />
+    </>
+  ),
+  'One-tap reconnect': (
+    <>
+      <polyline points="23 4 23 10 17 10" />
+      <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
+    </>
+  ),
+}
+
+function parseFeaturesMd(md: string): Array<{ title: string; text: string }> {
+  const lines = md.split('\n')
+  let inFeatures = false
+  const sectionLines: string[] = []
+  for (const raw of lines) {
+    const trimmed = raw.trim()
+    if (/^##\s+Homepage Features/i.test(trimmed)) {
+      inFeatures = true
+      continue
+    }
+    if (inFeatures) {
+      if (/^##?\s+/.test(trimmed)) break
+      sectionLines.push(raw)
+    }
+  }
+  const target = sectionLines.length > 0 ? sectionLines.join('\n') : md
+  const out: Array<{ title: string; text: string }> = []
+  for (const raw of target.split('\n')) {
+    const line = raw.trim()
+    let m = line.match(/^-\s*\*\*(.+?)\*\*:\s*(.+)$/)
+    if (m) {
+      out.push({ title: m[1]!.trim(), text: m[2]!.trim() })
+      continue
+    }
+    m = line.match(/^-\s*(.+?):\s*(.+)$/)
+    if (m && m[1] && m[2] && m[1]!.length < 40) {
+      const t = m[1]!.trim().replace(/^\*\*|\*\*$/g, '')
+      out.push({ title: t, text: m[2]!.trim() })
+    }
+  }
+  if (out.length > 0) return out
+  return [
+    { title: 'Token auth', text: 'Paste your token once, connect anytime.' },
+    { title: 'Live status', text: 'Green means go. See what is online at a glance.' },
+    { title: 'Local-first', text: 'Your list persists on this device. No account needed.' },
+    { title: 'One-tap reconnect', text: 'Dropped? Reconnect straight from the card.' },
+  ]
+}
+
+const FEATURES_FROM_MD: Array<{ title: string; text: string }> = (() => {
+  try {
+    const parsed = parseFeaturesMd(docsVsMdRaw)
+    return parsed.length > 0 ? parsed : []
+  } catch {
+    return []
+  }
+})()
+
 function HomePage() {
   return (
     <section className="page" aria-labelledby="page-title-home">
@@ -346,41 +417,14 @@ function HomePage() {
 
       <h2>Features</h2>
       <div className="grid">
-        <FeatureTile
-          icon={
-            <>
-              <rect x="3" y="11" width="18" height="11" rx="2" />
-              <path d="M7 11V7a5 5 0 0 1 10 0v4" />
-            </>
-          }
-          title="Token auth"
-          text="Paste your token once, connect anytime."
-        />
-        <FeatureTile
-          icon={<polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />}
-          title="Live status"
-          text="Green means go. See what is online at a glance."
-        />
-        <FeatureTile
-          icon={
-            <>
-              <path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z" />
-              <path d="M6 16h.01M10 16h.01" />
-            </>
-          }
-          title="Local-first"
-          text="Your list persists on this device. No account needed."
-        />
-        <FeatureTile
-          icon={
-            <>
-              <polyline points="23 4 23 10 17 10" />
-              <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
-            </>
-          }
-          title="One-tap reconnect"
-          text="Dropped? Reconnect straight from the card."
-        />
+        {FEATURES_FROM_MD.map((f) => (
+          <FeatureTile
+            key={f.title}
+            icon={FEATURE_ICONS[f.title] ?? FEATURE_ICONS['Token auth']!}
+            title={f.title}
+            text={f.text}
+          />
+        ))}
       </div>
     </section>
   )

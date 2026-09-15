@@ -9,6 +9,13 @@ sshx.io · **tmate** · **upterm** · **ttyd** · **wetty** = wetty/GoTTY ·
 **Sshw** = Sshwifty · **Guac** = Apache Guacamole · **Tele** = Teleport ·
 **Tail** = Tailscale SSH / CF Tunnel / ZeroTier · **VSCode** = VS Code tunnels.
 
+## Homepage Features
+
+- **Token auth**: Paste your token once, connect anytime.
+- **Live status**: Green means go. See what is online at a glance.
+- **Local-first**: Your list persists on this device. No account needed.
+- **One-tap reconnect**: Dropped? Reconnect straight from the card.
+
 ## Identity
 
 |  | KS SSH | SSH | sshx | tmate | upterm | ttyd | wetty | Sshw | Guac | Tele | Tail | VSCode |
