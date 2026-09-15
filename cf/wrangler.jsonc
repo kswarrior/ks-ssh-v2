@@ -2,7 +2,11 @@
 	"name": "ks-ssh-v2",
 	"main": "worker/index.ts",
 	"compatibility_date": "2026-09-01",
-	"assets": { "directory": "./dist/client", "not_found_handling": "single-page-application" },
+	"assets": {
+		"directory": "./dist/client",
+		"not_found_handling": "single-page-application",
+		"run_worker_first": ["/v", "/v/*", "/api/*", "/v1/*"]
+	},
 	"durable_objects": {
 		"bindings": [{ "name": "TUNNEL", "class_name": "TunnelRoom" }]
 	},
