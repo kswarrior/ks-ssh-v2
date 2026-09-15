@@ -1670,7 +1670,7 @@
   position: fixed;
   z-index: 72;
   width: min(380px, calc(100vw - 16px));
-  max-height: 320px;
+  max-height: min(320px, calc(100svh - 80px));
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -1707,9 +1707,15 @@
   flex-direction: column;
   gap: 6px;
   /* Fixed height: never grows the header, scrolls vertically instead. */
-  max-height: 240px;
+  max-height: min(240px, calc(100svh - 160px));
   overflow-y: auto;
   overscroll-behavior: contain;
+}
+
+.host-menu-empty {
+  padding: 12px;
+  font-size: 13px;
+  opacity: 0.7;
 }
 
 .host-terms {
