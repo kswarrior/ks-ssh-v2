@@ -11,14 +11,20 @@ The agent pushes its whole embedded frontend as a single-file HTML bundle
 over WSS to `https://ks-ssh-v2.kswarriorpro.workers.dev` (see `--relay`):
 
 ```
-./ks-ssh --no-serve --token=ABCDE
-# Relay token: ABCDE — enter it in the SSH page to connect.
-# E2E: ON (AES-256-GCM, aes-gcm-v1) — relay sees only ciphertext sizes.
-# Share link (contains secret — send directly, do not log):
-#   https://ks-ssh-v2.kswarriorpro.workers.dev/v/ABCDE#k=<SECRET>
-#   https://ks-ssh-v2.kswarriorpro.workers.dev/#/session/ABCDE#k=<SECRET>
-# Fullscreen UI: https://ks-ssh-v2.kswarriorpro.workers.dev/v/ABCDE
-#            or: https://ks-ssh-v2.kswarriorpro.workers.dev/#/session/ABCDE
+./ks-ssh --no-serve --token=ABCDE1234
+# ╭────────────────────────────────────────────────────────╮
+# │ KS SSH - ready                                         │
+# │ Serve   OFF (--no-serve, no open port)                 │
+# │ Token   ABCDE1234                                      │
+# │ E2E     ON (AES-256-GCM)                               │
+# │ E2E key <SECRET>                                       │
+# │ Finger  <16-hex> (verify in viewer, TOFU)              │
+# │ Link    https://ks-ssh-v2.kswarriorpro.workers.dev/v/ABCDE1234#k=<SECRET>
+# │ Link    https://ks-ssh-v2.kswarriorpro.workers.dev/#/session/ABCDE1234#k=<SECRET>
+# │ Login   OFF (open access)                              │
+# ╰────────────────────────────────────────────────────────╯
+# With --no-e2e the panel shows `E2E  OFF (relay-visible)` and links
+# without `#k=...` instead. With `--port` it shows `URL  http://127.0.0.1:8080`.
 # Visit in CF opens the full CLI UI (Terminal, Files, Ports, Host) over WSS —
 # same as --port, fully functional (no open port needed).
 ```
