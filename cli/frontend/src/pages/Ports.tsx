@@ -313,8 +313,7 @@ export default function PortsPage() {
                 ? ` · ${p.process}${p.pid != null ? ` (pid ${p.pid})` : ''}`
                 : ''
               const metaText = `${p.addr}:${p.port} · ${p.state}${proc}`
-              const isConfirm = confirmKill === key
-              const isKilling = killing === key
+              const isConfirm = confirmKill?.key === key
               return (
                 <li
                   key={key}
@@ -363,7 +362,7 @@ export default function PortsPage() {
                       onClick={(e) => {
                         e.stopPropagation()
                         setKillError(null)
-                        setConfirmKill(isConfirm ? null : key)
+                        setConfirmKill(isConfirm ? null : { key, port: p })
                       }}
                     >
                       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -378,46 +377,80 @@ export default function PortsPage() {
                     {p.addr}:{p.port} · {p.state}
                     {proc}
                   </div>
-                  {isConfirm && p.pid != null && (
-                    <div
-                      className="file-confirm"
-                      role="alertdialog"
-                      aria-label={`Kill process on port ${p.port}?`}
-                      onClick={(e) => e.stopPropagation()}
-                    >
-                      <p>
-                        Kill{' '}
-                        <strong>
-                          {p.process ?? 'process'} (pid {p.pid})
-                        </strong>{' '}
-                        on port <strong>{p.port}</strong>?
-                      </p>
-                      <div className="file-inline-actions">
-                        <button
-                          type="button"
-                          className="btn btn-sm btn-danger"
-                          disabled={isKilling}
-                          onClick={() => void killPort(p, key)}
-                        >
-                          {isKilling ? 'Killing…' : 'Kill'}
-                        </button>
-                        <button
-                          type="button"
-                          className="btn btn-sm"
-                          disabled={isKilling}
-                          onClick={() => setConfirmKill(null)}
-                        >
-                          Keep
-                        </button>
-                      </div>
-                    </div>
-                  )}
                 </li>
               )
             })}
           </ul>
         )}
       </div>
+
+      {confirmKill && (
+        <div
+          className="term-confirm-overlay"
+          onClick={() => {
+            if (!killing) setConfirmKill(null)
+          }}
+        >
+          <div
+            className="term-confirm"
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="ports-confirm-title"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <svg
+              className="term-confirm-icon"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <path d="M3 6h18" />
+              <path d="M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2" />
+              <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V6" />
+              <path d="M10 11v6M14 11v6" />
+            </svg>
+            <h2 id="ports-confirm-title">
+              Kill process on port {confirmKill.port.port}?
+            </h2>
+            <p>
+              Kill{' '}
+              <strong>
+                {confirmKill.port.process ?? 'process'}
+                {confirmKill.port.pid != null
+                  ? ` (pid ${confirmKill.port.pid})`
+                  : ''}
+              </strong>{' '}
+              on port <strong>{confirmKill.port.port}</strong>? This frees
+              the port.
+            </p>
+            <div className="term-confirm-actions">
+              <button
+                type="button"
+                className="btn btn-sm"
+                disabled={killing != null}
+                onClick={() => setConfirmKill(null)}
+                autoFocus
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn btn-sm btn-danger"
+                disabled={killing != null}
+                onClick={() =>
+                  void killPort(confirmKill.port, confirmKill.key)
+                }
+              >
+                {killing ? 'Killing…' : 'Kill'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </section>
   )
 }

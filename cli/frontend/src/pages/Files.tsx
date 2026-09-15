@@ -582,7 +582,7 @@ export default function FilesPage() {
   const [menuOpen, setMenuOpen] = useState<string | null>(null)
   const [renaming, setRenaming] = useState<string | null>(null)
   const [newName, setNewName] = useState('')
-  const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
+  const [confirmDelete, setConfirmDelete] = useState<FileEntry | null>(null)
   const [busy, setBusy] = useState(false)
   const [actionError, setActionError] = useState<string | null>(null)
   const renameInputRef = useRef<HTMLInputElement | null>(null)
