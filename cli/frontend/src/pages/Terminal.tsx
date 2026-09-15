@@ -566,7 +566,7 @@ function HostTermsMenu({
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [open])
+  }, [open ])
 
   const attached = new Set(
     [
@@ -575,11 +575,8 @@ function HostTermsMenu({
     ].filter((s): s is string => !!s),
   )
   const others = (host ?? []).filter((h) => !attached.has(h.id))
-  // Hide only when the list endpoint is missing (relay view / old backend).
-  // When there are zero other sessions the button stays visible with a 0
-  // badge so the header doesn't shift, and the dropdown shows an empty
-  // state instead of disappearing (also avoids stale open/anchor state).
   if (!host) return null
+  if (others.length === 0) return null
 
   const onKill = async (sid: string) => {
     setKilling(sid)
@@ -616,7 +613,7 @@ function HostTermsMenu({
         className="term-tab-add host-menu-btn"
         aria-label={`Other sessions on this host (${others.length})`}
         title={`Other sessions on this host (${others.length}) — shared, anyone can attach`}
-        aria-haspopup="dialog"
+        aria-haspopup="menu"
         aria-expanded={open}
         onClick={(e) => toggle(e.currentTarget)}
       >
@@ -639,8 +636,8 @@ function HostTermsMenu({
               />
               <div
                 className="host-menu-dropdown"
-                role="dialog"
-                aria-label={`Other sessions on this host (${others.length})`}
+                role="menu"
+                aria-label="Other sessions on this host"
                 style={{ top: anchor.top, right: anchor.right }}
                 onClick={(e) => e.stopPropagation()}
               >
@@ -656,11 +653,6 @@ function HostTermsMenu({
                     Refresh
                   </button>
                 </div>
-                {others.length === 0 ? (
-                  <div className="host-menu-empty" role="status">
-                    No other sessions on this host.
-                  </div>
-                ) : (
                 <ul className="host-menu-list">
                   {others.map((h) => (
                     <li key={h.id} className="host-term">
@@ -710,7 +702,6 @@ function HostTermsMenu({
                     </li>
                   ))}
                 </ul>
-                )}
               </div>
             </>,
             document.body,
