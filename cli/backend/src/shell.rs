@@ -369,11 +369,10 @@ fn spawn_session(id: String) -> anyhow::Result<Arc<Session>> {
                     // Claim this chunk's stream offset first so frames stay
                     // ordered even under contention.
                     let base = reader_session.offset.fetch_add(n as u64, Ordering::SeqCst);
-                    if let Ok(mut ring) = reader_session.ring.lock() {
-                        if let Ok(mut rbase) = reader_session.ring_base.lock() {
+                    if let Ok(mut ring) = reader_session.ring.lock()
+                        && let Ok(mut rbase) = reader_session.ring_base.lock() {
                             push_ring(&mut ring, &mut rbase, bytes);
                         }
-                    }
                     reader_session.dirty.store(true, Ordering::SeqCst);
                     // Session recording (output frame).
                     record_frame(&reader_session, "out", bytes);

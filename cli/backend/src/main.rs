@@ -252,7 +252,8 @@ fn build_router(
         )
         .with_state(state);
 
-    let app = match auth {
+    
+    match auth {
         Some(ref arc) => {
             let guarded = protected.route_layer(axum::middleware::from_fn_with_state(
                 arc.clone(),
@@ -261,8 +262,7 @@ fn build_router(
             public.merge(guarded).fallback(serve_ui)
         }
         None => public.merge(protected).fallback(serve_ui),
-    };
-    app
+    }
 }
 
 async fn serve(

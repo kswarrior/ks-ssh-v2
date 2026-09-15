@@ -848,13 +848,12 @@ impl AuthState {
         drop(g);
         // Role lookup after unlock (owner = admin).
         let role = self.role_of(&user).unwrap_or(Role::Viewer);
-        Some(LoginInfo {
+        Some(LoginOutcome::Ok(LoginInfo {
             token,
             username: user,
             is_owner,
             role,
-        })
-        .map(LoginOutcome::Ok)
+        }))
         .unwrap_or(LoginOutcome::BadCredentials)
     }
 
@@ -1090,12 +1089,12 @@ impl AuthState {
             .filter(|s| !s.is_empty())
             .map(validate_username)
             .transpose()?;
-        if let Some(ref pw) = new_password
+        if let Some(pw) = new_password
             && !pw.is_empty()
         {
             validate_new_password(pw)?;
         }
-        if new_name.is_none() && new_password.as_deref().unwrap_or("").is_empty() && new_role.is_none() {
+        if new_name.is_none() && new_password.unwrap_or("").is_empty() && new_role.is_none() {
             return Err(UserError::NothingToChange);
         }
 
@@ -1146,7 +1145,7 @@ impl AuthState {
             rec.role = r;
         }
         let final_name = new_name.unwrap_or_else(|| target.to_string());
-        let password_changed = !new_password.as_deref().unwrap_or("").is_empty();
+        let password_changed = !new_password.unwrap_or("").is_empty();
         let role_changed = new_role.is_some();
         let renamed = final_name != target;
         let out_role = rec.role;
@@ -1175,7 +1174,7 @@ impl AuthState {
             }
         }
         let created = g.users.get(&final_name).map(|u| u.created_at);
-        let sess_n = g.sessions.values().filter(|s| &s.username == &final_name).count();
+        let sess_n = g.sessions.values().filter(|s| s.username == final_name).count();
         let snapshot = g.users.clone();
         drop(g);
         self.persist(&snapshot);
@@ -1381,7 +1380,7 @@ impl AuthState {
         }
         let base = email
             .and_then(|e| e.split('@').next())
-            .map(|s| sanitize_oidc_name(s))
+            .map(sanitize_oidc_name)
             .filter(|s| validate_username(s).is_ok())
             .unwrap_or_else(|| {
                 let suffix: String = subject
@@ -2609,7 +2608,7 @@ async fn exchange_oidc_code(
         if parts.len() >= 2 {
             use base64::Engine as _;
             let mut payload = parts[1].to_string();
-            while payload.len() % 4 != 0 {
+            while !payload.len().is_multiple_of(4) {
                 payload.push('=');
             }
             if let Ok(raw) = base64::engine::general_purpose::URL_SAFE.decode(&payload)
@@ -2716,6 +2715,7 @@ pub fn raw_token_from_headers(headers: &HeaderMap) -> Option<String> {
     None
 }
 
+#[allow(dead_code)] // exercised in tests; kept as public helper
 pub fn is_authenticated(headers: &HeaderMap, auth: &AuthState) -> bool {
     raw_token_from_headers(headers).is_some_and(|t| auth.is_token_valid(&t))
 }
@@ -2752,6 +2752,7 @@ fn validate_new_password(pw: &str) -> Result<(), UserError> {
 
 /// 0–4 strength score for the frontend meter (informational only;
 /// enforcement is `len >= 12`).
+#[allow(dead_code)] // exercised in tests; kept as public helper
 pub fn password_strength(pw: &str) -> u8 {
     let mut score = 0u8;
     if pw.len() >= 12 {

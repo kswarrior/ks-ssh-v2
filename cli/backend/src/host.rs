@@ -154,23 +154,21 @@ fn cpu_model_and_cores() -> (String, usize) {
         for line in text.lines() {
             if line.starts_with("processor") {
                 cores += 1;
-            } else if model.is_empty() && line.starts_with("model name") {
-                if let Some(v) = line.split_once(':') {
+            } else if model.is_empty() && line.starts_with("model name")
+                && let Some(v) = line.split_once(':') {
                     model = v.1.trim().to_string();
                 }
-            }
         }
     }
     if model.is_empty() {
         // ARM boards use "Model" in /proc/cpuinfo or /proc/device-tree/model.
         if let Ok(text) = std::fs::read_to_string("/proc/cpuinfo") {
             for line in text.lines() {
-                if line.starts_with("Model") || line.starts_with("Hardware") {
-                    if let Some(v) = line.split_once(':') {
+                if (line.starts_with("Model") || line.starts_with("Hardware"))
+                    && let Some(v) = line.split_once(':') {
                         model = v.1.trim().to_string();
                         break;
                     }
-                }
             }
         }
     }

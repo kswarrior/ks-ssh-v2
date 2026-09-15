@@ -609,19 +609,17 @@ async fn proxy_rpc(
     let mut out_headers = HashMap::new();
     for (k, v) in resp.headers().iter() {
         let kl = k.as_str().to_ascii_lowercase();
-        if kl == "content-type"
+        if (kl == "content-type"
             || kl == "content-disposition"
             || kl == "set-cookie"
             || kl == "cache-control"
             || kl == "accept-ranges"
-            || kl == "content-range"
-        {
-            if let Ok(s) = v.to_str() {
+            || kl == "content-range")
+            && let Ok(s) = v.to_str() {
                 // Multiple set-cookie headers collapse in reqwest iteration;
                 // keep the last (login/logout set a single cookie).
                 out_headers.insert(kl, s.to_string());
             }
-        }
     }
     // Guard huge downloads before buffering (Content-Length may be absent).
     if let Some(cl) = resp.content_length()
@@ -644,7 +642,7 @@ async fn proxy_rpc(
     }
     let chunks: Vec<String> = bytes
         .chunks(RPC_CHUNK_RAW)
-        .map(|c| b64_encode(c))
+        .map(b64_encode)
         .collect();
     let n = chunks.len();
     // Strict: refuse the whole response when the peer lacks E2E (no leak).
@@ -951,11 +949,10 @@ async fn handle_inner_rpc(
             let id = inner.get("id").and_then(|v| v.as_str()).unwrap_or("");
             let i = inner.get("i").and_then(|v| v.as_u64()).unwrap_or(u64::MAX) as usize;
             let data = inner.get("data").and_then(|v| v.as_str()).unwrap_or("");
-            if let Some(pending) = pending_rpc.get_mut(id) {
-                if i < pending.parts.len() && data.len() <= 128 * 1024 && !data.is_empty() {
+            if let Some(pending) = pending_rpc.get_mut(id)
+                && i < pending.parts.len() && data.len() <= 128 * 1024 && !data.is_empty() {
                     pending.parts[i] = Some(data.to_string());
                 }
-            }
         }
         Some("rpc-end") => {
             let id = inner.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
@@ -1030,11 +1027,10 @@ async fn handle_inner_shell(
             let id = inner.get("id").and_then(|v| v.as_str()).unwrap_or("");
             let is_text = inner.get("is_text").and_then(|v| v.as_bool()).unwrap_or(true);
             let data = inner.get("data").and_then(|v| v.as_str()).unwrap_or("");
-            if let Some(bridge) = shells.lock().await.get(id) {
-                if let Some(bytes) = b64_decode(data) {
+            if let Some(bridge) = shells.lock().await.get(id)
+                && let Some(bytes) = b64_decode(data) {
                     let _ = bridge.to_local.send(ShellLocalIn::Send { is_text, data: bytes });
                 }
-            }
         }
         Some("shell-close") => {
             let id = inner.get("id").and_then(|v| v.as_str()).unwrap_or("");
@@ -1171,20 +1167,18 @@ async fn on_text(
             if peer_ok {
                 println!("web client supports E2E ({E2E_ALG})");
                 // Identity binding: peer fp must match ours (same k).
-                if e2e_on {
-                    if let (Some(theirs), Some(ours)) = (
+                if e2e_on
+                    && let (Some(theirs), Some(ours)) = (
                         msg.get("fp").and_then(|v| v.as_str()),
                         local_fp.as_deref(),
-                    ) {
-                        if theirs != ours {
+                    )
+                        && theirs != ours {
                             eprintln!(
                                 "E2E error: fingerprint mismatch (wrong key?) — refusing plaintext"
                             );
                             crate::db::audit("-", "local", "relay-downgrade", token, "deny");
                             peer.store(false, Ordering::SeqCst);
                         }
-                    }
-                }
             } else if e2e_on {
                 eprintln!("{E2E_ERROR_MSG}");
                 crate::db::audit("-", "local", "relay-downgrade", token, "deny");
@@ -1346,11 +1340,10 @@ async fn on_text(
             let id = msg.get("id").and_then(|v| v.as_str()).unwrap_or("");
             let i = msg.get("i").and_then(|v| v.as_u64()).unwrap_or(u64::MAX) as usize;
             let data = msg.get("data").and_then(|v| v.as_str()).unwrap_or("");
-            if let Some(pending) = pending_rpc.get_mut(id) {
-                if i < pending.parts.len() && data.len() <= 128 * 1024 && !data.is_empty() {
+            if let Some(pending) = pending_rpc.get_mut(id)
+                && i < pending.parts.len() && data.len() <= 128 * 1024 && !data.is_empty() {
                     pending.parts[i] = Some(data.to_string());
                 }
-            }
         }
         Some("rpc-end") => {
             if e2e_on && !strict_peer_ok(e2e_on, peer_e2e_now(&peer)) {
@@ -1438,11 +1431,10 @@ async fn on_text(
             let id = msg.get("id").and_then(|v| v.as_str()).unwrap_or("");
             let is_text = msg.get("is_text").and_then(|v| v.as_bool()).unwrap_or(true);
             let data = msg.get("data").and_then(|v| v.as_str()).unwrap_or("");
-            if let Some(bridge) = shells.lock().await.get(id) {
-                if let Some(bytes) = b64_decode(data) {
+            if let Some(bridge) = shells.lock().await.get(id)
+                && let Some(bytes) = b64_decode(data) {
                     let _ = bridge.to_local.send(ShellLocalIn::Send { is_text, data: bytes });
                 }
-            }
         }
         Some("shell-close") => {
             if e2e_on && !strict_peer_ok(e2e_on, peer_e2e_now(&peer)) {

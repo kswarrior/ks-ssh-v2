@@ -79,6 +79,7 @@ pub fn now_ms() -> i64 {
 pub fn set_audit_retain_days(days: u64) {
     AUDIT_RETAIN_DAYS.store(days, Ordering::SeqCst);
 }
+#[allow(dead_code)] // getter kept as public API alongside the setter
 pub fn audit_retain_days() -> u64 {
     AUDIT_RETAIN_DAYS.load(Ordering::SeqCst)
 }
@@ -407,6 +408,7 @@ pub fn audit_list(limit: usize, since: i64) -> Vec<AuditRow> {
 }
 
 /// Test helper: wipe audit rows (both SQLite and in-memory).
+#[allow(dead_code)]
 pub fn audit_clear_for_tests() {
     with_db(|conn| conn.execute("DELETE FROM audit", []));
     if let Ok(mut g) = MEM_AUDIT.lock() {
@@ -622,6 +624,7 @@ pub fn chat_insert(username: &str, message: &str) -> ChatMessage {
 }
 
 /// Test helper: wipe chat rows (both SQLite and in-memory).
+#[allow(dead_code)]
 pub fn chat_clear_for_tests() {
     with_db(|conn| conn.execute("DELETE FROM chat_messages", []));
     if let Ok(mut g) = MEM_CHAT.lock() {

@@ -360,6 +360,7 @@ impl E2e {
 /// One-shot encrypt with an explicit `seq` (stateless; prefer `E2e`).
 /// Legacy AAD=token (empty session/epoch/dir) — keeps the published
 /// `e2e.fixture.json` vector byte-identical.
+#[allow(dead_code)]
 pub fn encrypt_with_seq(
     key: &E2eKey,
     token: &str,
@@ -455,6 +456,7 @@ pub fn decrypt_bound(
 /// Deterministic encrypt with caller-supplied 12-byte nonce.
 /// Used for cross-language fixtures (TS roundtrip vector); production code
 /// must use random nonces via [`encrypt_with_seq`] / [`E2e::encrypt_next`].
+#[allow(dead_code)]
 pub fn encrypt_with_nonce(
     key: &E2eKey,
     token: &str,
@@ -468,6 +470,7 @@ pub fn encrypt_with_nonce(
 /// One-shot decrypt (stateless seq check is done by [`E2e::decrypt_next`]).
 /// Wrong key / tampered tag → Err (caller must show generic
 /// "E2E decrypt failed" without leaking details).
+#[allow(dead_code)]
 pub fn decrypt_envelope(
     key: &E2eKey,
     token: &str,
@@ -495,7 +498,7 @@ pub fn decode_b64url(s: &str) -> anyhow::Result<Vec<u8>> {
     }
     // Retry with padding added (some peers pad).
     let mut padded = s.to_string();
-    while padded.len() % 4 != 0 {
+    while !padded.len().is_multiple_of(4) {
         padded.push('=');
     }
     base64::engine::general_purpose::URL_SAFE
