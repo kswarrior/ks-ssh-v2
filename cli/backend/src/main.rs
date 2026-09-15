@@ -273,25 +273,28 @@ async fn serve(
     oidc: Option<Arc<auth::OidcState>>,
     relay_pin: Option<Arc<auth::RelayPinState>>,
     viewer_pin: Option<String>,
+    print_banner: bool,
 ) {
     let app = build_router(auth.clone(), oidc, relay_pin);
     let addr = format!("{host}:{port}");
     let listener = tokio::net::TcpListener::bind(&addr)
         .await
         .expect("bind port");
-    banner::print(&banner::StartupBanner {
-        local_url: Some(format!("http://{addr}")),
-        loopback: None,
-        relay_http: None,
-        token: None,
-        e2e_on: false,
-        e2e_key: None,
-        e2e_fp: None,
-        viewer_pin,
-        auth_on: auth.is_some(),
-        relay_auth_on: false,
-        push_ui: true,
-    });
+    if print_banner {
+        banner::print(&banner::StartupBanner {
+            local_url: Some(format!("http://{addr}")),
+            loopback: None,
+            relay_http: None,
+            token: None,
+            e2e_on: false,
+            e2e_key: None,
+            e2e_fp: None,
+            viewer_pin,
+            auth_on: auth.is_some(),
+            relay_auth_on: false,
+            push_ui: true,
+        });
+    }
     shell::spawn_reaper();
     shell::spawn_persister();
     axum::serve(listener, app.into_make_service())
@@ -555,13 +558,26 @@ async fn main() {
                 cli.host.clone()
             };
             let loopback = format!("http://{}:{}", proxy_host, cli.port);
+            let public_url = format!("http://{}:{}", cli.host, cli.port);
+            let auth_on = auth.is_some();
             tokio::spawn(async move {
-                relay::run_agent(&ws_base, &t, push_ui, e2e_key, relay_pin_for_agent, loopback).await
+                relay::run_agent(
+                    &ws_base,
+                    &t,
+                    push_ui,
+                    e2e_key,
+                    relay_pin_for_agent,
+                    loopback,
+                    viewer_pin_str,
+                    Some(public_url),
+                    auth_on,
+                )
+                .await
             });
-            serve(cli.host, cli.port, auth, oidc, relay_pin).await;
+            serve(cli.host, cli.port, auth, oidc, relay_pin, None, false).await;
         }
         // Local UI only (previous behaviour).
-        (false, None) => serve(cli.host, cli.port, auth, oidc, relay_pin).await,
+        (false, None) => serve(cli.host, cli.port, auth, oidc, relay_pin, viewer_pin_str, true).await,
     }
 }
 
