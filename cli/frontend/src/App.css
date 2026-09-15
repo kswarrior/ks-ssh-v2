@@ -1624,6 +1624,94 @@
 
 /* ---------- Shared host terminals (SQLite --db, anyone can attach) ---------- */
 
+.term-header {
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+}
+
+.term-header .term-bar {
+  flex: 1;
+  min-width: 0;
+}
+
+.host-menu-wrap {
+  flex-shrink: 0;
+  display: flex;
+  padding-top: 8px;
+}
+
+.host-menu-btn {
+  min-width: 52px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 10px;
+}
+
+.host-menu-btn svg {
+  width: 14px;
+  height: 14px;
+  display: block;
+}
+
+.host-menu-count {
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: var(--hover-bg);
+  border: 1px solid var(--glass-border);
+}
+
+.host-menu-dropdown {
+  position: fixed;
+  z-index: 72;
+  width: min(380px, calc(100vw - 16px));
+  max-height: 320px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--glass-border);
+  border-radius: 10px;
+  background: var(--panel-bg);
+  -webkit-backdrop-filter: blur(24px) saturate(150%);
+  backdrop-filter: blur(24px) saturate(150%);
+  box-shadow: var(--shadow-lg);
+}
+
+.host-menu-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px 8px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  opacity: 0.85;
+  border-bottom: 1px solid var(--glass-border);
+}
+
+.host-menu-head .btn {
+  margin-left: auto;
+}
+
+.host-menu-list {
+  list-style: none;
+  margin: 0;
+  padding: 8px 12px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  /* Fixed height: never grows the header, scrolls vertically instead. */
+  max-height: 240px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
 .host-terms {
   border: 1px solid var(--glass-border);
   border-radius: 10px;
@@ -1661,6 +1749,10 @@
   display: flex;
   flex-direction: column;
   gap: 6px;
+  /* Fixed height: many rows scroll instead of stretching the page. */
+  max-height: 200px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .host-term {
@@ -4461,6 +4553,29 @@ a.file-link {
   border: 1px solid rgba(255, 170, 0, 0.45);
   color: var(--text-h);
   font-size: 13px;
+}
+
+.rec-banner-dismiss {
+  border: none;
+  background: transparent;
+  color: inherit;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 7px;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  opacity: 0.7;
+  flex-shrink: 0;
+}
+
+.rec-banner-dismiss:hover {
+  background: rgba(255, 255, 255, 0.12);
+  opacity: 1;
 }
 
 /* Read-only replay player. */
