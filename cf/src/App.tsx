@@ -85,33 +85,6 @@ function relayWsHost(settings: Settings): string {
   return h || window.location.host
 }
 
-async function fetchRelayStatus(
-  relayBase: string,
-  token: string,
-  signal?: AbortSignal,
-): Promise<{ agentOnline: boolean; hasUi: boolean; gated: boolean; size: number } | null> {
-  try {
-    const res = await fetch(`${relayBase}/api/ssh/status?token=${encodeURIComponent(token)}`, { signal })
-    if (!res.ok) return null
-    const data = (await res.json()) as {
-      ok?: boolean
-      agentOnline?: boolean
-      hasUi?: boolean
-      gated?: boolean
-      size?: number
-    }
-    if (!data?.ok) return null
-    return {
-      agentOnline: data.agentOnline === true,
-      hasUi: data.hasUi === true,
-      gated: data.gated === true,
-      size: Number(data.size) || 0,
-    }
-  } catch {
-    return null
-  }
-}
-
 type Theme = 'light' | 'dark'
 
 function initialTheme(): Theme {
