@@ -301,6 +301,36 @@ type SshEntry = {
 }
 
 function HomePage() {
+  const [expanded, setExpanded] = useState<string | null>(null)
+
+  if (expanded) {
+    return (
+      <section className="page page-feature-lightbox" aria-labelledby="page-title-home">
+        <div className="feature-lightbox card">
+          <div className="feature-lightbox-head">
+            <h2 style={{ margin: 0 }}>Preview</h2>
+            <button type="button" className="btn btn-sm" onClick={() => setExpanded(null)} aria-label="Close preview">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M18 6L6 18M6 6l12 12" />
+              </svg>
+              Close
+            </button>
+          </div>
+          <div className="feature-lightbox-body" onClick={() => setExpanded(null)} role="button" tabIndex={0} aria-label="Close preview" onKeyDown={(e) => { if (e.key === 'Escape' || e.key === 'Enter') setExpanded(null) }}>
+            <img src={expanded} alt="Preview" className="feature-lightbox-img" />
+          </div>
+        </div>
+      </section>
+    )
+  }
+
+  const features: Array<{ title: string; text: string; src: string; alt: string }> = [
+    { title: 'Terminal', text: 'Real PTY, multi-tab + vertical split, gap-free resume, predictive echo, CJK/IME + search & export, touch bar.', src: '/images/terminal.png', alt: 'Terminal' },
+    { title: 'Files', text: 'HOME-jailed files & editor (1/5/100 MB caps), lexical path handling, zip/unzip, and media previews.', src: '/images/files.png', alt: 'Files' },
+    { title: 'Ports', text: 'Live /proc ports with process list, per-port kill, and connection tracking over WSS.', src: '/images/ports.png', alt: 'Ports' },
+    { title: 'Host', text: 'Per-core/RAM/swap/df-filtered host monitoring, metrics and system info – same as local --port.', src: '/images/host.png', alt: 'Host' },
+  ]
+
   return (
     <section className="page" aria-labelledby="page-title-home">
       <div className="hero card">
@@ -346,34 +376,30 @@ function HomePage() {
 
       <h2>Features</h2>
       <div className="features-image-grid">
-        <div className="card feature-image-card">
-          <div className="feature-image-text">
-            <h3>Terminal</h3>
-            <p>Real PTY, multi-tab + vertical split, gap-free resume, predictive echo, CJK/IME + search & export, touch bar.</p>
+        {features.map((f) => (
+          <div key={f.title} className="card feature-image-card">
+            <div className="feature-image-text">
+              <h3>{f.title}</h3>
+              <p>{f.text}</p>
+            </div>
+            <div className="feature-image-wrap">
+              <img src={f.src} alt={f.alt} className="feature-image" loading="lazy" onClick={() => setExpanded(f.src)} style={{ cursor: 'zoom-in' }} />
+              <button
+                type="button"
+                className="feature-image-expand-btn"
+                aria-label={`Expand ${f.title} image`}
+                onClick={() => setExpanded(f.src)}
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <polyline points="15 3 21 3 21 9" />
+                  <polyline points="9 21 3 21 3 15" />
+                  <line x1="21" y1="3" x2="14" y2="10" />
+                  <line x1="3" y1="21" x2="10" y2="14" />
+                </svg>
+              </button>
+            </div>
           </div>
-          <img src="/images/terminal.png" alt="Terminal" className="feature-image" loading="lazy" />
-        </div>
-        <div className="card feature-image-card">
-          <div className="feature-image-text">
-            <h3>Files</h3>
-            <p>HOME-jailed files & editor (1/5/100 MB caps), lexical path handling, zip/unzip, and media previews.</p>
-          </div>
-          <img src="/images/files.png" alt="Files" className="feature-image" loading="lazy" />
-        </div>
-        <div className="card feature-image-card">
-          <div className="feature-image-text">
-            <h3>Ports</h3>
-            <p>Live /proc ports with process list, per-port kill, and connection tracking over WSS.</p>
-          </div>
-          <img src="/images/ports.png" alt="Ports" className="feature-image" loading="lazy" />
-        </div>
-        <div className="card feature-image-card">
-          <div className="feature-image-text">
-            <h3>Host</h3>
-            <p>Per-core/RAM/swap/df-filtered host monitoring, metrics and system info – same as local --port.</p>
-          </div>
-          <img src="/images/host.png" alt="Host" className="feature-image" loading="lazy" />
-        </div>
+        ))}
       </div>
     </section>
   )
