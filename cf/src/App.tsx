@@ -2293,6 +2293,9 @@ export default function App() {
   const [sshEditId, setSshEditId] = useState<string | null>(() =>
     typeof window !== 'undefined' ? hashToSshEditId(window.location.hash) : null,
   )
+  const [sshVisitId, setSshVisitId] = useState<string | null>(() =>
+    typeof window !== 'undefined' ? hashToSshVisitId(window.location.hash) : null,
+  )
   const isMobile = useIsMobile(768)
   const btnRef = useRef<HTMLButtonElement>(null)
   const asideRef = useRef<HTMLElement>(null)
@@ -2337,6 +2340,7 @@ export default function App() {
       const next = hashToPage(window.location.hash)
       if (next) setPage(next)
       setSshEditId(hashToSshEditId(window.location.hash))
+      setSshVisitId(hashToSshVisitId(window.location.hash))
     }
     window.addEventListener('hashchange', onHash)
     return () => window.removeEventListener('hashchange', onHash)
@@ -2352,9 +2356,14 @@ export default function App() {
       document.title = 'KS SSH — Edit connection'
       return
     }
+    if (page === 'ssh-visit') {
+      const v = sshVisitId ? entries.find((x) => x.id === sshVisitId)?.name : null
+      document.title = v ? `KS SSH — ${v}` : 'KS SSH — Visit'
+      return
+    }
     const label = NAV.find((p) => p.id === page)?.label
     document.title = label && label !== 'Home' ? `KS SSH — ${label}` : 'KS SSH'
-  }, [page])
+  }, [page, sshVisitId, entries])
 
   // Apply + persist the neumorphic light/dark theme.
   useEffect(() => {
@@ -2459,7 +2468,8 @@ export default function App() {
           <nav aria-label="Primary">
             {NAV.map((item) => {
               const isActive =
-                item.id === page || (item.id === 'ssh' && (page === 'ssh-add' || page === 'ssh-edit'))
+                item.id === page ||
+                (item.id === 'ssh' && (page === 'ssh-add' || page === 'ssh-edit' || page === 'ssh-visit'))
               return (
                 <a
                   key={item.id}
@@ -2570,6 +2580,7 @@ export default function App() {
           {page === 'ssh' && <SSHPage entries={entries} onChange={setEntries} settings={settings} />}
           {page === 'ssh-add' && <SshAddPage entries={entries} onChange={setEntries} settings={settings} />}
           {page === 'ssh-edit' && <SshEditPage entries={entries} onChange={setEntries} settings={settings} editId={sshEditId} />}
+          {page === 'ssh-visit' && <SshVisitPage entries={entries} settings={settings} visitId={sshVisitId} />}
           {page === 'installation' && <InstallationPage />}
           {page === 'settings' && (
             <SettingsPage
