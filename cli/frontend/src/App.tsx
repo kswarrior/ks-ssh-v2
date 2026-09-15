@@ -164,7 +164,7 @@ export default function App() {
     }
   }, [menuOpen])
 
-  // Boot sequence: 0→100% loader that tracks real auth + relay + ping (fast load, not fake).
+  // Boot sequence: 0→100% loader that tracks real auth + relay + ping (fast, not fake — 2-4s like --port).
   useEffect(() => {
     let alive = true
     const bump = (p: number, phase: string) => {
@@ -173,7 +173,7 @@ export default function App() {
       setBootPhase(phase)
     }
     const load = async () => {
-      bump(12, 'Checking login…')
+      const FAST_TIMEOUT = 3800
       const isRelay = (() => {
         try {
           return /^\/v\/[A-Za-z0-9]{5,9}(?:\/|$)/.test(window.location.pathname)
@@ -181,61 +181,78 @@ export default function App() {
           return false
         }
       })()
-      if (isRelay) bump(18, 'Warming relay…')
-      try {
-        const res = await fetch('/api/auth/status', {
-          cache: 'no-store',
-          credentials: 'same-origin',
+      bump(12, 'Checking login…')
+      if (isRelay) bump(16, 'Warming relay…')
+
+      // Fast parallel: auth + hello with hard timeout race so relay RPC 120s never blocks boot (port is 2-4s, relay must match).
+      const authFetch = fetch('/api/auth/status', { cache: 'no-store', credentials: 'same-origin' })
+        .then(async (r) => {
+          if (!r.ok) return { ok: false as const, data: null as Partial<AuthStatus> | null }
+          const d = (await r.json().catch(() => null)) as Partial<AuthStatus> | null
+          return { ok: true as const, data: d }
         })
-        if (!alive) return
-        if (!res.ok) {
-          setAuth({ protected: false, authenticated: true })
-          bump(36, 'Open access')
-        } else {
-          const data = (await res.json()) as Partial<AuthStatus>
-          if (!alive) return
-          setAuth({
-            protected: !!data.protected,
-            authenticated: data.protected ? !!data.authenticated : true,
-            user: typeof data.user === 'string' ? data.user : undefined,
-            is_owner: data.is_owner,
-          })
-          bump(data.protected ? 38 : 36, data.protected ? 'Auth required' : 'Auth open')
-        }
-      } catch {
-        if (alive) {
-          setAuth({ protected: false, authenticated: true })
-          bump(34, 'Auth open')
-        }
-      }
+        .catch(() => ({ ok: false as const, data: null as Partial<AuthStatus> | null }))
+      const helloFetch = fetch('/api/hello', { cache: 'no-store' })
+        .then(async (r) => {
+          if (r.ok) await r.text().catch(() => {})
+          return { ok: r.ok }
+        })
+        .catch(() => ({ ok: false }))
+
+      // Race each against FAST_TIMEOUT so a hung relay RPC (120s) can't stall boot 1-3 min
+      const timeoutAuth = new Promise<{ ok: false; data: null; timedOut: true }>((res) =>
+        setTimeout(() => res({ ok: false, data: null, timedOut: true }), FAST_TIMEOUT),
+      )
+      const timeoutHello = new Promise<{ ok: false; timedOut: true }>((res) =>
+        setTimeout(() => res({ ok: false, timedOut: true }), 3400),
+      )
+
+      bump(22, 'Auth…')
+      const authRes = (await Promise.race([authFetch, timeoutAuth])) as
+        | { ok: boolean; data: Partial<AuthStatus> | null; timedOut?: boolean }
+        | { ok: false; data: null; timedOut: true }
       if (!alive) return
-      bump(52, 'Pinging server…')
-      try {
-        const ctrl = new AbortController()
-        const t = window.setTimeout(() => ctrl.abort(), 3500)
-        const r = await fetch('/api/hello', { cache: 'no-store', signal: ctrl.signal })
-        window.clearTimeout(t)
-        if (!alive) return
-        if (r.ok) {
-          await r.text().catch(() => {})
-          bump(74, 'Server reachable')
-        } else bump(62, 'Server response')
-      } catch {
-        if (alive) bump(60, 'Server unreachable — continuing…')
+      if ('timedOut' in authRes && authRes.timedOut) {
+        // Fast fallback: don't wait 120s — assume open and continue, background will revalidate
+        setAuth({ protected: false, authenticated: true })
+        bump(34, 'Auth open (fast)')
+      } else if (!authRes.ok || !authRes.data) {
+        setAuth({ protected: false, authenticated: true })
+        bump(34, 'Open access')
+      } else {
+        const d = authRes.data as Partial<AuthStatus>
+        setAuth({
+          protected: !!d.protected,
+          authenticated: d.protected ? !!d.authenticated : true,
+          user: typeof d.user === 'string' ? d.user : undefined,
+          is_owner: d.is_owner,
+        })
+        bump(d.protected ? 38 : 34, d.protected ? 'Auth required' : 'Auth open')
       }
+
+      bump(48, 'Pinging server…')
+      const helloRes = (await Promise.race([helloFetch, timeoutHello])) as { ok: boolean; timedOut?: boolean }
+      if (!alive) return
+      if (helloRes.ok) bump(68, 'Server reachable')
+      else if ('timedOut' in helloRes && helloRes.timedOut) bump(60, 'Server check fast-fallback…')
+      else bump(60, 'Server unreachable — continuing…')
+
       if (isRelay) {
-        bump(82, 'Syncing tunnel…')
-        await new Promise((res) => setTimeout(res, 280))
+        bump(76, 'Syncing tunnel…')
+        // Don't block on WSS handshake — shim already warming in main.tsx; short settle only
+        await new Promise((res) => setTimeout(res, 180))
         if (!alive) return
-        bump(90, 'Tunnel ready')
+        bump(86, 'Tunnel ready')
+      } else {
+        bump(78, 'Local ready')
       }
-      bump(96, 'Loading workspace…')
-      await new Promise((res) => setTimeout(res, 160))
+      bump(94, 'Loading workspace…')
+      await new Promise((res) => setTimeout(res, 120))
       if (!alive) return
       bump(100, 'Ready')
       window.setTimeout(() => {
         if (alive) setBootReady(true)
-      }, 280)
+      }, 180)
     }
     void load()
     return () => {
