@@ -11,10 +11,10 @@ sshx.io · **tmate** · **upterm** · **ttyd** · **wetty** = wetty/GoTTY ·
 
 ## Homepage Features
 
-- **Token auth**: Paste your token once, connect anytime.
-- **Live status**: Green means go. See what is online at a glance.
-- **Local-first**: Your list persists on this device. No account needed.
-- **One-tap reconnect**: Dropped? Reconnect straight from the card.
+- **Terminal**: Real PTY, multi-tab + vertical split, gap-free resume, predictive echo, CJK/IME + search & export, touch bar.
+- **Files**: HOME-jailed files & editor (1/5/100 MB caps), lexical path handling, zip/unzip, and media previews.
+- **Ports**: Live /proc ports with process list, per-port kill, and connection tracking over WSS.
+- **Host**: Per-core/RAM/swap/df-filtered host monitoring, metrics and system info – same as local --port.
 
 ## Identity
 
