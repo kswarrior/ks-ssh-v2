@@ -484,7 +484,11 @@ function HostTermsMenu({
   const [host, setHost] = useState<HostTerm[] | null>(null)
   const [killing, setKilling] = useState<string | null>(null)
   const [open, setOpen] = useState(false)
-  const [anchor, setAnchor] = useState<{ top: number; right: number } | null>(null)
+  const [anchor, setAnchor] = useState<{
+    top: number | null
+    bottom: number | null
+    right: number
+  } | null>(null)
 
   const load = useCallback(async () => {
     try {
@@ -566,7 +570,7 @@ function HostTermsMenu({
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [open ])
+  }, [open])
 
   const attached = new Set(
     [
@@ -575,8 +579,10 @@ function HostTermsMenu({
     ].filter((s): s is string => !!s),
   )
   const others = (host ?? []).filter((h) => !attached.has(h.id))
+  // Hide only when the backend has no list endpoint (relay view, old
+  // backend). When the endpoint exists but there is nothing else, keep the
+  // header button with a 0 badge so the header layout stays stable.
   if (!host) return null
-  if (others.length === 0) return null
 
   const onKill = async (sid: string) => {
     setKilling(sid)
@@ -599,10 +605,27 @@ function HostTermsMenu({
       return
     }
     const r = btn.getBoundingClientRect()
-    setAnchor({
-      top: Math.min(r.bottom + 6, Math.max(8, window.innerHeight - 80)),
-      right: Math.max(8, window.innerWidth - r.right),
-    })
+    // Drop down by default; drop upward when there is not enough room
+    // below but more room above (short landscape phones, zoomed pages).
+    const MENU_EST = 320
+    const spaceBelow = window.innerHeight - r.bottom
+    const right = Math.max(8, window.innerWidth - r.right)
+    if (spaceBelow >= MENU_EST || r.top <= spaceBelow) {
+      setAnchor({
+        top: Math.max(8, Math.min(r.bottom + 6, window.innerHeight - 80)),
+        bottom: null,
+        right,
+      })
+    } else {
+      setAnchor({
+        top: null,
+        bottom: Math.max(
+          8,
+          Math.min(window.innerHeight - r.top + 6, window.innerHeight - MENU_EST),
+        ),
+        right,
+      })
+    }
     setOpen(true)
   }
 
@@ -613,7 +636,7 @@ function HostTermsMenu({
         className="term-tab-add host-menu-btn"
         aria-label={`Other sessions on this host (${others.length})`}
         title={`Other sessions on this host (${others.length}) — shared, anyone can attach`}
-        aria-haspopup="menu"
+        aria-haspopup="dialog"
         aria-expanded={open}
         onClick={(e) => toggle(e.currentTarget)}
       >
@@ -636,9 +659,13 @@ function HostTermsMenu({
               />
               <div
                 className="host-menu-dropdown"
-                role="menu"
+                role="dialog"
                 aria-label="Other sessions on this host"
-                style={{ top: anchor.top, right: anchor.right }}
+                style={
+                  anchor.top != null
+                    ? { top: anchor.top, right: anchor.right }
+                    : { bottom: anchor.bottom ?? 8, right: anchor.right }
+                }
                 onClick={(e) => e.stopPropagation()}
               >
                 <div className="host-menu-head">
@@ -653,6 +680,11 @@ function HostTermsMenu({
                     Refresh
                   </button>
                 </div>
+                {others.length === 0 ? (
+                  <div className="host-menu-empty" role="status">
+                    No other sessions — you&apos;re the only one here.
+                  </div>
+                ) : (
                 <ul className="host-menu-list">
                   {others.map((h) => (
                     <li key={h.id} className="host-term">
@@ -702,6 +734,7 @@ function HostTermsMenu({
                     </li>
                   ))}
                 </ul>
+                )}
               </div>
             </>,
             document.body,
