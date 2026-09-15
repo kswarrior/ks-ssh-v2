@@ -159,6 +159,10 @@ fn https_base(ws_base: &str) -> String {
 /// `local_base`: loopback HTTP base (e.g. `http://127.0.0.1:PORT`) the agent
 /// proxies `rpc-*` / `shell-*` relay messages to — same router/auth/DB as
 /// `--port`, so Visit-over-WSS is fully functional with no open port.
+/// `viewer_pin`: one-time `--relay-auth` PIN string for the startup panel
+/// (the verifier stays in `relay_pin`; the string is display-only).
+/// `public_url`: local UI URL (`Some` when serving alongside, `None` pure agent).
+/// `auth_on`: local login gate on/off (panel row only).
 pub async fn run_agent(
     relay: &str,
     token: &str,
@@ -166,6 +170,9 @@ pub async fn run_agent(
     e2e_key: Option<E2eKey>,
     relay_pin: Option<std::sync::Arc<crate::auth::RelayPinState>>,
     local_base: String,
+    viewer_pin: Option<String>,
+    public_url: Option<String>,
+    auth_on: bool,
 ) {
     // rustls ships without a crypto provider — install ring once.
     let _ = rustls::crypto::ring::default_provider().install_default();
@@ -173,33 +180,40 @@ pub async fn run_agent(
     let url = format!("{base}/v1/agent?token={token}");
     let http = https_base(base);
     // NOTE: the token is safe to log (routing only). The E2E secret
-    // `k` must NEVER appear in logs except in the one-time share links below.
-    // The viewer PIN (when `--relay-auth`) is likewise printed once and never
-    // logged again.
-    println!("Relay token: {token} — enter it in the SSH page to connect.");
-    println!("Relay: {url} (no open port needed)");
+    // `k` appears ONLY in the one-time share links inside the startup
+    // panel below — never in any other log line.
+    // The viewer PIN (when `--relay-auth`) is likewise shown once in the
+    // panel and never logged again.
     crate::db::audit("-", "local", "relay-register", token, "ok");
-    if let Some(ref k) = e2e_key {
-        let secret = k.to_base64url();
-        let fp = k.fingerprint();
-        println!("E2E: ON (AES-256-GCM, {E2E_ALG}) — relay sees only ciphertext sizes.");
-        println!("E2E fingerprint: {fp} — verify it matches in the viewer on first connect (TOFU).");
-        println!("Share link (contains secret — send directly, do not log):");
-        println!("  {http}/v/{token}#k={secret}");
-        println!("  {http}/#/session/{token}#k={secret}");
-        // Drop the display copy immediately (the key itself stays in memory).
-    } else {
-        println!("E2E: OFF (legacy --no-e2e) — relay can see plaintext. Explicit escape hatch only; prefer the default E2E link above.");
+    // One-time display copies for the panel (the key itself stays in memory).
+    let (panel_key, panel_fp) = match e2e_key.as_ref() {
+        Some(k) => (Some(k.to_base64url()), Some(k.fingerprint())),
+        None => (None, None),
+    };
+    let e2e_on = e2e_key.is_some();
+    if !e2e_on {
         crate::db::audit("-", "local", "relay-downgrade", token, "explicit-no-e2e");
     }
-    if relay_pin.is_some() {
-        println!("Relay auth: ON — viewers must present the PIN inside E2E (never in query/logs) before data flows. Mint fresh PINs via POST /api/relay/pin. Default without --relay-auth stays bearer-open.");
-    }
-    if push_ui {
-        println!("Fullscreen UI: {http}/v/{token}  (or {http}/#/session/{token})");
-        println!("Visit in CF opens the full CLI UI (Terminal, Files, Ports, Host) over WSS — same as --port, fully functional.");
-        println!("UI bundle is public build output (zero secrets) served with no-store; all session data inside it travels via E2E when on.");
-    }
+    // Pure agent: surface the internal loopback for debugging; combined
+    // mode already shows the public URL (same target), so skip it there.
+    let loopback_row = if public_url.is_none() {
+        Some(local_base.clone())
+    } else {
+        None
+    };
+    crate::banner::print(&crate::banner::StartupBanner {
+        local_url: public_url,
+        loopback: loopback_row,
+        relay_http: Some(http.clone()),
+        token: Some(token.to_string()),
+        e2e_on,
+        e2e_key: panel_key,
+        e2e_fp: panel_fp,
+        viewer_pin,
+        auth_on,
+        relay_auth_on: relay_pin.is_some(),
+        push_ui,
+    });
 
     // Session binding: one random `sess` per run, `epoch` bumps per connect.
     // AAD=`TOKEN|sess|dir|epoch` so cross-session/epoch replays fail even
