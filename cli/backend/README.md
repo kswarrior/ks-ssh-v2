@@ -20,7 +20,6 @@ over WSS to `https://ks-ssh-v2.kswarriorpro.workers.dev` (see `--relay`):
 # │ E2E key <SECRET>                                       │
 # │ Finger  <16-hex> (verify in viewer, TOFU)              │
 # │ Link    https://ks-ssh-v2.kswarriorpro.workers.dev/v/ABCDE1234#k=<SECRET>
-# │ Link    https://ks-ssh-v2.kswarriorpro.workers.dev/#/session/ABCDE1234#k=<SECRET>
 # │ Login   OFF (open access)                              │
 # ╰────────────────────────────────────────────────────────╯
 # With --no-e2e the panel shows `E2E  OFF (relay-visible)` and links
