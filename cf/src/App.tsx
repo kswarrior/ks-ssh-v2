@@ -345,15 +345,35 @@ function HomePage() {
       </div>
 
       <h2>Features</h2>
-      <div className="grid">
-        {FEATURES_FROM_MD.map((f) => (
-          <FeatureTile
-            key={f.title}
-            icon={FEATURE_ICONS[f.title] ?? FEATURE_ICONS['Token auth']!}
-            title={f.title}
-            text={f.text}
-          />
-        ))}
+      <div className="features-image-grid">
+        <div className="card feature-image-card">
+          <div className="feature-image-text">
+            <h3>Terminal</h3>
+            <p>Real PTY, multi-tab + vertical split, gap-free resume, predictive echo, CJK/IME + search & export, touch bar.</p>
+          </div>
+          <img src="/images/terminal.png" alt="Terminal" className="feature-image" loading="lazy" />
+        </div>
+        <div className="card feature-image-card">
+          <div className="feature-image-text">
+            <h3>Files</h3>
+            <p>HOME-jailed files & editor (1/5/100 MB caps), lexical path handling, zip/unzip, and media previews.</p>
+          </div>
+          <img src="/images/files.png" alt="Files" className="feature-image" loading="lazy" />
+        </div>
+        <div className="card feature-image-card">
+          <div className="feature-image-text">
+            <h3>Ports</h3>
+            <p>Live /proc ports with process list, per-port kill, and connection tracking over WSS.</p>
+          </div>
+          <img src="/images/ports.png" alt="Ports" className="feature-image" loading="lazy" />
+        </div>
+        <div className="card feature-image-card">
+          <div className="feature-image-text">
+            <h3>Host</h3>
+            <p>Per-core/RAM/swap/df-filtered host monitoring, metrics and system info – same as local --port.</p>
+          </div>
+          <img src="/images/host.png" alt="Host" className="feature-image" loading="lazy" />
+        </div>
       </div>
     </section>
   )
