@@ -768,16 +768,27 @@ async fn spawn_shell_bridge(
         }
         // Connect with the viewer's session cookie (login over relay works:
         // the shim forwards `ks_ssh_auth` from its rpc cookie jar).
+        // NOTE: tungstenite 0.30 requires a hand-built Request to already
+        // carry every handshake header (Host/Connection/Upgrade/
+        // Sec-WebSocket-Version/Sec-WebSocket-Key) — a bare builder fails
+        // every dial with `sec-websocket-key` and relay terminals never
+        // open. Build via `IntoClientRequest` (adds all of them + a fresh
+        // key) and only append our Cookie afterwards.
         let req = {
-            use tokio_tungstenite::tungstenite::http::Request as HttpRequest;
-            let mut builder = HttpRequest::builder().uri(url.as_str());
+            use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+            use tokio_tungstenite::tungstenite::http::header::{COOKIE, HeaderValue};
+            let mut req = url
+                .as_str()
+                .into_client_request()
+                .map_err(|e| anyhow::anyhow!("loopback shell request: {e}"))?;
             if let Some(c) = cookie.as_deref().filter(|c| !c.is_empty()) {
-                builder = builder.header("Cookie", c);
+                req.headers_mut().insert(
+                    COOKIE,
+                    HeaderValue::from_str(c)
+                        .map_err(|e| anyhow::anyhow!("bad cookie header: {e}"))?,
+                );
             }
-            builder
-                .header("Host", "127.0.0.1")
-                .body(())
-                .map_err(|e| anyhow::anyhow!("{e}"))?
+            req
         };
         let (local_ws, _) = connect_async(req)
             .await
