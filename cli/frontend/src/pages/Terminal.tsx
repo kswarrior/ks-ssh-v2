@@ -1536,7 +1536,8 @@ function ShellSession({
           // Send failed — the socket error/close path takes over.
         }
       }
-      if (lastMsgRef.current > 0 && now - lastMsgRef.current > STALE_MS) {
+      // Only recycle when v2 is ready and we have had some traffic — empty idle terminals that are still handshaking (v2==false) must not be killed after 12s.
+      if (v2Ref.current && lastMsgRef.current > 0 && now - lastMsgRef.current > STALE_MS) {
         try {
           live.close()
         } catch {
