@@ -264,4 +264,53 @@ cli/backend/src/relay.rs:299,1108,1191
 
 ---
 
+## 9. Preview Debugging (CF + CLI)
+
+Preview commands (both sides):
+
+```bash
+# CF SPA + Worker preview (serves dist/client + worker, DO on localhost)
+cd cf
+npm run build        # tsc -b && vite build -> dist/client + dist/ks_ssh_v2
+npx vite preview --port 4173 --strictPort   # open http://localhost:4173/ (NOT 127.0.0.1)
+npm run test:e2e      # e2e-check.mjs + relay-check.mjs (vectors + routing/gating)
+
+# CLI frontend preview (local UI bundle that gets embedded into the binary)
+cd cli/frontend
+npm run build        # tsc -b && vite build -> dist/ (single-file source for ui.rs)
+
+# CLI backend smoke (loopback, no relay)
+cd cli
+cargo test -p ks-ssh                          # 83 tests
+./release/ks-ssh --port 18080 & curl -s http://127.0.0.1:18080/api/hello
+```
+
+### 9.1 Findings (preview run, 2026-09-15)
+
+| # | Area | Result |
+|---|------|--------|
+| 1 | `cf` `npm run build` | PASS — `dist/client` 276kB JS + `dist/ks_ssh_v2` 16.9kB worker |
+| 2 | `cf` `npx oxlint` | PASS with 4 pre-existing warnings only: `App.tsx:1439,1806` `set-state-in-effect`, `App.tsx:1438,1694` `exhaustive-deps` — cascading-render hints, no errors |
+| 3 | `cli/frontend` `npm run build` | PASS — 788kB single-file JS (by design, inlined by `backend/src/ui.rs`); chunk-size warning fixed via `chunkSizeWarningLimit: 900` in `cli/frontend/vite.config.ts` |
+| 4 | `cargo test -p ks-ssh` | PASS — 83 passed, 0 failed |
+| 5 | `cf` `test:e2e` | PASS — `e2e-check` (legacy + session vectors, negatives) + `relay-check` (rate-limit, routing, PIN gating) green |
+| 6 | CLI smoke `--port 18080` | PASS — `/api/hello` returns `KS SSH — hello world` |
+| 7 | `vite preview` bind | NOTE — binds `[::1]:4173`; `curl http://127.0.0.1:4173/` fails (`000`), `curl http://localhost:4173/` → `200`. Not a bug — use `localhost` URL or `vite preview --host 127.0.0.1` |
+
+### 9.2 Fixes applied
+
+- `cli/frontend/vite.config.ts`: added `build.chunkSizeWarningLimit: 900` — the ~790kB bundle is intentional (single-file relay push, see `cli/backend/src/ui.rs`), so the 500kB default warning was noise. Verified: warning gone after rebuild.
+- No code/logic bugs found in preview — E2E vectors, relay routing/gating, shell replay (`v2 &from=off`), boot `Promise.race 8500/7500`, `reset_seq`, `STALE 45s` all green.
+
+### 9.3 Preview verify checklist
+
+- [ ] `cd cf && npm run build && npx oxlint` (warnings only, no errors)
+- [ ] `cd cli/frontend && npm run build` (no chunk warning)
+- [ ] `cd cli && cargo test -p ks-ssh` (83 pass)
+- [ ] `cd cf && npm run test:e2e` (all vectors green)
+- [ ] `vite preview` → open `http://localhost:4173/` → `200`
+- [ ] `./release/ks-ssh --port 18080` → `/api/hello` → hello world
+
+---
+
 *Generated for Muse Spark / opencode — main-agent only, no Task sub-agents.*

@@ -4,17 +4,19 @@
 > `~/.ssh/config`, `scp`) is the baseline — this page compares what you get when
 > you want it **in a browser** and/or **without opening ports**.
 
+> **Honest re-verification 2026-09-15 — main agent only, no sub-agents (per `debugging.md` Read → Understand → Fix → Build):** full read of `cf/src/App.tsx` (2608 lines), `cf/src/e2e.ts`, `cf/src/e2e.fixture.json`, `cf/worker/room.ts`, `cf/worker/index.ts`, `cf/worker/limit.ts`, `cf/wrangler.jsonc`, `cli/backend/src/main.rs`, `auth.rs`, `e2e.rs`, `relay.rs`, `shell.rs`, `files.rs`, `ports.rs`, `host.rs`, `db.rs`, `chat.rs`, `banner.rs`, `ui.rs`, `cli/frontend/src/App.tsx`, `relay-shim.ts`, `relay-e2e.ts`, `pages/Terminal.tsx`, `Files.tsx`, `Ports.tsx`, `Host.tsx`, `Login.tsx`, `Users.tsx`, `Audit.tsx`, `Recordings.tsx`, `components/ChatWidget.tsx`, `RecordingPlayer.tsx`, `hash-route.ts` and scripts. All claims below re-checked against these files:line citations; deltas from previous version noted in `Scoring deltas 2026-09-15`.
+
 Columns: **KS** = KS SSH (this repo) · **SSH** = OpenSSH baseline · **sshx** =
 sshx.io · **tmate** · **upterm** · **ttyd** · **wetty** = wetty/GoTTY ·
 **Sshw** = Sshwifty · **Guac** = Apache Guacamole · **Tele** = Teleport ·
 **Tail** = Tailscale SSH / CF Tunnel / ZeroTier · **VSCode** = VS Code tunnels.
 
-## Homepage Features
+## Homepage Features (verified 2026-09-15)
 
-- **Terminal**: Real PTY, multi-tab + vertical split, gap-free resume, predictive echo, CJK/IME + search & export, touch bar.
-- **Files**: HOME-jailed files & editor (1/5/100 MB caps), lexical path handling, zip/unzip, and media previews.
-- **Ports**: Live /proc ports with process list, per-port kill, and connection tracking over WSS.
-- **Host**: Per-core/RAM/swap/df-filtered host monitoring, metrics and system info – same as local --port.
+- **Terminal**: Real PTY, multi-tab + vertical split, gap-free resume (`v2` `u64-LE offset + PTY bytes`, `ready {v,seq,behind}`, `?from=` replay, `ack` watermark, `ping`/`pong` RTT), predictive echo, CJK/IME + search & export, touch bar, bell/unread/latency. (`cli/backend/src/shell.rs:17-68,135,205,239`, `cli/frontend/src/pages/Terminal.tsx:40-48,898,989,1009`).
+- **Files**: HOME-jailed files & editor (caps: read 1 MB `files.rs:102`, save 5 MB `files.rs:104`, upload/download 100 MB `files.rs:106,961`, zip 200 MB `files.rs:1224`, unzip total 1 GB `files.rs:1226`), lexical path handling for missing paths (`files.rs:162-180`), zip/unzip, and media previews.
+- **Ports**: Live `/proc/net/{tcp,tcp6,udp,udp6}` + `ss` fallback, per-port kill (TERM → wait → KILL, refuses PID 1/self, audited `ports-kill` `ports.rs:388-449`), and connection tracking over WSS.
+- **Host**: Per-core (`/proc/stat` `host.rs:191-240` + `/proc/cpuinfo` `host.rs:150`), RAM/swap (`/proc/meminfo` `host.rs:278`), `df -kP -T` filtered (`host.rs:320-365`) host monitoring, metrics and system info – same as local --port.
 
 ## Identity
 
