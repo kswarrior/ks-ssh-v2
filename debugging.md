@@ -1,60 +1,33 @@
 # KS SSH v2 — Full CF + CLI Debugging Guide
 
-> One debug doc for **both** sides: `cf/` (Cloudflare Worker + SPA) and `cli/` (Rust backend + embedded React frontend). Covers architecture, local run, logs, and **how to spawn sub-agents** for parallel debugging.
+> One debug doc for **both** sides: `cf/` (Cloudflare Worker + SPA) and `cli/` (Rust backend + embedded React frontend). Covers architecture, local run, logs, and debugging **directly in the main agent** (no sub-agents).
 
 ---
 
-## 0. Spawn Sub-Agent for Debugging (how to use `Task`)
+## 0. Debugging Approach — Main Agent Only
 
-You **must** use sub-agents for any open-ended codebase search or multi-file fix. The main agent keeps context short; sub-agents do the heavy lifting.
-
-### When to spawn
-- User asks to “check cli and cf both flows” → spawn 2 sub-agents (one `cf/`, one `cli/`).
-- Searching for a bug that may be in `cf/src/App.tsx` **and** `cli/frontend/src/pages/Terminal.tsx` **and** `cli/backend/src/relay.rs`.
-- Any task with >3 files or >2 hypotheses.
-
-### How to spawn (Task tool)
-
-```ts
-// CF flow
-task({
-  description: "CF Visit loader",
-  prompt: "Explore cf/src/App.tsx SshVisitPage, cf/worker/room.ts, cf/worker/index.ts. Find why second Visit is 4-5s and returns loading. Return files:lines.",
-  subagent_type: "explore"
-})
-
-// CLI flow
-task({
-  description: "CLI relay",
-  prompt: "Explore cli/frontend/src/relay-shim.ts, cli/backend/src/relay.rs, cli/frontend/src/pages/Terminal.tsx. Find why E2E seq 0 fails on 2nd tab. Return files:lines.",
-  subagent_type: "explore"
-})
-
-// General multi-step fix
-task({
-  description: "Fix terminal reload",
-  prompt: "Fix STALE_MS 12s → 45s and backoff 500→200 in cli/frontend/src/pages/Terminal.tsx, verify with tsc -b && vite build. Return what you changed.",
-  subagent_type: "general"
-})
-```
+Do **all** debugging in the main agent. Do **not** spawn sub-agents (`Task` tool).
 
 ### Rules
-- `subagent_type: "explore"` → read-only, fast, thoroughness `quick|medium|very thorough`.
-- `subagent_type: "general"` → can edit, run bash, verify.
-- Always pass `description` (3-5 words), `prompt` (detailed task + what to return), `subagent_type`.
-- Main agent **must not** duplicate work after delegating; wait for result.
-- Sub-agents run in parallel — launch them in **one turn** with multiple `task` calls.
+- Main agent reads, searches (`Grep`/`Glob`/`Read`), edits, and verifies builds itself.
+- For CF + CLI flows, check both sides sequentially in the same session — e.g. `cf/src/App.tsx` then `cli/frontend/src/relay-shim.ts` — instead of delegating.
+- Keep context focused: read only the files/lines listed in §3 / §8 and expand as needed.
+- Verify in main after every fix: `tsc -b && vite build`, `bash rebuild.sh`, `wrangler dev` / `RUST_LOG=debug`.
 
-### Example — debugging “Visit 1-3 min vs --port 2-4s”
+### Example — debugging "Visit 1-3 min vs --port 2-4s" (main only)
 
-```ts
-task({ description: "Trace Visit 1-3min", prompt: "Trace click Visit in cf/src/App.tsx SSHPage visitUrl -> SshVisitPage vs raw /v/ -> cli/frontend/src/App.tsx boot -> relay-shim.ts ensure() RPC 120s. Why does relay take 120s and port 50ms? Check cf/worker/room.ts ensureUiLoaded and cli/backend/src/ui.rs build_single_file. Return timeline.", subagent_type: "explore" })
+```bash
+# Main agent does directly:
+grep -rn "AUTH_TIMEOUT\|HELLO_TIMEOUT\|RPC_TIMEOUT" cli/frontend/src/App.tsx cli/frontend/src/relay-shim.ts
+# Read cf/worker/room.ts:113 ensureUiLoaded and cli/backend/src/ui.rs build_single_file
+# Compare relay path vs port path, check Promise.race timeout 8500/7500 vs 120s
 ```
 
-### Example — debugging “empty terminal reload 60s”
+### Example — debugging "empty terminal reload 60s" (main only)
 
-```ts
-task({ description: "Terminal reload 60s", prompt: "Check cli/frontend/src/pages/Terminal.tsx ShellSession STALE_MS 12s, PING_MS 5s, backoffMs 500*2^a, lastMsgRef, v2Ref, saveOffset 10s throttle. Why does reload <2s fast but >10s slow even empty? Check shell.rs from handling.", subagent_type: "explore" })
+```bash
+grep -n "STALE_MS\|PING_MS\|backoffMs" cli/frontend/src/pages/Terminal.tsx
+# Read cli/frontend/src/pages/Terminal.tsx:40,1528,1579 and cli/backend/src/shell.rs from handling
 ```
 
 ---
@@ -198,35 +171,35 @@ Debug: open empty terminal → wait 15s → reload → Network `v1/shell?v=2&fro
 
 ---
 
-## 6. Sub-Agent Debugging Playbook
+## 6. Debugging Playbook (Main Agent Only)
 
 **Template to copy-paste**
 
 ```md
 Task: Debug <symptom>
-Spawn:
-- explore `cf/...` → files:lines for <CF part>
-- explore `cli/...` → files:lines for <CLI part>
-- general fix → edit + `tsc -b && vite build` + `bash rebuild.sh`
+Steps in main agent:
+1. Grep/Read cf/... for <CF part> — note files:lines
+2. Grep/Read cli/... for <CLI part> — note files:lines
+3. Edit directly, then verify: `tsc -b && vite build` + `bash rebuild.sh`
 ```
 
 **Current fixes as examples**
 
-| Fix | Sub-agents spawned | What they returned |
-|-----|-------------------|-------------------|
-| `online stale` | 1×explore `cf/src/App.tsx` | `online` persisted, no recheck |
-| `Visit 1-3 min` | 2×explore `cf/worker/room.ts` + `cli/frontend/src/relay-shim.ts` | `RPC 120s` vs `port 50ms` |
-| `2nd open 4-5s` | 1×explore `E2E seq` | `reset_seq` missing |
-| `terminal 60s` | 1×explore `Terminal.tsx` | `STALE 12s + backoff 36.5s` |
+| Fix | Where main agent looked | Root cause |
+|-----|------------------------|------------|
+| `online stale` | `cf/src/App.tsx:2400, 737` | `online` persisted, no recheck |
+| `Visit 1-3 min` | `cf/worker/room.ts` + `cli/frontend/src/relay-shim.ts` | `RPC 120s` vs `port 50ms` |
+| `2nd open 4-5s` | `cli/backend/src/e2e.rs` `cli/backend/src/relay.rs` `cli/frontend/src/relay-e2e.ts` | `reset_seq` missing |
+| `terminal 60s` | `cli/frontend/src/pages/Terminal.tsx:40,1528` | `STALE 12s + backoff 36.5s` |
 
-**How to spawn now (for next bug)**
+**How to debug next bug (main only)**
 
 ```bash
-# In this chat, the assistant will run:
-task({ description: "CF flow", prompt: "Explore cf/src/App.tsx ...", subagent_type: "explore" })
-task({ description: "CLI flow", prompt: "Explore cli/frontend/src/...", subagent_type: "explore" })
-# Then a general agent to fix both:
-task({ description: "Fix both flows", prompt: "Apply fixes to cf/src/App.tsx and cli/frontend/src/App.tsx and verify builds", subagent_type: "general" })
+# All in main agent, sequential:
+grep -rn "pattern" cf/src/App.tsx cli/frontend/src/pages/Terminal.tsx
+# Read files, edit, then verify:
+cd cf && npm run build
+cd cli && bash rebuild.sh
 ```
 
 ---
@@ -262,4 +235,4 @@ cli/backend/src/relay.rs:299,1108,1191
 
 ---
 
-*Generated for Muse Spark / opencode — use with `Task` sub-agents for every CF+CLI debug.*
+*Generated for Muse Spark / opencode — main-agent only, no Task sub-agents.*
