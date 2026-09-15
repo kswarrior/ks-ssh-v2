@@ -1107,9 +1107,7 @@ function ShellSession({
 
   // The emulator instance lives for the whole tab; only the socket
   // reconnects (so scrollback survives a reconnect).
-  // Use layout effect so the xterm is ready before the WebSocket connects —
-  // avoids a frame of blank while the socket waits for the terminal.
-  useLayoutEffect(() => {
+  useEffect(() => {
     const container = containerRef.current
     if (!container) return
     const term = new Terminal({
@@ -1471,33 +1469,7 @@ function ShellSession({
           const rest = confirmPredictions(bytes)
           bytes = rest
         }
-        if (bytes.length > 0) {
-          // Large replay (256KB ring) blocks the main thread if written at
-          // once — chunk it so the prompt appears quickly and the rest
-          // streams in without jank. Small live frames stay single-write.
-          if (bytes.length > 8192) {
-            let off = 0
-            const pump = () => {
-              const end = Math.min(off + 8192, bytes.length)
-              try {
-                term.write(bytes.subarray(off, end))
-              } catch {
-                // Emulator gone — ignore.
-              }
-              off = end
-              if (off < bytes.length) {
-                if (typeof requestAnimationFrame !== 'undefined') {
-                  requestAnimationFrame(pump)
-                } else {
-                  setTimeout(pump, 0)
-                }
-              }
-            }
-            pump()
-          } else {
-            term.write(bytes)
-          }
-        }
+        if (bytes.length > 0) term.write(bytes)
         maybeAck(false)
         const now = Date.now()
         if (now - lastSaveRef.current > 10000) {
@@ -1872,11 +1844,6 @@ function ShellSession({
           >
             ↓ latest
           </button>
-        )}
-        {status === 'connecting' && retryAttempt === 0 && (
-          <div className="term-offline" role="status">
-            <span>connecting…</span>
-          </div>
         )}
         {retryAttempt > 0 && status !== 'online' && (
           <div className="term-offline term-retrying" role="status">
