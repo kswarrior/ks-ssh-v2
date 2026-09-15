@@ -1873,6 +1873,11 @@ function ShellSession({
             ↓ latest
           </button>
         )}
+        {status === 'connecting' && retryAttempt === 0 && (
+          <div className="term-offline" role="status">
+            <span>connecting…</span>
+          </div>
+        )}
         {retryAttempt > 0 && status !== 'online' && (
           <div className="term-offline term-retrying" role="status">
             <span>
