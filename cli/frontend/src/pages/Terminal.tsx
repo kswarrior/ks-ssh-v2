@@ -223,23 +223,10 @@ function timeAgo(idle: number): string {
  * (`GET /api/record/status`). Sessions capture timestamped input+output
  * frames for read-only replay under Recordings.
  */
-const REC_BANNER_HIDE_KEY = 'ks-ssh:rec-banner-hidden'
-
 function RecordBanner() {
   const [on, setOn] = useState<boolean | null>(null)
   // Dismiss hides the notice only — recording keeps running on the backend.
   const [dismissed, setDismissed] = useState(false)
-  // "Never show again" persists across refreshes via localStorage.
-  const [hidden, setHidden] = useState<boolean>(() => {
-    try {
-      return localStorage.getItem(REC_BANNER_HIDE_KEY) === '1'
-    } catch {
-      return false
-    }
-  })
-  // ✕ opens a confirm dialog (like terminal delete) instead of hiding at once.
-  const [confirmOpen, setConfirmOpen] = useState(false)
-  const [neverAgain, setNeverAgain] = useState(false)
 
   useEffect(() => {
     let alive = true
@@ -256,96 +243,24 @@ function RecordBanner() {
     }
   }, [])
 
-  // Escape closes the hide-notice dialog.
-  useEffect(() => {
-    if (!confirmOpen) return
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setConfirmOpen(false)
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [confirmOpen])
-
   if (on !== true) return null
-  if (dismissed || hidden) return null
-
-  const closeConfirm = () => {
-    setConfirmOpen(false)
-    setNeverAgain(false)
-  }
-
-  const saveHide = () => {
-    if (neverAgain) {
-      try {
-        localStorage.setItem(REC_BANNER_HIDE_KEY, '1')
-      } catch {
-        // Storage unavailable — falls back to hiding for this view only.
-      }
-      setHidden(true)
-    }
-    setDismissed(true)
-    setConfirmOpen(false)
-    setNeverAgain(false)
-  }
-
+  if (dismissed) return null
   return (
-    <>
-      <div className="rec-banner" role="status">
-        <button
-          type="button"
-          className="rec-banner-dismiss"
-          aria-label="Hide recording notice (recording stays on)"
-          title="Hide notice — recording stays on"
-          aria-haspopup="dialog"
-          onClick={() => setConfirmOpen(true)}
-        >
-          ✕
-        </button>
-        <span>● Session recording is ON — input + output are stored for replay.</span>
-        <a className="btn btn-sm" href="#/recordings">
-          View recordings
-        </a>
-      </div>
-      {confirmOpen && (
-        <div className="term-confirm-overlay" onClick={closeConfirm}>
-          <div
-            className="term-confirm"
-            role="alertdialog"
-            aria-modal="true"
-            aria-labelledby="rec-hide-title"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <h2 id="rec-hide-title">Hide recording notice?</h2>
-            <p>Recording stays ON — this only hides the banner.</p>
-            <label className="rec-hide-row">
-              <input
-                type="checkbox"
-                checked={neverAgain}
-                onChange={(e) => setNeverAgain(e.target.checked)}
-              />
-              Never show again
-            </label>
-            <div className="term-confirm-actions">
-              <button
-                type="button"
-                className="btn btn-sm"
-                onClick={closeConfirm}
-                autoFocus
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                className="btn btn-sm btn-primary"
-                onClick={saveHide}
-              >
-                Save
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-    </>
+    <div className="rec-banner" role="status">
+      <button
+        type="button"
+        className="rec-banner-dismiss"
+        aria-label="Dismiss recording notice (recording stays on)"
+        title="Dismiss notice — recording stays on"
+        onClick={() => setDismissed(true)}
+      >
+        ✕
+      </button>
+      <span>● Session recording is ON — input + output are stored for replay.</span>
+      <a className="btn btn-sm" href="#/recordings">
+        View recordings
+      </a>
+    </div>
   )
 }
 
@@ -664,6 +579,10 @@ function HostTermsMenu({
     ].filter((s): s is string => !!s),
   )
   const others = (host ?? []).filter((h) => !attached.has(h.id))
+  // Hide only when the backend has no list endpoint (relay view, old
+  // backend). When the endpoint exists but there is nothing else, keep the
+  // header button with a 0 badge so the header layout stays stable.
+  if (!host) return null
 
   const onKill = async (sid: string) => {
     setKilling(sid)
@@ -686,32 +605,29 @@ function HostTermsMenu({
       return
     }
     const r = btn.getBoundingClientRect()
-    // Drop down by default; flip upward when there is not enough room
-    // below (short landscape phones, zoomed pages). Mirrors the tab ⋮ menu.
-    const MENU_EST = 340
+    // Drop down by default; drop upward when there is not enough room
+    // below but more room above (short landscape phones, zoomed pages).
+    const MENU_EST = 320
     const spaceBelow = window.innerHeight - r.bottom
     const right = Math.max(8, window.innerWidth - r.right)
     if (spaceBelow >= MENU_EST || r.top <= spaceBelow) {
       setAnchor({
-        top: Math.min(r.bottom + 6, Math.max(8, window.innerHeight - 80)),
+        top: Math.max(8, Math.min(r.bottom + 6, window.innerHeight - 80)),
         bottom: null,
         right,
       })
     } else {
       setAnchor({
         top: null,
-        bottom: Math.max(8, window.innerHeight - r.top + 6),
+        bottom: Math.max(
+          8,
+          Math.min(window.innerHeight - r.top + 6, window.innerHeight - MENU_EST),
+        ),
         right,
       })
     }
     setOpen(true)
   }
-
-  // No list endpoint (relay view, old backend) — hide the button entirely.
-  // When the endpoint exists but there are no *other* sessions, keep the
-  // button visible with a 0 badge so it is always findable in the header;
-  // the dropdown then shows an empty state instead of disappearing.
-  if (!host) return null
 
   return (
     <div className="host-menu-wrap">
@@ -720,7 +636,7 @@ function HostTermsMenu({
         className="term-tab-add host-menu-btn"
         aria-label={`Other sessions on this host (${others.length})`}
         title={`Other sessions on this host (${others.length}) — shared, anyone can attach`}
-        aria-haspopup="menu"
+        aria-haspopup="dialog"
         aria-expanded={open}
         onClick={(e) => toggle(e.currentTarget)}
       >
@@ -743,7 +659,7 @@ function HostTermsMenu({
               />
               <div
                 className="host-menu-dropdown"
-                role="menu"
+                role="dialog"
                 aria-label="Other sessions on this host"
                 style={
                   anchor.top != null
@@ -766,7 +682,7 @@ function HostTermsMenu({
                 </div>
                 {others.length === 0 ? (
                   <div className="host-menu-empty" role="status">
-                    No other sessions on this host.
+                    No other sessions — you&apos;re the only one here.
                   </div>
                 ) : (
                 <ul className="host-menu-list">
@@ -2427,7 +2343,7 @@ export default function TerminalPage({
       <RecordBanner />
       <div className="term-header">
         <div className="term-bar" role="tablist" aria-label="Terminals">
-          {sessions.map((t, i) => {
+        {sessions.map((t, i) => {
           const isActive = t.id === active.id
           const st = statuses[t.id] ?? 'connecting'
           // Label = running process, else "terminal" — max 8 chars + "...".

@@ -1670,7 +1670,7 @@
   position: fixed;
   z-index: 72;
   width: min(380px, calc(100vw - 16px));
-  max-height: min(320px, calc(100svh - 16px));
+  max-height: 320px;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -1710,12 +1710,6 @@
   max-height: 240px;
   overflow-y: auto;
   overscroll-behavior: contain;
-}
-
-.host-menu-empty {
-  padding: 12px;
-  font-size: 13px;
-  opacity: 0.7;
 }
 
 .host-terms {
@@ -4582,23 +4576,6 @@ a.file-link {
 .rec-banner-dismiss:hover {
   background: rgba(255, 255, 255, 0.12);
   opacity: 1;
-}
-
-/* "Never show again" row in the hide-recording-notice dialog. */
-.rec-hide-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 14px;
-  cursor: pointer;
-  user-select: none;
-}
-
-.rec-hide-row input[type='checkbox'] {
-  width: 16px;
-  height: 16px;
-  accent-color: var(--accent, #28c840);
-  cursor: pointer;
 }
 
 /* Read-only replay player. */
