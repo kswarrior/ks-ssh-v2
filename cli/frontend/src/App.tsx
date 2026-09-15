@@ -142,6 +142,7 @@ export default function App() {
   const [bootProgress, setBootProgress] = useState(6)
   const [bootPhase, setBootPhase] = useState('Starting…')
   const [bootReady, setBootReady] = useState(false)
+  const [bootError, setBootError] = useState<string | null>(null)
   const [menuOpen, setMenuOpen] = useState(false)
   const menuWrapRef = useRef<HTMLDivElement | null>(null)
 
