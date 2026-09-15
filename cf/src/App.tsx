@@ -324,12 +324,12 @@ function HomePage() {
   useEffect(() => {
     if (expanded) return
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'ArrowLeft') prev()
-      else if (e.key === 'ArrowRight') next()
+      if (e.key === 'ArrowLeft') setIndex((i) => (i - 1 + count) % count)
+      else if (e.key === 'ArrowRight') setIndex((i) => (i + 1) % count)
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  })
+  }, [expanded, count])
 
   if (expanded) {
     return (
