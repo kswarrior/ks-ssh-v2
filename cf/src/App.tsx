@@ -117,6 +117,39 @@ function writeJSON(key: string, value: unknown) {
   }
 }
 
+const E2E_KEYS_STORAGE = 'ks-ssh:e2e'
+
+/** Saved E2E keys by entry id (survives reload; dropped with the entry). */
+function readE2eKeys(): Record<string, string> {
+  try {
+    const raw = localStorage.getItem(E2E_KEYS_STORAGE)
+    if (!raw) return {}
+    const parsed = JSON.parse(raw) as unknown
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {}
+    const out: Record<string, string> = {}
+    for (const [id, k] of Object.entries(parsed as Record<string, unknown>)) {
+      if (typeof id === 'string' && typeof k === 'string' && k.length > 0) {
+        out[id] = k
+      }
+    }
+    return out
+  } catch {
+    return {}
+  }
+}
+
+function writeE2eKeys(keys: Record<string, string>) {
+  try {
+    if (Object.keys(keys).length === 0) {
+      localStorage.removeItem(E2E_KEYS_STORAGE)
+    } else {
+      localStorage.setItem(E2E_KEYS_STORAGE, JSON.stringify(keys))
+    }
+  } catch {
+    // Storage unavailable (private mode) — keys still work for this session.
+  }
+}
+
 /** Map a location hash to a page, or null when it is not a page route. */
 function hashToPage(hash: string): PageId | null {
   const clean = hash.replace(/^#\/?/, '')
@@ -676,9 +709,9 @@ function SSHPage({
   const [name, setName] = useState('')
   const [token, setToken] = useState('')
   const [note, setNote] = useState('')
-  // Per-connection E2E (form state). The raw `k` is memory-only by design:
-  // it never enters `SshEntry` (which is persisted to localStorage) — only
-  // the `e2e` flag persists. Keys live in `e2eKeys` below + the URL fragment.
+  // Per-connection E2E (form state). The raw `k` is saved on this device
+  // in `ks-ssh:e2e` (keyed by entry id) so Visit keeps working across
+  // reloads — deleting the connection drops its key too.
   const [e2eOn, setE2eOn] = useState(false)
   const [e2eKey, setE2eKey] = useState('')
   const [e2eError, setE2eError] = useState<string | null>(null)
@@ -686,8 +719,15 @@ function SSHPage({
   // Fingerprint cache for exactly one key (fp only — never the key itself
   // beyond `k` as the cache key, matching the SessionPage TOFU pattern).
   const [keyFp, setKeyFp] = useState<{ k: string; fp: string } | null>(null)
-  // Memory-only E2E keys by entry id (cleared on reload — never persisted).
-  const [e2eKeys, setE2eKeys] = useState<Record<string, string>>({})
+  // Saved E2E keys by entry id (persisted to localStorage, survives reload).
+  const [e2eKeys, setE2eKeys] = useState<Record<string, string>>(() =>
+    readE2eKeys(),
+  )
+
+  // Persist the key map (dropping the storage row when empty).
+  useEffect(() => {
+    writeE2eKeys(e2eKeys)
+  }, [e2eKeys])
   const [connectingId, setConnectingId] = useState<string | null>(null)
   const [banner, setBanner] = useState<string | null>(null)
   const socketsRef = useRef(new Map<string, WebSocket>())
