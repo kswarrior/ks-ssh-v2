@@ -267,10 +267,9 @@ pub fn render(b: &StartupBanner, color: bool) -> String {
     };
 
     if color {
-        line(Some(""), title, &format!("{C_BOLD}{C_CYAN}"));
+        line(None, title, &format!("{C_BOLD}{C_CYAN}"));
     } else {
-        // Plain title row keeps the label column for alignment.
-        line(Some(""), title, "");
+        line(None, title, "");
     }
     for r in &rows {
         line(r.label, &r.value, if color { r.style } else { "" });
