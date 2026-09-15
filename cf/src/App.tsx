@@ -2075,11 +2075,25 @@ function SettingsPage({
 }) {
   const [confirmClear, setConfirmClear] = useState(false)
   return (
-    <section className="page" aria-labelledby="page-title-settings">
-      <h1 id="page-title-settings">Settings</h1>
-      <p className="lead">Settings save automatically on this device and take effect immediately.</p>
-      <div className="card">
-        <h2>Relay</h2>
+    <section className="page page-settings" aria-labelledby="page-title-settings">
+      <Reveal>
+        <div className="settings-head">
+          <span className="eyebrow">Tuning</span>
+          <h1 id="page-title-settings">Settings</h1>
+          <p className="lead">Settings save automatically on this device and take effect immediately.</p>
+        </div>
+      </Reveal>
+      <Reveal delay={70}>
+      <div className="card settings-card">
+        <div className="settings-card-top">
+          <span className="settings-icon" aria-hidden="true">
+            <Icon>
+              <circle cx="12" cy="12" r="3" />
+              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+            </Icon>
+          </span>
+          <h2>Relay</h2>
+        </div>
         <div className="form">
           <label className="field" style={{ gridColumn: '1 / -1' }}>
             Relay host (empty = this Worker)
@@ -2125,8 +2139,18 @@ function SettingsPage({
           </span>
         </div>
       </div>
-      <div className="card">
-        <h2>Appearance</h2>
+      </Reveal>
+      <Reveal delay={140}>
+      <div className="card settings-card">
+        <div className="settings-card-top">
+          <span className="settings-icon" aria-hidden="true">
+            <Icon>
+              <circle cx="12" cy="12" r="4" />
+              <path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" />
+            </Icon>
+          </span>
+          <h2>Appearance</h2>
+        </div>
         <div className="row-actions">
           <button
             type="button"
@@ -2146,8 +2170,19 @@ function SettingsPage({
           </button>
         </div>
       </div>
-      <div className="card">
-        <h2>Local data</h2>
+      </Reveal>
+      <Reveal delay={210}>
+      <div className="card settings-card settings-danger">
+        <div className="settings-card-top">
+          <span className="settings-icon settings-icon-danger" aria-hidden="true">
+            <Icon>
+              <path d="M3 6h18" />
+              <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" />
+              <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+            </Icon>
+          </span>
+          <h2>Local data</h2>
+        </div>
         <p>
           {entryCount} saved connection{entryCount === 1 ? '' : 's'} on this device (tokens stay in your browser).
         </p>
@@ -2176,6 +2211,7 @@ function SettingsPage({
           </div>
         )}
       </div>
+      </Reveal>
     </section>
   )
 }
