@@ -282,19 +282,17 @@ function Reveal({
   className?: string
 }) {
   const ref = useRef<HTMLDivElement | null>(null)
-  const [visible, setVisible] = useState(false)
+  const [visible, setVisible] = useState(() => {
+    if (typeof window === 'undefined') return true
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return true
+    if (typeof IntersectionObserver === 'undefined') return true
+    return false
+  })
 
   useEffect(() => {
+    if (visible) return
     const el = ref.current
     if (!el) return
-    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-      setVisible(true)
-      return
-    }
-    if (typeof IntersectionObserver === 'undefined') {
-      setVisible(true)
-      return
-    }
     const obs = new IntersectionObserver(
       (entries) => {
         for (const e of entries) {
@@ -308,7 +306,7 @@ function Reveal({
     )
     obs.observe(el)
     return () => obs.disconnect()
-  }, [])
+  }, [visible])
 
   return (
     <div
