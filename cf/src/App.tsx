@@ -1407,6 +1407,7 @@ function SshEditPage({
   settings: Settings
   editId: string | null
 }) {
+  void settings
   const entry = editId ? entries.find((x) => x.id === editId) ?? null : null
   const [name, setName] = useState(() => entry?.name ?? '')
   const [token, setToken] = useState(() => entry?.token ?? '')
@@ -2261,6 +2262,8 @@ export default function App() {
         >
           {page === 'home' && <HomePage />}
           {page === 'ssh' && <SSHPage entries={entries} onChange={setEntries} settings={settings} />}
+          {page === 'ssh-add' && <SshAddPage entries={entries} onChange={setEntries} settings={settings} />}
+          {page === 'ssh-edit' && <SshEditPage entries={entries} onChange={setEntries} settings={settings} editId={sshEditId} />}
           {page === 'installation' && <InstallationPage />}
           {page === 'settings' && (
             <SettingsPage
