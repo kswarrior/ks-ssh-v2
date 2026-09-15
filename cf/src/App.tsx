@@ -1192,6 +1192,443 @@ function SSHPage({
   )
 }
 
+function SshAddPage({
+  entries,
+  onChange,
+  settings,
+}: {
+  entries: SshEntry[]
+  onChange: (fn: (prev: SshEntry[]) => SshEntry[]) => void
+  settings: Settings
+}) {
+  const relayBase = relayHttpBase(settings)
+  const [name, setName] = useState('')
+  const [token, setToken] = useState('')
+  const [e2eOn, setE2eOn] = useState(false)
+  const [e2eKey, setE2eKey] = useState('')
+  const [e2eError, setE2eError] = useState<string | null>(null)
+  const [showKey, setShowKey] = useState(false)
+  const [keyFp, setKeyFp] = useState<{ k: string; fp: string } | null>(null)
+  const [banner, setBanner] = useState<string | null>(null)
+
+  const parsedFormKey = e2eOn ? extractKeyFromText(e2eKey) : null
+  const formFp = parsedFormKey && keyFp && keyFp.k === parsedFormKey ? keyFp.fp : null
+
+  useEffect(() => {
+    if (!parsedFormKey) return
+    if (keyFp && keyFp.k === parsedFormKey) return
+    let alive = true
+    const k = parsedFormKey
+    void fingerprintK(k)
+      .then((f) => {
+        if (alive) setKeyFp({ k, fp: f })
+      })
+      .catch(() => {})
+    return () => {
+      alive = false
+    }
+  }, [parsedFormKey, keyFp])
+
+  const submit = (e: FormEvent) => {
+    e.preventDefault()
+    const cleanName = name.trim()
+    const cleanToken = token.trim().toUpperCase()
+    if (!cleanName || !cleanToken) return
+    if (!TOKEN_EXACT_RE.test(cleanToken)) {
+      setBanner('Token is 5 or 9 letters/numbers — run `ks-ssh --token=` to get one.')
+      return
+    }
+    let cleanKey: string | null = null
+    if (e2eOn) {
+      cleanKey = extractKeyFromText(e2eKey)
+      if (!cleanKey) {
+        setE2eError('Enter the E2E key — paste the full share link (with #k=…) or the raw key.')
+        return
+      }
+    }
+    setE2eError(null)
+    const id = `ssh-${Date.now().toString(36)}-${Math.floor(Math.random() * 10000)}`
+    const next: SshEntry = {
+      id,
+      name: cleanName,
+      token: cleanToken,
+      note: '',
+      online: false,
+      e2e: e2eOn,
+    }
+    if (e2eOn && cleanKey) {
+      const k = cleanKey
+      const map = readE2eKeys()
+      map[id] = k
+      writeE2eKeys(map)
+    }
+    onChange((prev) => [...prev, next])
+    setE2eKey('')
+    window.location.hash = '#/ssh'
+    // Optional: probe relay immediately so the new entry shows online without manual refresh.
+    void (async () => {
+      try {
+        const res = await fetch(`${relayBase}/api/ssh/status?token=${encodeURIComponent(cleanToken)}`, { cache: 'no-store' })
+        if (res.ok) {
+          const data = (await res.json()) as { agentOnline?: boolean }
+          if (data.agentOnline === true) {
+            onChange((prev) => prev.map((x) => (x.id === id ? { ...x, online: true } : x)))
+          }
+        }
+      } catch {}
+    })()
+    void entries
+  }
+
+  return (
+    <section className="page page-ssh" aria-labelledby="page-title-ssh-add">
+      <div className="page-head">
+        <a className="btn btn-sm" href="#/ssh" aria-label="Back to SSH">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <polyline points="15 18 9 12 15 6" />
+          </svg>
+          Back
+        </a>
+        <h1 id="page-title-ssh-add" style={{ margin: 0, flex: 1 }}>New connection</h1>
+      </div>
+      <Reveal>
+        <div className="card form-card">
+          <form className="form" onSubmit={submit}>
+            <label className="field">
+              Name
+              <input
+                type="text"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="Home Lab"
+                autoComplete="off"
+                required
+                autoFocus
+              />
+            </label>
+            <label className="field">
+              Token
+              <input
+                type="text"
+                value={token}
+                onChange={(e) => setToken(e.target.value.toUpperCase().slice(0, 9))}
+                placeholder="A3K9Q"
+                autoComplete="off"
+                inputMode="text"
+                maxLength={9}
+                required
+              />
+            </label>
+            <label className="field checkbox-row" style={{ gridColumn: '1 / -1' }}>
+              <input
+                type="checkbox"
+                checked={e2eOn}
+                onChange={(e) => {
+                  setE2eOn(e.target.checked)
+                  setE2eError(null)
+                }}
+              />
+              E2E encrypted
+            </label>
+            {e2eOn && (
+              <label className="field ssh-note-field">
+                E2E key
+                <span style={{ display: 'flex', gap: '8px' }}>
+                  <input
+                    type={showKey ? 'text' : 'password'}
+                    value={e2eKey}
+                    onChange={(e) => {
+                      setE2eKey(e.target.value)
+                      setE2eError(null)
+                    }}
+                    placeholder="Paste full share link (…/v/TOKEN#k=…) or raw key"
+                    autoComplete="off"
+                    spellCheck={false}
+                    style={{ flex: 1 }}
+                  />
+                  <button
+                    type="button"
+                    className="btn btn-sm"
+                    onClick={() => setShowKey((v) => !v)}
+                    aria-label={showKey ? 'Hide E2E key' : 'Show E2E key'}
+                  >
+                    {showKey ? 'Hide' : 'Show'}
+                  </button>
+                </span>
+                {e2eError ? (
+                  <span className="session-status" role="alert">
+                    {e2eError}
+                  </span>
+                ) : formFp ? (
+                  <span className="session-status session-hint">
+                    🔒 fingerprint <code>{formFp}</code> (saved on this device with this connection)
+                  </span>
+                ) : (
+                  <span className="session-status session-hint">
+                    Saved on this device with this connection — deleting it drops the key too.
+                  </span>
+                )}
+              </label>
+            )}
+            {banner && (
+              <div className="banner-error" role="alert" style={{ gridColumn: '1 / -1' }}>
+                <p>{banner}</p>
+              </div>
+            )}
+            <div className="row-actions">
+              <a className="btn" href="#/ssh">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M18 6L6 18M6 6l12 12" />
+                </svg>
+                Cancel
+              </a>
+              <button type="submit" className="btn btn-primary">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M20 6L9 17l-5-5" />
+                </svg>
+                Connect
+              </button>
+            </div>
+          </form>
+        </div>
+      </Reveal>
+    </section>
+  )
+}
+
+function SshEditPage({
+  entries,
+  onChange,
+  settings,
+  editId,
+}: {
+  entries: SshEntry[]
+  onChange: (fn: (prev: SshEntry[]) => SshEntry[]) => void
+  settings: Settings
+  editId: string | null
+}) {
+  const entry = editId ? entries.find((x) => x.id === editId) ?? null : null
+  const [name, setName] = useState(() => entry?.name ?? '')
+  const [token, setToken] = useState(() => entry?.token ?? '')
+  const [e2eOn, setE2eOn] = useState(() => entry?.e2e === true)
+  const [e2eKey, setE2eKey] = useState(() => {
+    if (!entry) return ''
+    try {
+      const map = readE2eKeys()
+      return map[entry.id] ?? ''
+    } catch {
+      return ''
+    }
+  })
+  const [e2eError, setE2eError] = useState<string | null>(null)
+  const [showKey, setShowKey] = useState(false)
+  const [keyFp, setKeyFp] = useState<{ k: string; fp: string } | null>(null)
+  const [banner, setBanner] = useState<string | null>(null)
+
+  // Keep form in sync if entry loads late (e.g. after storage hydration)
+  useEffect(() => {
+    if (entry) {
+      setName(entry.name)
+      setToken(entry.token)
+      setE2eOn(entry.e2e === true)
+      try {
+        const map = readE2eKeys()
+        setE2eKey(map[entry.id] ?? '')
+      } catch {
+        setE2eKey('')
+      }
+    }
+  }, [entry?.id])
+
+  const parsedFormKey = e2eOn ? extractKeyFromText(e2eKey) : null
+  const formFp = parsedFormKey && keyFp && keyFp.k === parsedFormKey ? keyFp.fp : null
+
+  useEffect(() => {
+    if (!parsedFormKey) return
+    if (keyFp && keyFp.k === parsedFormKey) return
+    let alive = true
+    const k = parsedFormKey
+    void fingerprintK(k)
+      .then((f) => {
+        if (alive) setKeyFp({ k, fp: f })
+      })
+      .catch(() => {})
+    return () => {
+      alive = false
+    }
+  }, [parsedFormKey, keyFp])
+
+  if (!entry) {
+    return (
+      <section className="page page-ssh" aria-labelledby="page-title-ssh-edit">
+        <div className="page-head">
+          <a className="btn btn-sm" href="#/ssh" aria-label="Back to SSH">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <polyline points="15 18 9 12 15 6" />
+            </svg>
+            Back
+          </a>
+          <h1 id="page-title-ssh-edit" style={{ margin: 0, flex: 1 }}>Edit connection</h1>
+        </div>
+        <div className="card">
+          <p>Connection not found.</p>
+          <div className="row-actions">
+            <a className="btn btn-primary" href="#/ssh">
+              Back to SSH
+            </a>
+          </div>
+        </div>
+      </section>
+    )
+  }
+
+  const submit = (e: FormEvent) => {
+    e.preventDefault()
+    const cleanName = name.trim()
+    const cleanToken = token.trim().toUpperCase()
+    if (!cleanName || !cleanToken) return
+    if (!TOKEN_EXACT_RE.test(cleanToken)) {
+      setBanner('Token is 5 or 9 letters/numbers — run `ks-ssh --token=` to get one.')
+      return
+    }
+    let cleanKey: string | null = null
+    if (e2eOn) {
+      cleanKey = extractKeyFromText(e2eKey)
+      if (!cleanKey) {
+        setE2eError('Enter the E2E key — paste the full share link (with #k=…) or the raw key.')
+        return
+      }
+    }
+    setE2eError(null)
+    onChange((prev) =>
+      prev.map((x) =>
+        x.id === entry.id ? { ...x, name: cleanName, token: cleanToken, e2e: e2eOn, online: false } : x,
+      ),
+    )
+    const map = readE2eKeys()
+    if (e2eOn && cleanKey) map[entry.id] = cleanKey
+    else delete map[entry.id]
+    writeE2eKeys(map)
+    setE2eKey('')
+    window.location.hash = '#/ssh'
+  }
+
+  return (
+    <section className="page page-ssh" aria-labelledby="page-title-ssh-edit">
+      <div className="page-head">
+        <a className="btn btn-sm" href="#/ssh" aria-label="Back to SSH">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <polyline points="15 18 9 12 15 6" />
+          </svg>
+          Back
+        </a>
+        <h1 id="page-title-ssh-edit" style={{ margin: 0, flex: 1 }}>Edit connection</h1>
+      </div>
+      <Reveal>
+        <div className="card form-card">
+          <form className="form" onSubmit={submit}>
+            <label className="field">
+              Name
+              <input
+                type="text"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="Home Lab"
+                autoComplete="off"
+                required
+                autoFocus
+              />
+            </label>
+            <label className="field">
+              Token
+              <input
+                type="text"
+                value={token}
+                onChange={(e) => setToken(e.target.value.toUpperCase().slice(0, 9))}
+                placeholder="A3K9Q"
+                autoComplete="off"
+                inputMode="text"
+                maxLength={9}
+                required
+              />
+            </label>
+            <label className="field checkbox-row" style={{ gridColumn: '1 / -1' }}>
+              <input
+                type="checkbox"
+                checked={e2eOn}
+                onChange={(e) => {
+                  setE2eOn(e.target.checked)
+                  setE2eError(null)
+                }}
+              />
+              E2E encrypted
+            </label>
+            {e2eOn && (
+              <label className="field ssh-note-field">
+                E2E key
+                <span style={{ display: 'flex', gap: '8px' }}>
+                  <input
+                    type={showKey ? 'text' : 'password'}
+                    value={e2eKey}
+                    onChange={(e) => {
+                      setE2eKey(e.target.value)
+                      setE2eError(null)
+                    }}
+                    placeholder="Paste full share link (…/v/TOKEN#k=…) or raw key"
+                    autoComplete="off"
+                    spellCheck={false}
+                    style={{ flex: 1 }}
+                  />
+                  <button
+                    type="button"
+                    className="btn btn-sm"
+                    onClick={() => setShowKey((v) => !v)}
+                    aria-label={showKey ? 'Hide E2E key' : 'Show E2E key'}
+                  >
+                    {showKey ? 'Hide' : 'Show'}
+                  </button>
+                </span>
+                {e2eError ? (
+                  <span className="session-status" role="alert">
+                    {e2eError}
+                  </span>
+                ) : formFp ? (
+                  <span className="session-status session-hint">
+                    🔒 fingerprint <code>{formFp}</code> (saved on this device with this connection)
+                  </span>
+                ) : (
+                  <span className="session-status session-hint">
+                    Saved on this device with this connection — deleting it drops the key too.
+                  </span>
+                )}
+              </label>
+            )}
+            {banner && (
+              <div className="banner-error" role="alert" style={{ gridColumn: '1 / -1' }}>
+                <p>{banner}</p>
+              </div>
+            )}
+            <div className="row-actions">
+              <a className="btn" href="#/ssh">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M18 6L6 18M6 6l12 12" />
+                </svg>
+                Cancel
+              </a>
+              <button type="submit" className="btn btn-primary">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M20 6L9 17l-5-5" />
+                </svg>
+                Save
+              </button>
+            </div>
+          </form>
+        </div>
+      </Reveal>
+    </section>
+  )
+}
+
 function InstallationPage() {
   const origin =
     typeof window !== 'undefined'
@@ -1546,6 +1983,9 @@ export default function App() {
         ? hashToPage(window.location.hash)
         : null) ?? 'home',
   )
+  const [sshEditId, setSshEditId] = useState<string | null>(() =>
+    typeof window !== 'undefined' ? hashToSshEditId(window.location.hash) : null,
+  )
   const isMobile = useIsMobile(768)
   const btnRef = useRef<HTMLButtonElement>(null)
   const asideRef = useRef<HTMLElement>(null)
@@ -1589,6 +2029,7 @@ export default function App() {
     const onHash = () => {
       const next = hashToPage(window.location.hash)
       if (next) setPage(next)
+      setSshEditId(hashToSshEditId(window.location.hash))
     }
     window.addEventListener('hashchange', onHash)
     return () => window.removeEventListener('hashchange', onHash)
@@ -1596,6 +2037,14 @@ export default function App() {
 
   // Browser tab title follows the active page.
   useEffect(() => {
+    if (page === 'ssh-add') {
+      document.title = 'KS SSH — New connection'
+      return
+    }
+    if (page === 'ssh-edit') {
+      document.title = 'KS SSH — Edit connection'
+      return
+    }
     const label = NAV.find((p) => p.id === page)?.label
     document.title = label && label !== 'Home' ? `KS SSH — ${label}` : 'KS SSH'
   }, [page])
@@ -1702,7 +2151,8 @@ export default function App() {
         >
           <nav aria-label="Primary">
             {NAV.map((item) => {
-              const isActive = item.id === page
+              const isActive =
+                item.id === page || (item.id === 'ssh' && (page === 'ssh-add' || page === 'ssh-edit'))
               return (
                 <a
                   key={item.id}
