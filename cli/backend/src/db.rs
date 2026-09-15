@@ -240,7 +240,6 @@ pub fn enabled() -> bool {
 }
 
 /// Insert or refresh a session row (keeps the original `created_at`).
-#[allow(dead_code)]
 pub fn upsert(id: &str, created_at: u64, last_active: u64, dead: bool, scrollback: &[u8]) {
     // Back-compat wrapper: seq unknown → derive from scrollback length
     // (correct for non-overflow, otherwise client resets on next ready).
