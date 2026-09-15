@@ -655,14 +655,35 @@ function SSHPage({
       setBanner('Token is 5 or 9 letters/numbers — run `ks-ssh --token=` to get one.')
       return
     }
+    // E2E key stays in memory only — validate (full link or raw `k`) but
+    // never put it into `SshEntry` (persisted to localStorage).
+    let cleanKey: string | null = null
+    if (e2eOn) {
+      cleanKey = extractKeyFromText(e2eKey)
+      if (!cleanKey) {
+        setE2eError('Enter the E2E key — paste the full share link (with #k=…) or the raw key.')
+        return
+      }
+    }
+    setE2eError(null)
     if (editingId) {
+      const id = editingId
       onChange((prev) =>
         prev.map((x) =>
-          x.id === editingId
-            ? { ...x, name: cleanName, token: cleanToken, note: note.trim() }
+          x.id === id
+            ? { ...x, name: cleanName, token: cleanToken, note: note.trim(), e2e: e2eOn }
             : x,
         ),
       )
+      // Sync the memory-only key map (drop it when E2E is toggled off).
+      setE2eKeys((prev) => {
+        const next = { ...prev }
+        if (e2eOn && cleanKey) next[id] = cleanKey
+        else delete next[id]
+        return next
+      })
+      // Drop the pasted text from form memory immediately.
+      setE2eKey('')
       closeForm()
     } else {
       const id = `ssh-${Date.now().toString(36)}-${Math.floor(Math.random() * 10000)}`
@@ -672,8 +693,15 @@ function SSHPage({
         token: cleanToken,
         note: note.trim(),
         online: false,
+        e2e: e2eOn,
+      }
+      if (e2eOn && cleanKey) {
+        const k = cleanKey
+        setE2eKeys((prev) => ({ ...prev, [id]: k }))
       }
       onChange((prev) => [...prev, next])
+      // Drop the pasted text from form memory immediately.
+      setE2eKey('')
       closeForm()
       attemptConnect(next)
     }
@@ -682,7 +710,21 @@ function SSHPage({
   const removeEntry = (id: string) => {
     closeSocket(id)
     setConnectingId((cur) => (cur === id ? null : cur))
+    setE2eKeys((prev) => {
+      if (!(id in prev)) return prev
+      const next = { ...prev }
+      delete next[id]
+      return next
+    })
     onChange((prev) => prev.filter((x) => x.id !== id))
+  }
+
+  // Visit URL: per-entry memory key first, then the URL fragment — so E2E
+  // survives the navigation to raw /v/TOKEN. `k` stays in the fragment only.
+  const visitUrl = (entry: SshEntry): string => {
+    const t = entry.token.trim().toUpperCase()
+    const k = e2eKeys[entry.id] ?? parseFragmentKey()
+    return k ? `${relayBase}/v/${t}#k=${k}` : `${relayBase}/v/${t}`
   }
 
   const total = entries.length
@@ -778,6 +820,57 @@ function SSHPage({
                 required
               />
             </label>
+            <label className="field checkbox-row" style={{ gridColumn: '1 / -1' }}>
+              <input
+                type="checkbox"
+                checked={e2eOn}
+                onChange={(e) => {
+                  setE2eOn(e.target.checked)
+                  setE2eError(null)
+                }}
+              />
+              E2E encrypted
+            </label>
+            {e2eOn && (
+              <label className="field ssh-note-field">
+                E2E key
+                <span style={{ display: 'flex', gap: '8px' }}>
+                  <input
+                    type={showKey ? 'text' : 'password'}
+                    value={e2eKey}
+                    onChange={(e) => {
+                      setE2eKey(e.target.value)
+                      setE2eError(null)
+                    }}
+                    placeholder="Paste full share link (…/v/TOKEN#k=…) or raw key"
+                    autoComplete="off"
+                    spellCheck={false}
+                    style={{ flex: 1 }}
+                  />
+                  <button
+                    type="button"
+                    className="btn btn-sm"
+                    onClick={() => setShowKey((v) => !v)}
+                    aria-label={showKey ? 'Hide E2E key' : 'Show E2E key'}
+                  >
+                    {showKey ? 'Hide' : 'Show'}
+                  </button>
+                </span>
+                {e2eError ? (
+                  <span className="session-status" role="alert">
+                    {e2eError}
+                  </span>
+                ) : keyFp ? (
+                  <span className="session-status session-hint">
+                    🔒 fingerprint <code>{keyFp}</code> (memory-only — re-enter after reload)
+                  </span>
+                ) : (
+                  <span className="session-status session-hint">
+                    Key stays in memory only — never stored. Paste once per session.
+                  </span>
+                )}
+              </label>
+            )}
             <label className="field ssh-note-field">
               Note
               <input
@@ -845,6 +938,7 @@ function SSHPage({
         <ul className="ssh-list">
           {entries.map((e) => {
             const connecting = e.id === connectingId
+            const hasKey = Boolean(e2eKeys[e.id] ?? parseFragmentKey())
             return (
               <li key={e.id} className="card ssh-card">
                 <div className="ssh-head">
@@ -854,6 +948,11 @@ function SSHPage({
                   <span className="ssh-name">{e.name}</span>
                   <StatusTag online={e.online} connecting={connecting} />
                 </div>
+                {e.e2e === true && (
+                  <p className="session-status session-hint" style={{ margin: 0 }}>
+                    {hasKey ? '🔒 E2E on' : '🔒 E2E on — key missing (edit to re-enter)'}
+                  </p>
+                )}
                 <div className="ssh-foot">
                   {e.note ? <p className="ssh-note">{e.note}</p> : null}
                   <div className="row-actions">
@@ -871,14 +970,7 @@ function SSHPage({
                         <>
                           <a
                             className="btn btn-sm btn-primary"
-                            href={(() => {
-                              // Full-page CLI frontend (same as --port): raw /v/TOKEN
-                              // has no CF header/sidebar, only the CLI chrome.
-                              // Preserve #k=... so E2E survives the navigation.
-                              const t = e.token.trim().toUpperCase()
-                              const k = parseFragmentKey()
-                              return k ? `${relayBase}/v/${t}#k=${k}` : `${relayBase}/v/${t}`
-                            })()}
+                            href={visitUrl(e)}
                             aria-label={`Visit ${e.name}`}
                             title="Visit — open the full CLI frontend (Terminal, Files, Ports, Host) for this machine"
                           >
