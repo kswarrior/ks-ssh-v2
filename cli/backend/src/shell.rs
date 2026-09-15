@@ -523,12 +523,14 @@ fn persist_session(session: &Session) {
         .lock()
         .map(|r| r.iter().copied().collect())
         .unwrap_or_default();
-    db::upsert(
+    let seq = session.offset.load(Ordering::SeqCst);
+    db::upsert_with_seq(
         &session.id,
         session.created_at,
         db::now_secs(),
         session.dead.load(Ordering::SeqCst),
         &bytes,
+        seq,
     );
     session.dirty.store(false, Ordering::SeqCst);
 }
@@ -576,6 +578,13 @@ pub async fn load_persisted() -> usize {
         }
         let (writer_tx, _) = tokio::sync::mpsc::channel::<Vec<u8>>(1);
         let restored_len = row.scrollback.len() as u64;
+        // Use persisted `seq` (total bytes) when available so a ring that had
+        // overflowed before the restart keeps its true offset and doesn't put
+        // reconnecting clients (with `from` near the old head) permanently
+        // ahead — the "green dot but blank" deep bug. `seq` is at least the
+        // scrollback length; `ring_base` is derived from it.
+        let restored_seq = row.seq.max(restored_len);
+        let restored_base = restored_seq.saturating_sub(restored_len);
         let session = Arc::new(Session {
             id: row.id.clone(),
             master: StdMutex::new(None),
@@ -583,8 +592,8 @@ pub async fn load_persisted() -> usize {
             writer_tx,
             sub: StdMutex::new(None),
             ring: StdMutex::new(row.scrollback.into_iter().collect()),
-            ring_base: StdMutex::new(0),
-            offset: AtomicU64::new(restored_len),
+            ring_base: StdMutex::new(restored_base),
+            offset: AtomicU64::new(restored_seq),
             acked: AtomicU64::new(0),
             dead: AtomicBool::new(true),
             epoch: AtomicU64::new(0),
@@ -941,6 +950,10 @@ async fn handle_socket(
     // v2 also learns the stream head so it can resume gap-free.
     // Replay window: v1 always gets the whole ring; v2 gets only the tail
     // after `?from=` (or the whole ring when the offset was evicted).
+    // Clamp `from` that is ahead of the server head (e.g., after a kill+reuse
+    // of the same id or a restart with overflow) to the head so old clients
+    // that ignore `ready.seq` still get a contiguous stream instead of a
+    // permanent hole that leaves the tab blank with a green dot.
     let (replay_base, backlog, behind): (u64, Vec<u8>, bool) = {
         let ring: Vec<u8> = session
             .ring
@@ -948,6 +961,8 @@ async fn handle_socket(
             .map(|r| r.iter().copied().collect())
             .unwrap_or_default();
         let rbase = session.ring_base.lock().ok().map(|b| *b).unwrap_or(0);
+        let head = session.offset.load(Ordering::SeqCst);
+        let from = if v2 && from > head { head } else { from };
         if !v2 || from <= rbase {
             (rbase, ring, v2 && from < rbase)
         } else {

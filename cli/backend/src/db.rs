@@ -97,6 +97,11 @@ pub struct PersistedSession {
     pub created_at: u64,
     pub dead: bool,
     pub scrollback: Vec<u8>,
+    /// Total PTY bytes ever produced (`offset = ring_base + scrollback.len()`).
+    /// Persisted so a restart with ring overflow doesn't put the client
+    /// watermark ahead of the server head (which caused a permanent blank
+    /// "green dot but no prompt" after reconnect).
+    pub seq: u64,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -236,20 +241,36 @@ pub fn enabled() -> bool {
 
 /// Insert or refresh a session row (keeps the original `created_at`).
 pub fn upsert(id: &str, created_at: u64, last_active: u64, dead: bool, scrollback: &[u8]) {
+    // Back-compat wrapper: seq unknown → derive from scrollback length
+    // (correct for non-overflow, otherwise client resets on next ready).
+    upsert_with_seq(id, created_at, last_active, dead, scrollback, scrollback.len() as u64)
+}
+
+/// Insert or refresh a session row with an explicit stream `seq` (offset).
+pub fn upsert_with_seq(
+    id: &str,
+    created_at: u64,
+    last_active: u64,
+    dead: bool,
+    scrollback: &[u8],
+    seq: u64,
+) {
     with_db(|conn| {
         conn.execute(
-            "INSERT INTO sessions (id, created_at, last_active, dead, scrollback)
-             VALUES (?1, ?2, ?3, ?4, ?5)
+            "INSERT INTO sessions (id, created_at, last_active, dead, scrollback, seq)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)
              ON CONFLICT(id) DO UPDATE SET
                last_active = excluded.last_active,
                dead = excluded.dead,
-               scrollback = excluded.scrollback",
+               scrollback = excluded.scrollback,
+               seq = excluded.seq",
             rusqlite::params![
                 id,
                 created_at as i64,
                 last_active as i64,
                 dead as i32,
-                scrollback
+                scrollback,
+                seq as i64
             ],
         )
     });
@@ -294,8 +315,9 @@ pub fn prune_expired() -> usize {
 
 pub fn load_all() -> Vec<PersistedSession> {
     with_db(|conn| {
+        // `seq` may be missing on old DBs — coalesce to scrollback length.
         let mut stmt = conn.prepare(
-            "SELECT id, created_at, dead, scrollback
+            "SELECT id, created_at, dead, scrollback, COALESCE(seq, LENGTH(scrollback))
              FROM sessions ORDER BY last_active DESC LIMIT ?1",
         )?;
         let rows = stmt.query_map([MAX_PERSISTED as i64], |r| {
@@ -304,6 +326,7 @@ pub fn load_all() -> Vec<PersistedSession> {
                 created_at: r.get::<_, i64>(1)? as u64,
                 dead: r.get::<_, i32>(2)? != 0,
                 scrollback: r.get(3)?,
+                seq: r.get::<_, i64>(4)? as u64,
             })
         })?;
         rows.collect::<rusqlite::Result<Vec<_>>>()
