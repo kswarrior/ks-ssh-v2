@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type ReactNode } from 'react'
 import {
   E2E_ALG,
   checkTofu,
@@ -272,6 +272,55 @@ function Icon({ children }: { children: ReactNode }) {
   )
 }
 
+function Reveal({
+  children,
+  delay = 0,
+  className,
+}: {
+  children: ReactNode
+  delay?: number
+  className?: string
+}) {
+  const ref = useRef<HTMLDivElement | null>(null)
+  const [visible, setVisible] = useState(false)
+
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      setVisible(true)
+      return
+    }
+    if (typeof IntersectionObserver === 'undefined') {
+      setVisible(true)
+      return
+    }
+    const obs = new IntersectionObserver(
+      (entries) => {
+        for (const e of entries) {
+          if (e.isIntersecting) {
+            setVisible(true)
+            obs.disconnect()
+          }
+        }
+      },
+      { threshold: 0.1, rootMargin: '0px 0px -6% 0px' },
+    )
+    obs.observe(el)
+    return () => obs.disconnect()
+  }, [])
+
+  return (
+    <div
+      ref={ref}
+      className={`reveal${visible ? ' is-visible' : ''}${className ? ` ${className}` : ''}`}
+      style={{ '--reveal-delay': `${delay}ms` } as CSSProperties}
+    >
+      {children}
+    </div>
+  )
+}
+
 function FeatureTile({
   icon,
   title,
@@ -396,6 +445,7 @@ function HomePage() {
 
   return (
     <section className="page page-home" aria-labelledby="page-title-home">
+      <Reveal>
       <div
         className="showcase-3d"
         aria-roledescription="carousel"
@@ -493,7 +543,9 @@ function HomePage() {
           </div>
         </div>
       </div>
+      </Reveal>
 
+      <Reveal delay={110}>
       <div className="hero card">
         <span className="eyebrow">KS SSH</span>
         <h1 id="page-title-home">Shell access, minus the hassle.</h1>
@@ -510,19 +562,27 @@ function HomePage() {
           </a>
         </div>
       </div>
+      </Reveal>
 
-      <h2>Why us</h2>
-      <div className="grid">
+      <Reveal delay={60}>
+        <h2 className="home-section-title">Why us</h2>
+      </Reveal>
+      <div className="grid home-grid">
+        <Reveal delay={0} className="home-tile">
         <FeatureTile
           icon={<polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />}
           title="Fast"
           text="Connect in one tap with your saved token. No typing addresses twice."
         />
+        </Reveal>
+        <Reveal delay={110} className="home-tile">
         <FeatureTile
           icon={<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />}
           title="Private"
           text="Tokens stay in your browser. Shell traffic is E2E-sealed with AES-256-GCM."
         />
+        </Reveal>
+        <Reveal delay={220} className="home-tile">
         <FeatureTile
           icon={
             <>
@@ -533,6 +593,7 @@ function HomePage() {
           title="Everywhere"
           text="The same interface on phone and desktop, with offline-first data."
         />
+        </Reveal>
       </div>
     </section>
   )
