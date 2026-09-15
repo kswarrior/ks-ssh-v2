@@ -65,7 +65,7 @@ function validKey(k: string): boolean {
 
 /**
  * Read `k` from a URL hash fragment ONLY (never query/fetch).
- * Supports `#/session/ABCDE#k=...`, `#k=...`, `#/v/ABCDE&k=...`.
+ * Supports `#k=...`, `#/v/ABCDE&k=...` and legacy `#/session/...` (compat).
  */
 export function parseKeyFromHash(hash: string): string | null {
   try {
@@ -80,7 +80,7 @@ export function parseKeyFromHash(hash: string): string | null {
 
 /**
  * Read the E2E key for relay mode: parent fragment first (CF Visit keeps
- * `#k=` on the parent `#/session/TOKEN` URL — same-origin iframes and
+ * `#k=` on the parent `/v/TOKEN#k=…` URL — same-origin iframes and
  * srcDoc can read it without duplicating the secret), then our own hash.
  * Returns null when the user opened with a bare token (plaintext peers are
  * refused by default-E2E agents with a clear "open the full link" error).

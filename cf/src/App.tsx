@@ -9,19 +9,6 @@ import {
 /** Token pattern: 9 chars fresh, 5 chars legacy — both route. */
 const TOKEN_EXACT_RE = /^(?:[A-Za-z0-9]{5}|[A-Za-z0-9]{9})$/
 
-function withRelayGlobals(html: string, token: string, host: string): string {
-  const safeToken = token.replace(/[^A-Za-z0-9]/g, '').slice(0, 9)
-  const safeHost = host.replace(/[^A-Za-z0-9.:-]/g, '').slice(0, 253)
-  if (!TOKEN_EXACT_RE.test(safeToken) || !safeHost) return html
-  const tag = `<script>window.__KS_RELAY_TOKEN__=${JSON.stringify(safeToken)};window.__KS_RELAY_HOST__=${JSON.stringify(safeHost)};</script>`
-  const idx = html.indexOf('<head')
-  if (idx >= 0) {
-    const end = html.indexOf('>', idx)
-    if (end >= 0) return `${html.slice(0, end + 1)}${tag}${html.slice(end + 1)}`
-  }
-  return `${tag}${html}`
-}
-
 type PageId = 'home' | 'ssh' | 'installation' | 'settings'
 
 type NavItem = { id: PageId; label: string; hash: string }
@@ -2060,20 +2047,12 @@ export default function App() {
           <main
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           ref={mainRef as any}
-          className={`content${page === 'session' ? ' content-session' : ''}`}
+          className="content"
           id="main"
           tabIndex={-1}
         >
           {page === 'home' && <HomePage />}
           {page === 'ssh' && <SSHPage entries={entries} onChange={setEntries} settings={settings} />}
-          {page === 'session' && (
-            <SessionPage
-              key={sessionToken ?? 'none'}
-              token={sessionToken}
-              name={sessionName}
-              settings={settings}
-            />
-          )}
           {page === 'installation' && <InstallationPage />}
           {page === 'settings' && (
             <SettingsPage
