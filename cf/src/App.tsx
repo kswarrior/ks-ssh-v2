@@ -327,34 +327,7 @@ type SshEntry = {
   online: boolean
 }
 
-function HomePage({ entries }: { entries: SshEntry[] }) {
-  const [health, setHealth] = useState<'checking' | 'online' | 'offline'>('checking')
-  const [latencyMs, setLatencyMs] = useState<number | null>(null)
-
-  useEffect(() => {
-    let alive = true
-    const ctrl = new AbortController()
-    const t0 = performance.now()
-    fetch('/api/health', { signal: ctrl.signal })
-      .then((r) => r.json())
-      .then((d: { ok?: boolean }) => {
-        if (!alive) return
-        setHealth(d?.ok === true ? 'online' : 'offline')
-        setLatencyMs(Math.round(performance.now() - t0))
-      })
-      .catch(() => {
-        if (alive) setHealth('offline')
-      })
-    return () => {
-      alive = false
-      ctrl.abort()
-    }
-  }, [])
-
-  const total = entries.length
-  const online = entries.filter((x) => x.online).length
-  const recent = entries.slice(-3).reverse()
-
+function HomePage() {
   return (
     <section className="page" aria-labelledby="page-title-home">
       <div className="hero card">
@@ -371,102 +344,6 @@ function HomePage({ entries }: { entries: SshEntry[] }) {
           <a className="btn" href="#/installation">
             Install
           </a>
-        </div>
-      </div>
-
-      <div className="grid">
-        <div className="card">
-          <h2>Relay status</h2>
-          <p>
-            {health === 'checking'
-              ? 'Checking live relay…'
-              : health === 'online'
-                ? `Relay online${latencyMs !== null ? ` · ${latencyMs}ms` : ''} — agents can register now.`
-                : 'Relay unreachable — check your connection, then retry.'}
-          </p>
-          <div className="row-actions">
-            <StatusTag online={health === 'online'} connecting={health === 'checking'} />
-            {health !== 'checking' && (
-              <button
-                type="button"
-                className="btn btn-sm"
-                onClick={() => {
-                  setHealth('checking')
-                  const t0 = performance.now()
-                  fetch('/api/health')
-                    .then((r) => r.json())
-                    .then((d: { ok?: boolean }) => {
-                      setHealth(d?.ok === true ? 'online' : 'offline')
-                      setLatencyMs(Math.round(performance.now() - t0))
-                    })
-                    .catch(() => setHealth('offline'))
-                }}
-              >
-                Recheck
-              </button>
-            )}
-          </div>
-        </div>
-        <div className="card">
-          <h2>Your connections</h2>
-          <p>
-            {total === 0
-              ? 'No connections saved yet on this device.'
-              : `${total} saved · ${online} online · ${total - online} offline.`}
-          </p>
-          <div className="row-actions">
-            <a className="btn btn-sm btn-primary" href="#/ssh">
-              {total === 0 ? 'Add your first connection' : 'Open SSH list'}
-            </a>
-          </div>
-        </div>
-      </div>
-
-      {recent.length > 0 && (
-        <>
-          <h2>Recent</h2>
-          <ul className="ssh-list">
-            {recent.map((e) => (
-              <li key={e.id} className="card ssh-card">
-                <div className="ssh-head">
-                  <span className="ssh-icon" aria-hidden="true">
-                    <SshGlyph />
-                  </span>
-                  <span className="ssh-name">{e.name}</span>
-                  <StatusTag online={e.online} />
-                </div>
-                <div className="ssh-foot">
-                  <div className="row-actions">
-                    <a className="btn btn-sm" href="#/ssh">
-                      Open
-                    </a>
-                  </div>
-                </div>
-              </li>
-            ))}
-          </ul>
-        </>
-      )}
-
-      <h2>How it works</h2>
-      <div className="grid">
-        <div className="card">
-          <h3>1. Run the agent</h3>
-          <p>On the machine, download the static binary and register a relay token:</p>
-          <CodeBlock code="./ks-ssh --no-serve --token=" />
-        </div>
-        <div className="card">
-          <h3>2. Save the token</h3>
-          <p>Paste the printed 9-character token into the SSH page. Presence is verified live over WSS.</p>
-          <div className="row-actions">
-            <a className="btn btn-sm" href="#/ssh">
-              Open SSH
-            </a>
-          </div>
-        </div>
-        <div className="card">
-          <h3>3. Open the live UI</h3>
-          <p>When the agent is online, Visit opens Terminal, Files, Ports and Host — the same UI as local --port, tunnelled over WSS with E2E.</p>
         </div>
       </div>
 
@@ -2140,7 +2017,7 @@ export default function App() {
           id="main"
           tabIndex={-1}
         >
-          {page === 'home' && <HomePage entries={entries} />}
+          {page === 'home' && <HomePage />}
           {page === 'ssh' && <SSHPage entries={entries} onChange={setEntries} settings={settings} />}
           {page === 'session' && (
             <SessionPage
