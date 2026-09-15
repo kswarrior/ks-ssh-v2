@@ -1519,33 +1519,10 @@ function decodeUiChunks(chunks: string[]): string {
   return new TextDecoder().decode(all)
 }
 
-function InstallationPage({ settings }: { settings: Settings }) {
-  const relayBase = relayHttpBase(settings)
-  const [health, setHealth] = useState<'checking' | 'online' | 'offline'>('checking')
-  useEffect(() => {
-    let alive = true
-    const ctrl = new AbortController()
-    fetch(`${relayBase}/api/health`, { signal: ctrl.signal })
-      .then((r) => r.json())
-      .then((d: { ok?: boolean }) => {
-        if (alive) setHealth(d?.ok === true ? 'online' : 'offline')
-      })
-      .catch(() => {
-        if (alive) setHealth('offline')
-      })
-    return () => {
-      alive = false
-      ctrl.abort()
-    }
-  }, [relayBase])
+function InstallationPage() {
   return (
     <section className="page" aria-labelledby="page-title-installation">
       <h1 id="page-title-installation">Installation</h1>
-      <p className="lead">
-        Relay status:{' '}
-        {health === 'checking' ? 'checking…' : health === 'online' ? 'online — agents can register now.' : 'unreachable — check your connection.'}{' '}
-        <StatusTag online={health === 'online'} connecting={health === 'checking'} />
-      </p>
       <div className="card">
         <h2>1. Download the agent</h2>
         <p>Paste this in your terminal to download and run:</p>
