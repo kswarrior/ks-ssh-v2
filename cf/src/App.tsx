@@ -962,7 +962,7 @@ function SSHPage({
   const online = entries.filter((x) => x.online).length
 
   return (
-    <section className="page" aria-labelledby="page-title-ssh">
+    <section className="page page-ssh" aria-labelledby="page-title-ssh">
       <div className="page-head">
         <h1 id="page-title-ssh">SSH</h1>        <button
           type="button"
@@ -984,20 +984,22 @@ function SSHPage({
         </button>
       </div>
 
-      <div className="grid">
-        <div className="card">
+      <Reveal delay={60}>
+      <div className="grid ssh-stats">
+        <div className="card stat-card">
           <span className="stat">{total}</span>
           <span>Total SSH</span>
         </div>
-        <div className="card">
+        <div className="card stat-card">
           <span className="stat">{online}</span>
           <span>Online</span>
         </div>
-        <div className="card">
+        <div className="card stat-card">
           <span className="stat">{total - online}</span>
           <span>Offline</span>
         </div>
       </div>
+      </Reveal>
 
       {banner && (
         <div className="banner-error" role="alert">
@@ -1024,7 +1026,8 @@ function SSHPage({
       )}
 
       {formOpen && (
-        <div className="card">
+        <Reveal>
+        <div className="card form-card">
           <h2>{editingId ? 'Edit connection' : 'New connection'}</h2>          <form className="form" onSubmit={submit}>
             <label className="field">
               Name
@@ -1144,10 +1147,12 @@ function SSHPage({
             </div>
           </form>
         </div>
+        </Reveal>
       )}
 
       {entries.length === 0 && !formOpen ? (
-        <div className="card" style={{ textAlign: 'center', padding: '48px 24px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '20px' }}>
+        <Reveal>
+        <div className="card empty-card" style={{ textAlign: 'center', padding: '48px 24px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '20px' }}>
           <h2 style={{ margin: 0 }}>No connections yet</h2>
           <svg
             width="120"
@@ -1165,6 +1170,7 @@ function SSHPage({
             <path d="M7 9l3 3-3 3M12 15h5" />
           </svg>
         </div>
+        </Reveal>
       ) : (
         <ul className="ssh-list">
           {entries.map((e) => {
@@ -1865,47 +1871,189 @@ function decodeUiChunks(chunks: string[]): string {
 }
 
 function InstallationPage() {
+  const origin =
+    typeof window !== 'undefined'
+      ? window.location.origin
+      : 'https://<relay-host>'
+  const steps: Array<{
+    tag: string
+    title: string
+    body: string
+    codes: string[]
+    hint?: ReactNode
+  }> = [
+    {
+      tag: 'Start',
+      title: 'Download the agent',
+      body: 'One single binary — local UI, relay agent and embedded frontend in ~19 MB. Paste this in your terminal to download it and list every flag:',
+      codes: [
+        'curl -sSfL https://raw.githubusercontent.com/kswarrior/ks-ssh-v2/refs/heads/main/cli/release/ks-ssh -o ks-ssh && chmod +x ks-ssh && ./ks-ssh --help',
+      ],
+    },
+    {
+      tag: 'Serve',
+      title: 'Local UI on this machine',
+      body: 'Serves Terminal, Files, Ports and Host on loopback, with PTY reattach, scrollback and resize:',
+      codes: ['./ks-ssh --port 8080'],
+      hint: (
+        <>
+          Open <code>http://127.0.0.1:8080</code> in a browser on that machine.
+          Prefer <code>--host 127.0.0.1</code> — only bind <code>0.0.0.0</code>{' '}
+          behind proxy auth on untrusted networks.
+        </>
+      ),
+    },
+    {
+      tag: 'Protect',
+      title: 'Lock it with a login',
+      body: 'Show a login page and make that account the admin — its password confirms user edits and deletes. More accounts live on the Users page with Argon2id hashes, admin/operator/viewer roles, TOTP and optional OIDC SSO:',
+      codes: [`./ks-ssh --user admin --pass 'choose-a-long-password'`],
+      hint: (
+        <>
+          Single sign-on: <code>--oidc-issuer</code> +{' '}
+          <code>--oidc-client-id</code> (auto-provisions as viewer,{' '}
+          <code>--oidc-allow-domain</code> whitelists one domain).
+        </>
+      ),
+    },
+    {
+      tag: 'Serve',
+      title: 'Relay with no open port',
+      body: 'Pushes an outbound WSS tunnel plus the full UI bundle to this relay and prints a share link with #k=… — nothing to forward, no ingress:',
+      codes: ['./ks-ssh --no-serve --token='],
+      hint: (
+        <>
+          Paste the printed token into the SSH page, then open it from the full
+          share link so E2E works. Tokens are exactly 5 or 9 letters/numbers.
+        </>
+      ),
+    },
+    {
+      tag: 'Serve',
+      title: 'Relay + local UI together',
+      body: 'The same UI both ways at once — serve loopback and the relay from one command:',
+      codes: ['./ks-ssh --token=ABCDE1234'],
+      hint: (
+        <>
+          Reuses your token; omit the value (<code>--token=</code>) to mint a
+          fresh 9-character one.
+        </>
+      ),
+    },
+    {
+      tag: 'Protect',
+      title: 'Reuse keys, trim the push',
+      body: 'Keep the same E2E key across restarts, or skip the UI-bundle push when only shell access matters:',
+      codes: [
+        `./ks-ssh --no-serve --token=ABCDE1234 --e2e-key='<k-from-your-last-link>'`,
+        './ks-ssh --no-serve --token= --no-ui',
+      ],
+      hint: (
+        <>
+          <code>--no-e2e</code> is a legacy plaintext escape hatch only — loud
+          startup warning plus an audit row.
+        </>
+      ),
+    },
+    {
+      tag: 'Protect',
+      title: 'Viewer PIN (optional)',
+      body: 'Require a one-time PIN sealed inside E2E before any shell or file bridge — the agent prints it once and signed-in local users can mint fresh ones:',
+      codes: ['./ks-ssh --no-serve --token= --relay-auth'],
+      hint: <>One-time PIN with a 15-minute life — never in query strings or logs.</>,
+    },
+    {
+      tag: 'Keep',
+      title: 'Audit and recordings',
+      body: 'Every login, file write, port kill and shell attach lands in an append-only SQLite audit log, and every shell is recorded for replay. Tune retention per box:',
+      codes: [
+        './ks-ssh --audit-retain-days 90 --record-max-mb 10',
+        './ks-ssh --no-record',
+      ],
+      hint: (
+        <>
+          The Audit page filters and exports JSON/CSV; the Recordings page
+          replays with play, pause, speed and scrub. Recording defaults on
+          while auth is on.
+        </>
+      ),
+    },
+    {
+      tag: 'Verify',
+      title: 'Check the relay',
+      body: 'Confirm this relay answers, then check a token is live before sharing it:',
+      codes: [
+        `curl -s ${origin}/api/health`,
+        `curl -s "${origin}/api/ssh/status?token=ABCDE1234"`,
+      ],
+    },
+  ]
+
   return (
-    <section className="page" aria-labelledby="page-title-installation">
-      <h1 id="page-title-installation">Installation</h1>
-      <div className="card">
-        <h2>1. Download the agent</h2>
-        <p>Paste this in your terminal to download and run:</p>
-        <CodeBlock code="curl -sSfL https://raw.githubusercontent.com/kswarrior/ks-ssh-v2/refs/heads/main/cli/release/ks-ssh -o ks-ssh && chmod +x ks-ssh && ./ks-ssh --help" />
-      </div>
-      <div className="card">
-        <h2>2. Local UI (same machine)</h2>
-        <p>Serves Terminal, Files, Ports and Host on loopback:</p>
-        <CodeBlock code="./ks-ssh --port 8080" />
-        <p className="session-status session-hint">Open http://127.0.0.1:8080 in a browser on that machine.</p>
-      </div>
-      <div className="card">
-        <h2>3. Relay (no open port)</h2>
-        <p>Registers a fresh 9-character token and prints a share link with #k=…:</p>
-        <CodeBlock code="./ks-ssh --no-serve --token=" />
-        <p>Paste the printed token into the SSH page, then open it from the full share link so E2E works.</p>
-      </div>
-      <div className="card">
-        <h2>4. Relay + local UI together</h2>
-        <CodeBlock code="./ks-ssh --token=ABCDE1234" />
-        <p className="session-status session-hint">Reuses your token; omit the value (--token=) to mint a fresh one.</p>
-      </div>
-      <div className="card">
-        <h2>5. Viewer PIN (optional)</h2>
-        <p>Require a one-time PIN sealed inside E2E before any shell or file bridge:</p>
-        <CodeBlock code="./ks-ssh --no-serve --token= --relay-auth" />
-      </div>
-      <div className="card">
-        <h2>Verify</h2>
-        <p>Confirm this relay answers, then check a token:</p>
-        <CodeBlock code={`curl -s ${typeof window !== 'undefined' ? window.location.origin : 'https://<relay-host>'}/api/health`} />
-        <CodeBlock code={`curl -s "${typeof window !== 'undefined' ? window.location.origin : 'https://<relay-host>'}/api/ssh/status?token=ABCDE1234"`} />
-        <div className="row-actions">
-          <a className="btn btn-sm btn-primary" href="#/ssh">
-            Open SSH
-          </a>
+    <section className="page page-install" aria-labelledby="page-title-installation">
+      <Reveal>
+        <div className="install-head">
+          <span className="eyebrow">Guide</span>
+          <h1 id="page-title-installation">Installation</h1>
+          <p className="lead">
+            One binary, three ways to serve it — locked, audited and recorded.
+            Follow the steps in order.
+          </p>
         </div>
-      </div>
+      </Reveal>
+      <ol className="steps install-steps">
+        {steps.map((s, i) => (
+          <li key={s.title}>
+            <Reveal delay={Math.min(i, 6) * 70}>
+              <div className="card step-card">
+                <div className="step-top">
+                  <span className="step-num" aria-hidden="true">
+                    {i + 1}
+                  </span>
+                  <div className="step-titles">
+                    <span className="step-tag">{s.tag}</span>
+                    <h2>{s.title}</h2>
+                  </div>
+                </div>
+                <p>{s.body}</p>
+                {s.codes.map((c) => (
+                  <CodeBlock key={c} code={c} />
+                ))}
+                {s.hint ? (
+                  <p className="session-status session-hint">{s.hint}</p>
+                ) : null}
+              </div>
+            </Reveal>
+          </li>
+        ))}
+      </ol>
+      <Reveal>
+        <div className="card habits-card">
+          <h2>Good habits</h2>
+          <ul className="habits-list">
+            <li>
+              Mint a fresh <code>--token=</code> per session and compare the
+              viewer&apos;s fingerprint with the CLI&apos;s on first connect.
+            </li>
+            <li>
+              Keep <code>k</code> and PINs in the fragment and memory only —
+              never in query strings, fetch URLs or logs.
+            </li>
+            <li>
+              Files stay jailed to <code>$HOME</code>; port kills are
+              PID-scoped and never touch PID 1 or the agent itself.
+            </li>
+          </ul>
+          <div className="row-actions">
+            <a className="btn btn-sm btn-primary" href="#/ssh">
+              Open SSH
+            </a>
+            <a className="btn btn-sm" href="#/settings">
+              Settings
+            </a>
+          </div>
+        </div>
+      </Reveal>
     </section>
   )
 }
