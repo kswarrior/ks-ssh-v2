@@ -484,7 +484,11 @@ function HostTermsMenu({
   const [host, setHost] = useState<HostTerm[] | null>(null)
   const [killing, setKilling] = useState<string | null>(null)
   const [open, setOpen] = useState(false)
-  const [anchor, setAnchor] = useState<{ top: number; right: number } | null>(null)
+  const [anchor, setAnchor] = useState<{
+    top: number | null
+    bottom: number | null
+    right: number
+  } | null>(null)
 
   const load = useCallback(async () => {
     try {
