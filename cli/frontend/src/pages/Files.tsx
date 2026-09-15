@@ -789,6 +789,19 @@ export default function FilesPage() {
     return () => document.removeEventListener('keydown', onKey)
   }, [previewing, propsEntry, propsBusy, transfer, transferBusy])
 
+  // Escape closes the delete confirmations (when not busy).
+  useEffect(() => {
+    if (!confirmDelete && !confirmBulkDelete) return
+    if (busy) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return
+      setConfirmDelete(null)
+      setConfirmBulkDelete(false)
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [confirmDelete, confirmBulkDelete, busy])
+
   const base = useMemo(
     () =>
       (data?.entries ?? []).filter(
@@ -889,7 +902,7 @@ export default function FilesPage() {
 
   // Click a card: folders open, media previews, other files open in the editor.
   const openEntry = (e: FileEntry) => {
-    if (renaming === e.path || confirmDelete === e.path) return
+    if (renaming === e.path) return
     if (e.is_dir) {
       void load(e.path)
     } else if (!e.is_symlink && previewKindOf(e.name)) {
@@ -1802,22 +1815,15 @@ export default function FilesPage() {
                     type="button"
                     className="btn btn-sm btn-danger"
                     disabled={busy || bulkBusy}
-                    onClick={() => {
-                      if (confirmBulkDelete) {
-                        setConfirmBulkDelete(false)
-                        void submitBulkDelete()
-                      } else {
-                        setConfirmBulkDelete(true)
-                      }
-                    }}
-                    title={confirmBulkDelete ? `Click again to delete ${selected.length} selected item(s)` : `Delete ${selected.length} selected item(s)`}
+                    onClick={() => setConfirmBulkDelete(true)}
+                    title={`Delete ${selected.length} selected item(s)`}
                   >
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                       <path d="M3 6h18" />
-                      <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                      <path d="M8 6V4a1 1 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
                       <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" />
                     </svg>
-                    <span className="btn-label">{busy ? 'Deleting…' : confirmBulkDelete ? `Confirm (${selected.length})` : 'Delete'}</span>
+                    <span className="btn-label">{busy ? 'Deleting…' : 'Delete'}</span>
                   </button>
                   <button
                     type="button"
@@ -1841,7 +1847,6 @@ export default function FilesPage() {
             {visible.map((e) => {
               const isMenu = menuOpen === e.path
               const isRenaming = renaming === e.path
-              const isConfirm = confirmDelete === e.path
               const isChecked = selected.includes(e.path)
               const previewKind = !e.is_dir && !e.is_symlink ? previewKindOf(e.name) : null
               const cat: FileCat = e.is_dir ? 'dir' : fileCat(e.name, false)
@@ -2063,7 +2068,10 @@ export default function FilesPage() {
                             type="button"
                             role="menuitem"
                             className="file-menu-item danger"
-                            onClick={() => setConfirmDelete(e.path)}
+                            onClick={() => {
+                              setMenuOpen(null)
+                              setConfirmDelete(e)
+                            }}
                           >
                             Delete
                           </button>
@@ -2111,49 +2119,6 @@ export default function FilesPage() {
                         </svg>
                         <span className="btn-label">Cancel</span>
                       </button>
-                    </div>
-                  )}
-
-                  {isConfirm && (
-                    <div
-                      className="file-confirm"
-                      role="alertdialog"
-                      aria-label={`Delete ${e.name}?`}
-                      onClick={(ev) => ev.stopPropagation()}
-                    >
-                      <p>
-                        Delete <strong>{e.name}</strong>
-                        {e.is_dir ? ' and everything inside it?' : '?'}
-                      </p>
-                      <div className="file-inline-actions">
-                        <button
-                          type="button"
-                          className="btn btn-sm btn-danger"
-                          disabled={busy}
-                          onClick={() => void submitDelete(e)}
-                          title={`Delete ${e.name}`}
-                        >
-                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                            <path d="M3 6h18" />
-                            <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-                            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" />
-                          </svg>
-                          <span className="btn-label">{busy ? 'Deleting…' : 'Delete'}</span>
-                        </button>
-                        <button
-                          type="button"
-                          className="btn btn-sm"
-                          disabled={busy}
-                          onClick={() => setConfirmDelete(null)}
-                          title="Keep file"
-                        >
-                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                            <path d="M9 14 4 9l5-5" />
-                            <path d="M4 9h10a6 6 0 0 1 0 12h-3" />
-                          </svg>
-                          <span className="btn-label">Keep</span>
-                        </button>
-                      </div>
                     </div>
                   )}
                 </li>
