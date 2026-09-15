@@ -946,6 +946,13 @@ function SSHPage({
     onChange((prev) => prev.filter((x) => x.id !== id))
   }
 
+  // Raw /v/ URL with fragment key — always raw, the CLI bundle shows its own 0-100% loader.
+  const visitUrl = (entry: SshEntry): string => {
+    const t = entry.token.trim().toUpperCase()
+    const k = e2eKeys[entry.id] ?? parseFragmentKey()
+    return k ? `${relayBase}/v/${t}#k=${k}` : `${relayBase}/v/${t}`
+  }
+
   const total = entries.length
   const online = entries.filter((x) => x.online).length
 
@@ -1097,9 +1104,11 @@ function SSHPage({
                         <>
                           <a
                             className="btn btn-sm btn-primary"
-                            href={`#/ssh/visit/${encodeURIComponent(e.id)}`}
+                            href={visitUrl(e)}
+                            target="_blank"
+                            rel="noreferrer"
                             aria-label={`Visit ${e.name}`}
-                            title="Visit — open the full CLI frontend via CF loader (Terminal, Files, Ports, Host)"
+                            title="Visit — open the raw CLI frontend (Terminal, Files, Ports, Host) — shows 0→100% loader then shell"
                           >
                             <svg
                               viewBox="0 0 24 24"
