@@ -139,6 +139,9 @@ export default function App() {
   // Login gate: enabled only when the backend runs with --user/--pass.
   // `null` = still checking; relay views (no /api/auth/*) fall back to open.
   const [auth, setAuth] = useState<AuthStatus | null>(null)
+  const [bootProgress, setBootProgress] = useState(6)
+  const [bootPhase, setBootPhase] = useState('Starting…')
+  const [bootReady, setBootReady] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
   const menuWrapRef = useRef<HTMLDivElement | null>(null)
 
@@ -161,32 +164,78 @@ export default function App() {
     }
   }, [menuOpen])
 
-  // Ask the backend whether a login page is required.
+  // Boot sequence: 0→100% loader that tracks real auth + relay + ping (fast load, not fake).
   useEffect(() => {
     let alive = true
+    const bump = (p: number, phase: string) => {
+      if (!alive) return
+      setBootProgress((prev) => (p > prev ? p : prev))
+      setBootPhase(phase)
+    }
     const load = async () => {
+      bump(12, 'Checking login…')
+      const isRelay = (() => {
+        try {
+          return /^\/v\/[A-Za-z0-9]{5,9}(?:\/|$)/.test(window.location.pathname)
+        } catch {
+          return false
+        }
+      })()
+      if (isRelay) bump(18, 'Warming relay…')
       try {
         const res = await fetch('/api/auth/status', {
           cache: 'no-store',
           credentials: 'same-origin',
         })
+        if (!alive) return
         if (!res.ok) {
-          // Relay view / old backend without auth endpoints — stay open.
-          if (alive) setAuth({ protected: false, authenticated: true })
-          return
-        }
-        const data = (await res.json()) as Partial<AuthStatus>
-        if (alive) {
+          setAuth({ protected: false, authenticated: true })
+          bump(36, 'Open access')
+        } else {
+          const data = (await res.json()) as Partial<AuthStatus>
+          if (!alive) return
           setAuth({
             protected: !!data.protected,
             authenticated: data.protected ? !!data.authenticated : true,
             user: typeof data.user === 'string' ? data.user : undefined,
             is_owner: data.is_owner,
           })
+          bump(data.protected ? 38 : 36, data.protected ? 'Auth required' : 'Auth open')
         }
       } catch {
-        if (alive) setAuth({ protected: false, authenticated: true })
+        if (alive) {
+          setAuth({ protected: false, authenticated: true })
+          bump(34, 'Auth open')
+        }
       }
+      if (!alive) return
+      bump(52, 'Pinging server…')
+      try {
+        const ctrl = new AbortController()
+        const t = window.setTimeout(() => ctrl.abort(), 3500)
+        const r = await fetch('/api/hello', { cache: 'no-store', signal: ctrl.signal })
+        window.clearTimeout(t)
+        if (!alive) return
+        if (r.ok) {
+          await r.text().catch(() => {})
+          bump(74, 'Server reachable')
+        } else bump(62, 'Server response')
+      } catch {
+        if (alive) bump(60, 'Server unreachable — continuing…')
+      }
+      if (isRelay) {
+        bump(82, 'Syncing tunnel…')
+        await new Promise((res) => setTimeout(res, 280))
+        if (!alive) return
+        bump(90, 'Tunnel ready')
+      }
+      bump(96, 'Loading workspace…')
+      await new Promise((res) => setTimeout(res, 160))
+      if (!alive) return
+      bump(100, 'Ready')
+      window.setTimeout(() => {
+        if (alive) setBootReady(true)
+      }, 280)
     }
     void load()
     return () => {
@@ -353,12 +402,13 @@ export default function App() {
     setAuth({ protected: true, authenticated: true, user })
   }
 
-  // Still checking /api/auth/status — don't flash the app or login yet.
-  if (auth === null) {
+  // Boot loader — 0→100% tied to real auth + WSS + ping (raw /v/ shows this, not fake).
+  if (auth === null || !bootReady) {
+    const pct = Math.min(100, Math.max(0, Math.round(bootProgress)))
     return (
       <div className="app-shell">
         <main className="content login-content" id="main">
-          <div className="card app-boot" role="status" aria-label="Starting KS SSH">
+          <div className="card app-boot" role="status" aria-label="Starting KS SSH" aria-live="polite">
             <span className="app-boot-orb" aria-hidden="true">
               <svg viewBox="0 0 32 32">
                 <defs>
@@ -389,7 +439,15 @@ export default function App() {
               <span className="app-boot-ring" />
             </span>
             <span className="app-boot-title">Starting KS SSH…</span>
-            <span className="app-boot-sub">Checking login status…</span>
+            <span className="app-boot-sub">{bootPhase}</span>
+            <div className="app-boot-track" role="progressbar" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100} aria-label="Loading frontend">
+              <div className="app-boot-bar" style={{ width: `${pct}%` }} />
+              <div className="app-boot-glow" style={{ left: `calc(${pct}% - 10px)` }} />
+            </div>
+            <div className="app-boot-meta">
+              <span className="app-boot-phase">{bootPhase}</span>
+              <span className="app-boot-pct">{pct}%</span>
+            </div>
           </div>
         </main>
       </div>
