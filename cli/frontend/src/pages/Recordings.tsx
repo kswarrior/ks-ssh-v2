@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import RecordingPlayer from '../components/RecordingPlayer'
+import { navToRoute } from '../hash-route.ts'
 
 type TermEntry = {
   id: string
@@ -30,7 +31,7 @@ export function requestReplay(sid: string): void {
   } catch {
     // Storage unavailable — Recordings page just won't preselect.
   }
-  window.location.hash = '#/recordings'
+  navToRoute('#/recordings')
 }
 
 /**

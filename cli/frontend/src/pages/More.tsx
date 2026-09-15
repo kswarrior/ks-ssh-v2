@@ -1,5 +1,6 @@
 // "More" hub — replaces the old Settings page.
 // Add future entries by copying the Users <li> below.
+import { navToRoute } from '../hash-route.ts'
 
 function UsersIcon() {
   return (
@@ -73,13 +74,13 @@ function ChevronIcon() {
 
 export default function MorePage({ authProtected }: { authProtected: boolean }) {
   const openUsers = () => {
-    window.location.hash = '#/users'
+    navToRoute('#/users')
   }
   const openAudit = () => {
-    window.location.hash = '#/audit'
+    navToRoute('#/audit')
   }
   const openRecordings = () => {
-    window.location.hash = '#/recordings'
+    navToRoute('#/recordings')
   }
 
   return (

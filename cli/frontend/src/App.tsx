@@ -9,6 +9,7 @@ import AuditPage from './pages/Audit'
 import RecordingsPage from './pages/Recordings'
 import LoginPage from './pages/Login'
 import ChatWidget from './components/ChatWidget'
+import { buildHashForRoute, getRouteFromHash, navToRoute } from './hash-route.ts'
 
 type TabId = 'terminal' | 'files' | 'ports' | 'host' | 'more' | 'users' | 'audit' | 'recordings'
 
@@ -60,9 +61,11 @@ function writeJSON(key: string, value: unknown) {
   }
 }
 
-/** Map a location hash to a tab, or null when it is not a tab route. */
+/** Map a location hash to a tab, or null when it is not a tab route. Keeps `#k=KEY/...` working. */
 function hashToTab(hash: string): TabId | null {
-  const clean = hash.replace(/^#\/?/, '')
+  const route = getRouteFromHash(hash) // e.g. `/files` from `#k=KEY/files` or `#/files`
+  const clean = route.replace(/^\//, '')
+  if (clean === '') return null
   // Old Settings URL still opens More.
   if (clean === 'settings') return 'more'
   const found = TABS.find((t) => t.hash.replace(/^#\/?/, '') === clean)
@@ -397,9 +400,7 @@ export default function App() {
 
   const go = (item: TabItem) => {
     setTab(item.id)
-    if (window.location.hash !== item.hash) {
-      window.location.hash = item.hash
-    }
+    navToRoute(item.hash)
   }
 
   const logout = async () => {
@@ -569,7 +570,7 @@ export default function App() {
               return (
                 <a
                   key={item.id}
-                  href={item.hash}
+                  href={buildHashForRoute(item.hash)}
                   className={isActive ? 'active' : undefined}
                   aria-current={isActive ? 'page' : undefined}
                   onClick={(e) => {
@@ -759,7 +760,7 @@ export default function App() {
             return (
               <a
                 key={item.id}
-                href={item.hash}
+                href={buildHashForRoute(item.hash)}
                 className={isActive ? 'active' : undefined}
                 aria-current={isActive ? 'page' : undefined}
                 onClick={(e) => {

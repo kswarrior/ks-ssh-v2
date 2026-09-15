@@ -65,7 +65,8 @@ function validKey(k: string): boolean {
 
 /**
  * Read `k` from a URL hash fragment ONLY (never query/fetch).
- * Supports `#k=...`, `#/v/ABCDE&k=...` and legacy `#/session/...` (compat).
+ * Supports `#k=...`, `#k=.../files` (key-preserving tab routes),
+ * `#/v/ABCDE&k=...` and legacy `#/session/...` (compat).
  */
 export function parseKeyFromHash(hash: string): string | null {
   try {
