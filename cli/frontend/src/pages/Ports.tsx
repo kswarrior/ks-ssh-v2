@@ -302,6 +302,7 @@ export default function PortsPage() {
               const proc = p.process
                 ? ` · ${p.process}${p.pid != null ? ` (pid ${p.pid})` : ''}`
                 : ''
+              const metaText = `${p.addr}:${p.port} · ${p.state}${proc}`
               const isConfirm = confirmKill === key
               const isKilling = killing === key
               return (
@@ -363,7 +364,7 @@ export default function PortsPage() {
                       </svg>
                     </button>
                   </div>
-                  <div className="file-meta">
+                  <div className="file-meta" title={metaText}>
                     {p.addr}:{p.port} · {p.state}
                     {proc}
                   </div>

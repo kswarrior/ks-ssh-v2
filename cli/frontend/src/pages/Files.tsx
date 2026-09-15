@@ -1845,6 +1845,7 @@ export default function FilesPage() {
               const isChecked = selected.includes(e.path)
               const previewKind = !e.is_dir && !e.is_symlink ? previewKindOf(e.name) : null
               const cat: FileCat = e.is_dir ? 'dir' : fileCat(e.name, false)
+              const metaText = `${e.is_dir ? 'folder' : formatSize(e.size)} · ${formatDate(e.modified)}${e.is_symlink ? ' · link' : ''}`
               return (
                 <li
                   key={e.path}
@@ -2070,7 +2071,7 @@ export default function FilesPage() {
                       )}
                     </div>
                   </div>
-                  <div className="file-meta">
+                  <div className="file-meta" title={metaText}>
                     {e.is_dir ? 'folder' : formatSize(e.size)} ·{' '}
                     {formatDate(e.modified)}
                     {e.is_symlink ? ' · link' : ''}
