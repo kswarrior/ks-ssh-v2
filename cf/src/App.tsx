@@ -354,23 +354,6 @@ function HomePage() {
 
   return (
     <section className="page" aria-labelledby="page-title-home">
-      <div className="hero card">
-        <span className="eyebrow">KS SSH</span>
-        <h1 id="page-title-home">Shell access, minus the hassle.</h1>
-        <p className="lead">
-          Save your connections, see live status, and reconnect in one tap —
-          from your phone or desktop.
-        </p>
-        <div className="row-actions">
-          <a className="btn btn-primary" href="#/ssh">
-            Open SSH
-          </a>
-          <a className="btn" href="#/installation">
-            Install
-          </a>
-        </div>
-      </div>
-
       <div className="card showcase-card" aria-roledescription="carousel" aria-label="App screenshots">
         <div
           className="showcase-stage"
@@ -448,6 +431,23 @@ function HomePage() {
               onClick={() => setIndex(i)}
             />
           ))}
+        </div>
+      </div>
+
+      <div className="hero card">
+        <span className="eyebrow">KS SSH</span>
+        <h1 id="page-title-home">Shell access, minus the hassle.</h1>
+        <p className="lead">
+          Save your connections, see live status, and reconnect in one tap —
+          from your phone or desktop.
+        </p>
+        <div className="row-actions">
+          <a className="btn btn-primary" href="#/ssh">
+            Open SSH
+          </a>
+          <a className="btn" href="#/installation">
+            Install
+          </a>
         </div>
       </div>
 
