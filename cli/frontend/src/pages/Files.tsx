@@ -3183,6 +3183,11 @@ export default function FilesPage() {
                 ? ' and everything inside it?'
                 : ' permanently?'}
             </p>
+            {actionError && (
+              <div className="banner-error" role="alert">
+                <p>{actionError}</p>
+              </div>
+            )}
             <div className="term-confirm-actions">
               <button
                 type="button"
