@@ -379,7 +379,7 @@ type SshEntry = {
   note: string
   online: boolean
   // E2E expected for this connection (persisted flag only — the raw `k`
-  // itself lives in SSHPage memory (`e2eKeys`), never in localStorage).
+  // itself lives in the saved `e2eKeys` map, never in the entry row).
   e2e?: boolean
 }
 
@@ -801,8 +801,7 @@ function SSHPage({
     setToken(e.token)
     setNote(e.note)
     setE2eOn(e.e2e === true)
-    // Memory-only: prefill only if the key is still in this session.
-    // After a reload it is intentionally empty (never persisted).
+    // Saved keys: prefill from this device so Visit keeps working reloads.
     setE2eKey(e2eKeys[e.id] ?? '')
     setE2eError(null)
     setShowKey(false)
@@ -836,8 +835,8 @@ function SSHPage({
     }, timeoutMs)
     ws.onopen = () => {
       // Presence check only (no secrets). Include e2e capability when a key
-      // is available — per-entry memory key first, then the URL fragment.
-      // `k` itself never leaves memory/fragment.
+      // is available — saved per-entry key first, then the URL fragment.
+      // `k` itself never leaves storage/fragment.
       const k = e2eKeys[entry.id] ?? parseFragmentKey()
       ws.send(
         JSON.stringify(
@@ -926,8 +925,8 @@ function SSHPage({
       setBanner('Token is 5 or 9 letters/numbers — run `ks-ssh --token=` to get one.')
       return
     }
-    // E2E key stays in memory only — validate (full link or raw `k`) but
-    // never put it into `SshEntry` (persisted to localStorage).
+    // E2E key is saved on this device with the connection — validate
+    // (full link or raw `k`) but never put it into `SshEntry` itself.
     let cleanKey: string | null = null
     if (e2eOn) {
       cleanKey = extractKeyFromText(e2eKey)
@@ -946,7 +945,7 @@ function SSHPage({
             : x,
         ),
       )
-      // Sync the memory-only key map (drop it when E2E is toggled off).
+      // Sync the saved key map (drop it when E2E is toggled off).
       setE2eKeys((prev) => {
         const next = { ...prev }
         if (e2eOn && cleanKey) next[id] = cleanKey
@@ -990,8 +989,8 @@ function SSHPage({
     onChange((prev) => prev.filter((x) => x.id !== id))
   }
 
-  // Visit URL: per-entry memory key first, then the URL fragment — so E2E
-  // survives the navigation to raw /v/TOKEN. `k` stays in the fragment only.
+  // Visit URL: saved per-entry key first, then the URL fragment — so E2E
+  // survives reloads and the navigation to raw /v/TOKEN.
   const visitUrl = (entry: SshEntry): string => {
     const t = entry.token.trim().toUpperCase()
     const k = e2eKeys[entry.id] ?? parseFragmentKey()
@@ -1136,11 +1135,11 @@ function SSHPage({
                   </span>
                 ) : formFp ? (
                   <span className="session-status session-hint">
-                    🔒 fingerprint <code>{formFp}</code> (memory-only — re-enter after reload)
+                    🔒 fingerprint <code>{formFp}</code> (saved on this device with this connection)
                   </span>
                 ) : (
                   <span className="session-status session-hint">
-                    Key stays in memory only — never stored. Paste once per session.
+                    Saved on this device with this connection — deleting it drops the key too.
                   </span>
                 )}
               </label>
@@ -2076,8 +2075,8 @@ function InstallationPage() {
               viewer&apos;s fingerprint with the CLI&apos;s on first connect.
             </li>
             <li>
-              Keep <code>k</code> and PINs in the fragment and memory only —
-              never in query strings, fetch URLs or logs.
+              Keep <code>k</code> and PINs out of query strings, fetch URLs
+              and logs — they travel in the fragment and sealed traffic only.
             </li>
             <li>
               Files stay jailed to <code>$HOME</code>; port kills are
@@ -2384,6 +2383,7 @@ export default function App() {
     try {
       localStorage.removeItem('ks-ssh:ssh')
       localStorage.removeItem('ks-ssh:settings')
+      localStorage.removeItem('ks-ssh:e2e')
       sessionStorage.clear()
     } catch {
       // Storage unavailable — in-memory state already cleared.
