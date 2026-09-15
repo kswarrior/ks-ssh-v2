@@ -8,26 +8,46 @@
 
 Do **all** debugging in the main agent. Do **not** spawn sub-agents (`Task` tool).
 
-### Rules
-- Main agent reads, searches (`Grep`/`Glob`/`Read`), edits, and verifies builds itself.
-- For CF + CLI flows, check both sides sequentially in the same session — e.g. `cf/src/App.tsx` then `cli/frontend/src/relay-shim.ts` — instead of delegating.
-- Keep context focused: read only the files/lines listed in §3 / §8 and expand as needed.
-- Verify in main after every fix: `tsc -b && vite build`, `bash rebuild.sh`, `wrangler dev` / `RUST_LOG=debug`.
+### Mandatory Workflow — Read → Understand → Fix → Build
 
-### Example — debugging "Visit 1-3 min vs --port 2-4s" (main only)
+**You MUST follow this order. Do NOT edit or build before reading and understanding.**
+
+**Phase 1 — READ ALL & UNDERSTAND (required first)**
+- Read **all** relevant files **fully** before any fix. At minimum: every file in `§3 Logs & Where to Look` + `§8 Files to Watch` plus `§1 Architecture` flows and `§2 Local Run`.
+- Trace **both** sides sequentially in main: `cf/` **and** `cli/` — e.g. `cf/src/App.tsx` → `cf/worker/room.ts` → `cf/worker/index.ts` → `cli/frontend/src/App.tsx` → `cli/frontend/src/relay-shim.ts` → `cli/frontend/src/relay-e2e.ts` → `cli/backend/src/relay.rs` → `cli/backend/src/e2e.rs` → `cli/frontend/src/pages/Terminal.tsx` → `cli/backend/src/shell.rs` → `cli/backend/src/ui.rs`.
+- Understand the full lifecycle end-to-end: `Visit` (`SSHPage visitUrl -> SshVisitPage` vs raw `/v/` → `room.ts uiHtml` → `relay-shim` → `WSS /v1/client` → `E2E` → `rpc/shell`), `Add/Edit`, `Online` (`/api/ssh/status` / `room.ts:72`), `WSS / E2E seq` / `shell replay v2 &from=off`.
+- Use `Grep`/`Glob`/`Read` to collect evidence. Note `file:line` for every finding. No assumptions, no partial reads.
+
+**Phase 2 — FIX (only after Phase 1)**
+- Only after you can explain the flow end-to-end, apply fixes directly in main agent.
+
+**Phase 3 — BUILD & VERIFY (only after Phase 2)**
+- Then go to build/verify: `tsc -b && vite build`, `bash rebuild.sh`, `wrangler dev`, `RUST_LOG=debug`, smoke tests in `§7`.
+
+### Rules
+- Main agent does everything itself — reads, searches, edits, builds, verifies — all in same session, in the order above.
+- Do NOT skip Phase 1. Do NOT jump to Fix/Build without reading all files and understanding flows.
+- Keep context complete: do not edit with partial file knowledge.
+
+### Example — debugging "Visit 1-3 min vs --port 2-4s" (main only, must Read → Understand → Fix → Build)
 
 ```bash
-# Main agent does directly:
+# Phase 1 — READ ALL & UNDERSTAND first (no edits yet):
 grep -rn "AUTH_TIMEOUT\|HELLO_TIMEOUT\|RPC_TIMEOUT" cli/frontend/src/App.tsx cli/frontend/src/relay-shim.ts
-# Read cf/worker/room.ts:113 ensureUiLoaded and cli/backend/src/ui.rs build_single_file
-# Compare relay path vs port path, check Promise.race timeout 8500/7500 vs 120s
+# Read cf/src/App.tsx:949,1105,1630 + cf/worker/room.ts:46,113,174,398 + cli/frontend/src/App.tsx:141,167,438 + cli/backend/src/ui.rs + cli/backend/src/relay.rs
+# Understand: why raw /v/ via shim takes 120s RPC vs --port 50ms direct, check Promise.race 8500/7500
+# Phase 2 — FIX only after full understanding
+# Phase 3 — BUILD: cd cf && npm run build; cd cli && bash rebuild.sh
 ```
 
-### Example — debugging "empty terminal reload 60s" (main only)
+### Example — debugging "empty terminal reload 60s" (main only, must Read → Understand → Fix → Build)
 
 ```bash
+# Phase 1 — READ ALL first:
 grep -n "STALE_MS\|PING_MS\|backoffMs" cli/frontend/src/pages/Terminal.tsx
-# Read cli/frontend/src/pages/Terminal.tsx:40,1528,1579 and cli/backend/src/shell.rs from handling
+# Read cli/frontend/src/pages/Terminal.tsx:40,1528,1579 + cli/backend/src/shell.rs + cli/frontend/src/App.tsx boot
+# Understand: STALE 12s + v2 gating + backoff 500*2^a 36.5s before touching code
+# Phase 2 — FIX, Phase 3 — BUILD
 ```
 
 ---
