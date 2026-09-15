@@ -1578,6 +1578,23 @@ function ShellSession({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [gen])
 
+  // Flush resume offset on page hide/reload so `from=` is never 10s stale on fast reload (empty terminal still 0).
+  useEffect(() => {
+    const flush = () => {
+      try {
+        saveOffset()
+      } catch {}
+    }
+    window.addEventListener('visibilitychange', flush)
+    window.addEventListener('pagehide', flush)
+    window.addEventListener('beforeunload', flush)
+    return () => {
+      window.removeEventListener('visibilitychange', flush)
+      window.removeEventListener('pagehide', flush)
+      window.removeEventListener('beforeunload', flush)
+    }
+  }, [])
+
   useEffect(() => {
     onStatus(id, status)
   }, [id, status, onStatus])
