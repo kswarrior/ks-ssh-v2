@@ -8,46 +8,56 @@
 
 Do **all** debugging in the main agent. Do **not** spawn sub-agents (`Task` tool).
 
-### Mandatory Workflow — Read → Understand → Fix → Build
+### Mandatory Workflow — Read → Understand → Find Problem → Fix → Build
 
-**You MUST follow this order. Do NOT edit or build before reading and understanding.**
+**You MUST follow this order. Do NOT edit or build before reading, understanding, and finding the problem.**
 
-**Phase 1 — READ ALL & UNDERSTAND (required first)**
+**Phase 1 — READ ALL (required first)**
 - Read **all** relevant files **fully** before any fix. At minimum: every file in `§3 Logs & Where to Look` + `§8 Files to Watch` plus `§1 Architecture` flows and `§2 Local Run`.
 - Trace **both** sides sequentially in main: `cf/` **and** `cli/` — e.g. `cf/src/App.tsx` → `cf/worker/room.ts` → `cf/worker/index.ts` → `cli/frontend/src/App.tsx` → `cli/frontend/src/relay-shim.ts` → `cli/frontend/src/relay-e2e.ts` → `cli/backend/src/relay.rs` → `cli/backend/src/e2e.rs` → `cli/frontend/src/pages/Terminal.tsx` → `cli/backend/src/shell.rs` → `cli/backend/src/ui.rs`.
-- Understand the full lifecycle end-to-end: `Visit` (`SSHPage visitUrl -> SshVisitPage` vs raw `/v/` → `room.ts uiHtml` → `relay-shim` → `WSS /v1/client` → `E2E` → `rpc/shell`), `Add/Edit`, `Online` (`/api/ssh/status` / `room.ts:72`), `WSS / E2E seq` / `shell replay v2 &from=off`.
 - Use `Grep`/`Glob`/`Read` to collect evidence. Note `file:line` for every finding. No assumptions, no partial reads.
 
-**Phase 2 — FIX (only after Phase 1)**
-- Only after you can explain the flow end-to-end, apply fixes directly in main agent.
+**Phase 2 — UNDERSTAND (only after Phase 1)**
+- Understand the full lifecycle end-to-end: `Visit` (`SSHPage visitUrl -> SshVisitPage` vs raw `/v/` → `room.ts uiHtml` → `relay-shim` → `WSS /v1/client` → `E2E` → `rpc/shell`), `Add/Edit`, `Online` (`/api/ssh/status` / `room.ts:72`), `WSS / E2E seq` / `shell replay v2 &from=off`.
+- You must be able to explain the flow end-to-end before moving on.
 
-**Phase 3 — BUILD & VERIFY (only after Phase 2)**
-- Then go to build/verify: `tsc -b && vite build`, `bash rebuild.sh`, `wrangler dev`, `RUST_LOG=debug`, smoke tests in `§7`.
+**Phase 3 — FIND PROBLEM (only after Phase 2)**
+- Find the problem / root cause: compare expected vs actual flow, pinpoint `file:line` where the bug lives (e.g. `RPC_TIMEOUT 120s` `relay-shim.ts:24`, `STALE_MS 12s` `Terminal.tsx:40`, `reset_seq` missing `e2e.rs:236`).
+- Document the problem with evidence (`file:line` + log/repro) before editing.
+
+**Phase 4 — FIX (only after Phase 3)**
+- After the problem is found and understood, apply fixes directly in main agent. No fix without a found problem.
+
+**Phase 5 — BUILD & VERIFY (only after Phase 4 — after fixed, then build)**
+- Only after the fix is done, go to build/verify: `tsc -b && vite build`, `bash rebuild.sh`, `wrangler dev`, `RUST_LOG=debug`, smoke tests in `§7`. Do NOT build before the fix.
 
 ### Rules
 - Main agent does everything itself — reads, searches, edits, builds, verifies — all in same session, in the order above.
-- Do NOT skip Phase 1. Do NOT jump to Fix/Build without reading all files and understanding flows.
+- Do NOT skip Phase 1 or 2. Do NOT jump to Find/Fix/Build without reading all files and understanding flows.
+- Do NOT fix without finding the problem first. Do NOT build until after the fix is done.
 - Keep context complete: do not edit with partial file knowledge.
 
-### Example — debugging "Visit 1-3 min vs --port 2-4s" (main only, must Read → Understand → Fix → Build)
+### Example — debugging "Visit 1-3 min vs --port 2-4s" (main only, must Read → Understand → Find Problem → Fix → Build)
 
 ```bash
-# Phase 1 — READ ALL & UNDERSTAND first (no edits yet):
+# Phase 1 — READ ALL first (no edits yet):
 grep -rn "AUTH_TIMEOUT\|HELLO_TIMEOUT\|RPC_TIMEOUT" cli/frontend/src/App.tsx cli/frontend/src/relay-shim.ts
 # Read cf/src/App.tsx:949,1105,1630 + cf/worker/room.ts:46,113,174,398 + cli/frontend/src/App.tsx:141,167,438 + cli/backend/src/ui.rs + cli/backend/src/relay.rs
-# Understand: why raw /v/ via shim takes 120s RPC vs --port 50ms direct, check Promise.race 8500/7500
-# Phase 2 — FIX only after full understanding
-# Phase 3 — BUILD: cd cf && npm run build; cd cli && bash rebuild.sh
+# Phase 2 — UNDERSTAND: why raw /v/ via shim takes 120s RPC vs --port 50ms direct, check Promise.race 8500/7500
+# Phase 3 — FIND PROBLEM: boot awaited fetch via shim with 120s RPC -> race 8500/7500 missing
+# Phase 4 — FIX only after problem found
+# Phase 5 — BUILD after fixed: cd cf && npm run build; cd cli && bash rebuild.sh
 ```
 
-### Example — debugging "empty terminal reload 60s" (main only, must Read → Understand → Fix → Build)
+### Example — debugging "empty terminal reload 60s" (main only, must Read → Understand → Find Problem → Fix → Build)
 
 ```bash
 # Phase 1 — READ ALL first:
 grep -n "STALE_MS\|PING_MS\|backoffMs" cli/frontend/src/pages/Terminal.tsx
 # Read cli/frontend/src/pages/Terminal.tsx:40,1528,1579 + cli/backend/src/shell.rs + cli/frontend/src/App.tsx boot
-# Understand: STALE 12s + v2 gating + backoff 500*2^a 36.5s before touching code
-# Phase 2 — FIX, Phase 3 — BUILD
+# Phase 2 — UNDERSTAND: STALE 12s + v2 gating + backoff 500*2^a 36.5s
+# Phase 3 — FIND PROBLEM: STALE_MS 12s kills idle empty (v2==false no ping) -> 36.5s backoff
+# Phase 4 — FIX, Phase 5 — BUILD after fixed
 ```
 
 ---
