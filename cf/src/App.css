@@ -1967,6 +1967,12 @@
   }
 }
 
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .card.ssh-card:hover {
   transform: translateY(-4px);
   border-color: rgba(139, 124, 255, 0.45);
