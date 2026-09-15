@@ -649,21 +649,6 @@ function SSHPage({
 }) {
   const relayBase = relayHttpBase(settings)
   const wsHost = relayWsHost(settings)
-  const [formOpen, setFormOpen] = useState(false)
-  const [editingId, setEditingId] = useState<string | null>(null)
-  const [name, setName] = useState('')
-  const [token, setToken] = useState('')
-  const [note, setNote] = useState('')
-  // Per-connection E2E (form state). The raw `k` is saved on this device
-  // in `ks-ssh:e2e` (keyed by entry id) so Visit keeps working across
-  // reloads — deleting the connection drops its key too.
-  const [e2eOn, setE2eOn] = useState(false)
-  const [e2eKey, setE2eKey] = useState('')
-  const [e2eError, setE2eError] = useState<string | null>(null)
-  const [showKey, setShowKey] = useState(false)
-  // Fingerprint cache for exactly one key (fp only — never the key itself
-  // beyond `k` as the cache key, matching the SessionPage TOFU pattern).
-  const [keyFp, setKeyFp] = useState<{ k: string; fp: string } | null>(null)
   // Saved E2E keys by entry id (persisted to localStorage, survives reload).
   const [e2eKeys, setE2eKeys] = useState<Record<string, string>>(() =>
     readE2eKeys(),
@@ -808,29 +793,6 @@ function SSHPage({
     // eslint-disable-next-line react-hooks/exhaustive-deps -- run once on mount
   }, [])
 
-  // Parsed key for the form (derived during render — no cascading render).
-  const parsedFormKey = e2eOn ? extractKeyFromText(e2eKey) : null
-  const formFp = parsedFormKey && keyFp && keyFp.k === parsedFormKey ? keyFp.fp : null
-
-  // Fingerprint preview for the typed key (async continuation only, so no
-  // cascading render; stale keys never display — render gates on `k`).
-  useEffect(() => {
-    if (!parsedFormKey) return
-    if (keyFp && keyFp.k === parsedFormKey) return
-    let alive = true
-    const k = parsedFormKey
-    void fingerprintK(k)
-      .then((f) => {
-        if (alive) setKeyFp({ k, fp: f })
-      })
-      .catch(() => {
-        // Invalid key — preview stays empty (render already gates on `k`).
-      })
-    return () => {
-      alive = false
-    }
-  }, [parsedFormKey, keyFp])
-
   useEffect(
     () => () => {
       for (const ws of socketsRef.current.values()) {
@@ -855,38 +817,12 @@ function SSHPage({
     }
   }
 
-  const resetForm = () => {
-    setEditingId(null)
-    setName('')
-    setToken('')
-    setNote('')
-    setE2eOn(false)
-    setE2eKey('')
-    setE2eError(null)
-    setShowKey(false)
-  }
-
   const openNew = () => {
-    resetForm()
-    setFormOpen(true)
+    window.location.hash = '#/ssh/add'
   }
 
   const openEdit = (e: SshEntry) => {
-    setEditingId(e.id)
-    setName(e.name)
-    setToken(e.token)
-    setNote(e.note)
-    setE2eOn(e.e2e === true)
-    // Saved keys: prefill from this device so Visit keeps working reloads.
-    setE2eKey(e2eKeys[e.id] ?? '')
-    setE2eError(null)
-    setShowKey(false)
-    setFormOpen(true)
-  }
-
-  const closeForm = () => {
-    setFormOpen(false)
-    resetForm()
+    window.location.hash = `#/ssh/edit/${encodeURIComponent(e.id)}`
   }
 
   const attemptConnect = (entry: SshEntry) => {
