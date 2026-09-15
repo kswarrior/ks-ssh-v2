@@ -305,6 +305,31 @@ type SshEntry = {
 
 function HomePage() {
   const [expanded, setExpanded] = useState<string | null>(null)
+  const [index, setIndex] = useState(0)
+  const touchX = useRef<number | null>(null)
+
+  const features: Array<{ title: string; text: string; src: string; alt: string }> = [
+    { title: 'Terminal', text: 'Real PTY, multi-tab + vertical split, gap-free resume, predictive echo, CJK/IME + search & export, touch bar.', src: '/images/terminal.png', alt: 'Terminal' },
+    { title: 'Files', text: 'HOME-jailed files & editor (1/5/100 MB caps), lexical path handling, zip/unzip, and media previews.', src: '/images/files.png', alt: 'Files' },
+    { title: 'Ports', text: 'Live /proc ports with process list, per-port kill, and connection tracking over WSS.', src: '/images/ports.png', alt: 'Ports' },
+    { title: 'Host', text: 'Per-core/RAM/swap/df-filtered host monitoring, metrics and system info – same as local --port.', src: '/images/host.png', alt: 'Host' },
+  ]
+
+  const count = features.length
+  const prev = () => setIndex((i) => (i - 1 + count) % count)
+  const next = () => setIndex((i) => (i + 1) % count)
+  const current = features[index] ?? features[0]!
+
+  // Arrow-key navigation for the carousel (ignored while lightbox is open).
+  useEffect(() => {
+    if (expanded) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'ArrowLeft') prev()
+      else if (e.key === 'ArrowRight') next()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  })
 
   if (expanded) {
     return (
@@ -327,13 +352,6 @@ function HomePage() {
     )
   }
 
-  const features: Array<{ title: string; text: string; src: string; alt: string }> = [
-    { title: 'Terminal', text: 'Real PTY, multi-tab + vertical split, gap-free resume, predictive echo, CJK/IME + search & export, touch bar.', src: '/images/terminal.png', alt: 'Terminal' },
-    { title: 'Files', text: 'HOME-jailed files & editor (1/5/100 MB caps), lexical path handling, zip/unzip, and media previews.', src: '/images/files.png', alt: 'Files' },
-    { title: 'Ports', text: 'Live /proc ports with process list, per-port kill, and connection tracking over WSS.', src: '/images/ports.png', alt: 'Ports' },
-    { title: 'Host', text: 'Per-core/RAM/swap/df-filtered host monitoring, metrics and system info – same as local --port.', src: '/images/host.png', alt: 'Host' },
-  ]
-
   return (
     <section className="page" aria-labelledby="page-title-home">
       <div className="hero card">
@@ -350,6 +368,86 @@ function HomePage() {
           <a className="btn" href="#/installation">
             Install
           </a>
+        </div>
+      </div>
+
+      <div className="card showcase-card" aria-roledescription="carousel" aria-label="App screenshots">
+        <div
+          className="showcase-stage"
+          onTouchStart={(e) => {
+            touchX.current = e.touches[0]?.clientX ?? null
+          }}
+          onTouchEnd={(e) => {
+            if (touchX.current === null) return
+            const dx = (e.changedTouches[0]?.clientX ?? touchX.current) - touchX.current
+            touchX.current = null
+            if (Math.abs(dx) < 30) return
+            if (dx > 0) prev()
+            else next()
+          }}
+        >
+          <div className="showcase-caption" aria-live="polite">
+            <strong className="showcase-caption-title">{current.title}</strong>
+            <span className="showcase-caption-text">{current.text}</span>
+          </div>
+          <img
+            key={current.src}
+            src={current.src}
+            alt={current.alt}
+            className="showcase-image"
+            onClick={() => setExpanded(current.src)}
+            style={{ cursor: 'zoom-in' }}
+          />
+          <button
+            type="button"
+            className="showcase-nav showcase-nav-prev"
+            onClick={prev}
+            aria-label={`Previous image: ${features[(index - 1 + count) % count]?.title}`}
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <polyline points="15 18 9 12 15 6" />
+            </svg>
+          </button>
+          <button
+            type="button"
+            className="showcase-nav showcase-nav-next"
+            onClick={next}
+            aria-label={`Next image: ${features[(index + 1) % count]?.title}`}
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <polyline points="9 18 15 12 9 6" />
+            </svg>
+          </button>
+          <button
+            type="button"
+            className="feature-image-expand-btn showcase-expand"
+            aria-label={`Expand ${current.title} image`}
+            onClick={() => setExpanded(current.src)}
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <polyline points="15 3 21 3 21 9" />
+              <polyline points="9 21 3 21 3 15" />
+              <line x1="21" y1="3" x2="14" y2="10" />
+              <line x1="3" y1="21" x2="10" y2="14" />
+            </svg>
+          </button>
+          <span className="showcase-counter" aria-hidden="true">
+            {index + 1} / {count}
+          </span>
+        </div>
+        <div className="showcase-dots" role="tablist" aria-label="Choose screenshot">
+          {features.map((f, i) => (
+            <button
+              key={f.title}
+              type="button"
+              role="tab"
+              aria-selected={i === index}
+              aria-label={`Show ${f.title}`}
+              title={f.title}
+              className={`showcase-dot${i === index ? ' is-active' : ''}`}
+              onClick={() => setIndex(i)}
+            />
+          ))}
         </div>
       </div>
 
@@ -375,34 +473,6 @@ function HomePage() {
           title="Everywhere"
           text="The same interface on phone and desktop, with offline-first data."
         />
-      </div>
-
-      <h2>Features</h2>
-      <div className="features-image-grid">
-        {features.map((f) => (
-          <div key={f.title} className="card feature-image-card">
-            <div className="feature-image-text">
-              <h3>{f.title}</h3>
-              <p>{f.text}</p>
-            </div>
-            <div className="feature-image-wrap">
-              <img src={f.src} alt={f.alt} className="feature-image" loading="lazy" onClick={() => setExpanded(f.src)} style={{ cursor: 'zoom-in' }} />
-              <button
-                type="button"
-                className="feature-image-expand-btn"
-                aria-label={`Expand ${f.title} image`}
-                onClick={() => setExpanded(f.src)}
-              >
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                  <polyline points="15 3 21 3 21 9" />
-                  <polyline points="9 21 3 21 3 15" />
-                  <line x1="21" y1="3" x2="14" y2="10" />
-                  <line x1="3" y1="21" x2="10" y2="14" />
-                </svg>
-              </button>
-            </div>
-          </div>
-        ))}
       </div>
     </section>
   )
