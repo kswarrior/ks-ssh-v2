@@ -544,6 +544,7 @@ function SSHPage({
         const msg = JSON.parse(String(e.data)) as {
           type?: string
           online?: boolean
+          agent?: boolean
         }
         // `enc` payloads are opaque here — handled in the active session.
         if (msg?.type === 'enc') return
@@ -1138,6 +1139,7 @@ function SessionPage({
           type?: string
           gated?: boolean
           relay_auth?: boolean
+          online?: boolean
         }
         // `enc` is opaque sealed traffic — ignore here (UI is plaintext).
         if (msg?.type === 'enc') return
