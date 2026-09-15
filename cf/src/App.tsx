@@ -9,7 +9,7 @@ import {
 /** Token pattern: 9 chars fresh, 5 chars legacy — both route. */
 const TOKEN_EXACT_RE = /^(?:[A-Za-z0-9]{5}|[A-Za-z0-9]{9})$/
 
-type PageId = 'home' | 'ssh' | 'ssh-add' | 'ssh-edit' | 'installation' | 'settings'
+type PageId = 'home' | 'ssh' | 'ssh-add' | 'ssh-edit' | 'ssh-visit' | 'installation' | 'settings'
 
 type NavItem = { id: PageId; label: string; hash: string }
 
@@ -132,12 +132,18 @@ function hashToPage(hash: string): PageId | null {
   const clean = hash.replace(/^#\/?/, '')
   if (clean === 'ssh/add' || clean === 'ssh-add') return 'ssh-add'
   if (clean.startsWith('ssh/edit/') || clean.startsWith('ssh-edit/')) return 'ssh-edit'
+  if (clean.startsWith('ssh/visit/') || clean.startsWith('ssh-visit/')) return 'ssh-visit'
   const found = NAV.find((p) => p.hash.replace(/^#\/?/, '') === clean)
   return found ? found.id : null
 }
 
 function hashToSshEditId(hash: string): string | null {
   const m = hash.match(/^#\/?ssh\/edit\/([^/?#]+)/) ?? hash.match(/^#\/?ssh-edit\/([^/?#]+)/)
+  return m?.[1] ? decodeURIComponent(m[1]) : null
+}
+
+function hashToSshVisitId(hash: string): string | null {
+  const m = hash.match(/^#\/?ssh\/visit\/([^/?#]+)/) ?? hash.match(/^#\/?ssh-visit\/([^/?#]+)/)
   return m?.[1] ? decodeURIComponent(m[1]) : null
 }
 
