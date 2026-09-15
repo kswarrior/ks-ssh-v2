@@ -363,6 +363,8 @@ fn totp_check(secret_raw: &[u8], code: &str) -> bool {
     totp.check_current(&code).is_some()
 }
 
+// Test-only helper (used from `#[cfg(test)]`); allow dead code in normal builds.
+#[allow(dead_code)]
 fn totp_current_for_tests(secret_raw: &[u8]) -> Option<String> {
     use totp_rs::Algorithm;
     let secret = totp_rs::Secret::new(secret_raw.to_vec().into_boxed_slice());
