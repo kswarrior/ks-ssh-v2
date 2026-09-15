@@ -1198,6 +1198,17 @@ async fn on_text(
             let alg = msg.get("e2e").and_then(|v| v.as_str());
             let peer_ok = alg == Some(E2E_ALG);
             peer.store(peer_ok, Ordering::SeqCst);
+            // New client hello — reset E2E seq so second tab's seq 0 doesn't look like replay of first tab's N+1.
+            // This fixes 4-5s `E2E decrypt failed` + 120s RPC timeout on 2nd open (reopen after close).
+            {
+                let mut g = shared.lock().await;
+                if let Some(state) = g.as_mut() {
+                    state.reset_seq();
+                }
+                if relay_pin.is_some() {
+                    *viewer_ok = false;
+                }
+            }
             if peer_ok {
                 println!("web client supports E2E ({E2E_ALG})");
                 // Identity binding: peer fp must match ours (same k).
