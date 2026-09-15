@@ -928,67 +928,6 @@ function SSHPage({
     )
   }
 
-  const submit = (e: FormEvent) => {
-    e.preventDefault()
-    const cleanName = name.trim()
-    const cleanToken = token.trim().toUpperCase()
-    if (!cleanName || !cleanToken) return
-    if (!TOKEN_EXACT_RE.test(cleanToken)) {
-      setBanner('Token is 5 or 9 letters/numbers — run `ks-ssh --token=` to get one.')
-      return
-    }
-    // E2E key is saved on this device with the connection — validate
-    // (full link or raw `k`) but never put it into `SshEntry` itself.
-    let cleanKey: string | null = null
-    if (e2eOn) {
-      cleanKey = extractKeyFromText(e2eKey)
-      if (!cleanKey) {
-        setE2eError('Enter the E2E key — paste the full share link (with #k=…) or the raw key.')
-        return
-      }
-    }
-    setE2eError(null)
-    if (editingId) {
-      const id = editingId
-      onChange((prev) =>
-        prev.map((x) =>
-          x.id === id
-            ? { ...x, name: cleanName, token: cleanToken, note: note.trim(), e2e: e2eOn }
-            : x,
-        ),
-      )
-      // Sync the saved key map (drop it when E2E is toggled off).
-      setE2eKeys((prev) => {
-        const next = { ...prev }
-        if (e2eOn && cleanKey) next[id] = cleanKey
-        else delete next[id]
-        return next
-      })
-      // Drop the pasted text from form memory immediately.
-      setE2eKey('')
-      closeForm()
-    } else {
-      const id = `ssh-${Date.now().toString(36)}-${Math.floor(Math.random() * 10000)}`
-      const next: SshEntry = {
-        id,
-        name: cleanName,
-        token: cleanToken,
-        note: note.trim(),
-        online: false,
-        e2e: e2eOn,
-      }
-      if (e2eOn && cleanKey) {
-        const k = cleanKey
-        setE2eKeys((prev) => ({ ...prev, [id]: k }))
-      }
-      onChange((prev) => [...prev, next])
-      // Drop the pasted text from form memory immediately.
-      setE2eKey('')
-      closeForm()
-      attemptConnect(next)
-    }
-  }
-
   const removeEntry = (id: string) => {
     closeSocket(id)
     setConnectingId((cur) => (cur === id ? null : cur))
@@ -1102,132 +1041,7 @@ function SSHPage({
         </div>
       )}
 
-      {formOpen && (
-        <Reveal>
-        <div className="card form-card">
-          <h2>{editingId ? 'Edit connection' : 'New connection'}</h2>          <form className="form" onSubmit={submit}>
-            <label className="field">
-              Name
-              <input
-                type="text"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="Home Lab"
-                autoComplete="off"
-                required
-                autoFocus
-              />
-            </label>
-            <label className="field">
-              Token
-              <input
-                type="text"
-                value={token}
-                onChange={(e) => setToken(e.target.value.toUpperCase().slice(0, 9))}
-                placeholder="A3K9Q"
-                autoComplete="off"
-                inputMode="text"
-                maxLength={9}
-                required
-              />
-            </label>
-            <label className="field checkbox-row" style={{ gridColumn: '1 / -1' }}>
-              <input
-                type="checkbox"
-                checked={e2eOn}
-                onChange={(e) => {
-                  setE2eOn(e.target.checked)
-                  setE2eError(null)
-                }}
-              />
-              E2E encrypted
-            </label>
-            {e2eOn && (
-              <label className="field ssh-note-field">
-                E2E key
-                <span style={{ display: 'flex', gap: '8px' }}>
-                  <input
-                    type={showKey ? 'text' : 'password'}
-                    value={e2eKey}
-                    onChange={(e) => {
-                      setE2eKey(e.target.value)
-                      setE2eError(null)
-                    }}
-                    placeholder="Paste full share link (…/v/TOKEN#k=…) or raw key"
-                    autoComplete="off"
-                    spellCheck={false}
-                    style={{ flex: 1 }}
-                  />
-                  <button
-                    type="button"
-                    className="btn btn-sm"
-                    onClick={() => setShowKey((v) => !v)}
-                    aria-label={showKey ? 'Hide E2E key' : 'Show E2E key'}
-                  >
-                    {showKey ? 'Hide' : 'Show'}
-                  </button>
-                </span>
-                {e2eError ? (
-                  <span className="session-status" role="alert">
-                    {e2eError}
-                  </span>
-                ) : formFp ? (
-                  <span className="session-status session-hint">
-                    🔒 fingerprint <code>{formFp}</code> (saved on this device with this connection)
-                  </span>
-                ) : (
-                  <span className="session-status session-hint">
-                    Saved on this device with this connection — deleting it drops the key too.
-                  </span>
-                )}
-              </label>
-            )}
-            <label className="field ssh-note-field">
-              Note
-              <input
-                type="text"
-                value={note}
-                onChange={(e) => setNote(e.target.value)}
-                placeholder="What is this machine for? (optional)"
-                autoComplete="off"
-              />
-            </label>
-            <div className="row-actions">
-              <button type="button" className="btn" onClick={closeForm}>
-                <svg
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2.2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  aria-hidden="true"
-                >
-                  <path d="M18 6L6 18M6 6l12 12" />
-                </svg>
-                Cancel
-              </button>
-              <button type="submit" className="btn btn-primary">
-                <svg
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2.2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  aria-hidden="true"
-                >
-                  <path d="M20 6L9 17l-5-5" />
-                </svg>
-                {editingId ? 'Save' : 'Connect'}
-              </button>
-            </div>
-          </form>
-        </div>
-        </Reveal>
-      )}
-
-      {entries.length === 0 && !formOpen ? (
+      {entries.length === 0 ? (
         <Reveal>
         <div className="card empty-card" style={{ textAlign: 'center', padding: '48px 24px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '20px' }}>
           <h2 style={{ margin: 0 }}>No connections yet</h2>
@@ -1259,16 +1073,17 @@ function SSHPage({
                   <span className="ssh-icon" aria-hidden="true">
                     <SshGlyph />
                   </span>
-                  <span className="ssh-name">{e.name}</span>
+                  <div className="ssh-head-main">
+                    <span className="ssh-name">{e.name}</span>
+                    {e.e2e === true && (
+                      <span className="tag e2e-tag">
+                        {hasKey ? '🔒 E2E on' : '🔒 E2E on — key missing'}
+                      </span>
+                    )}
+                  </div>
                   <StatusTag online={e.online} connecting={connecting} />
                 </div>
-                {e.e2e === true && (
-                  <p className="session-status session-hint" style={{ margin: 0 }}>
-                    {hasKey ? '🔒 E2E on' : '🔒 E2E on — key missing (edit to re-enter)'}
-                  </p>
-                )}
                 <div className="ssh-foot">
-                  {e.note ? <p className="ssh-note">{e.note}</p> : null}
                   <div className="row-actions">
                     {!e.online && (
                       <button
