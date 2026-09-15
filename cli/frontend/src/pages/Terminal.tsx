@@ -290,26 +290,23 @@ function newSid(): string {
 }
 
 /**
- * Other terminals living on this host (SQLite `--db`, shared on purpose).
+ * Shared `GET /api/terms` poll for the Other-sessions UI (block + dropdown).
  *
- * Your own open tabs are hidden here — this lists only sessions you have
- * NOT attached in this browser, so a fresh page no longer scares you with
- * "anyone can attach" rows that are actually your own tabs. Live shells
- * reattach, ended ones replay their saved output. Hidden when the backend
- * has no list endpoint (relay view, old backend) or when there is nothing
- * else on the host.
+ * `refreshKey` forces an immediate re-list (bumped by the parent after local
+ * mutations — tab close, attach, split toggle — so a killed/attached session
+ * never lingers as a stale row until the next 15s poll). Failures keep the
+ * previous list; only a failure before the very first success hides the UI
+ * (relay view / old backend without the endpoint).
  */
-function HostTerms({
-  sessions,
-  splits,
-  onAttach,
-}: {
-  sessions: TermSession[]
-  splits: Record<string, TermSession>
-  onAttach: (sid: string) => void
-}) {
+function useHostList(refreshKey: number): {
+  host: HostTerm[] | null
+  killing: string | null
+  load: () => Promise<HostTerm[] | null>
+  onKill: (sid: string) => Promise<void>
+} {
   const [host, setHost] = useState<HostTerm[] | null>(null)
   const [killing, setKilling] = useState<string | null>(null)
+  const seenOk = useRef(false)
 
   const load = useCallback(async () => {
     try {
@@ -332,6 +329,7 @@ function HostTerms({
               typeof s.alive === 'boolean',
           )
         : []
+      seenOk.current = true
       setHost(list)
       return list
     } catch {
@@ -342,7 +340,6 @@ function HostTerms({
 
   useEffect(() => {
     let alive = true
-    let first = true
     const tick = async () => {
       try {
         const res = await fetch('/api/terms', {
@@ -350,9 +347,9 @@ function HostTerms({
           credentials: 'same-origin',
         })
         if (!res.ok) {
-          // Endpoint missing (relay view) or logged out — hide on first
-          // load, keep the old list on later polls.
-          if (first && alive) setHost(null)
+          // Endpoint missing (relay view) or logged out — hide only when
+          // nothing ever loaded, keep the old list on later polls.
+          if (!seenOk.current && alive) setHost(null)
           return
         }
         const data = (await res.json()) as {
@@ -367,11 +364,11 @@ function HostTerms({
             )
           : []
         if (alive) {
-          first = false
+          seenOk.current = true
           setHost(list)
         }
       } catch {
-        if (first && alive) setHost(null)
+        if (!seenOk.current && alive) setHost(null)
       }
     }
     void tick()
@@ -380,7 +377,170 @@ function HostTerms({
       alive = false
       window.clearInterval(id)
     }
-  }, [])
+  }, [refreshKey])
+
+  const onKill = useCallback(
+    async (sid: string) => {
+      setKilling(sid)
+      try {
+        await killHostTerm(sid)
+        await load()
+      } finally {
+        setKilling((cur) => (cur === sid ? null : cur))
+      }
+    },
+    [load],
+  )
+
+  return { host, killing, load, onKill }
+}
+
+// Cross-window presence: tabs live in shared localStorage, so two windows
+// of the same browser each hold the same tab sids in their own React state.
+// Without this, window B lists window A's own open tabs as scary "shared —
+// anyone can attach" rows. Every live page heartbeats the sids it currently
+// has attached; readers exclude sids claimed by *other* live pages.
+const PRESENCE_KEY = 'ks-ssh:term-presence'
+const PRESENCE_TTL_MS = 15000
+const PRESENCE_BEAT_MS = 5000
+
+function readForeignSids(selfId: string): Set<string> {
+  try {
+    const raw = localStorage.getItem(PRESENCE_KEY)
+    if (!raw) return new Set()
+    const obj = JSON.parse(raw) as Record<
+      string,
+      { ts?: unknown; sids?: unknown } | null
+    >
+    const now = Date.now()
+    const out = new Set<string>()
+    for (const [id, v] of Object.entries(obj ?? {})) {
+      if (id === selfId || !v || typeof v !== 'object') continue
+      if (typeof v.ts !== 'number' || now - v.ts > PRESENCE_TTL_MS) continue
+      if (!Array.isArray(v.sids)) continue
+      for (const s of v.sids) {
+        if (typeof s === 'string' && s) out.add(s)
+      }
+    }
+    return out
+  } catch {
+    return new Set()
+  }
+}
+
+function sameStrSet(a: Set<string>, b: Set<string>): boolean {
+  if (a.size !== b.size) return false
+  for (const s of a) {
+    if (!b.has(s)) return false
+  }
+  return true
+}
+
+/** Sids currently attached by *other* live pages of this browser. */
+function useForeignSids(ownKey: string): Set<string> {
+  const selfRef = useRef<string | null>(null)
+  if (selfRef.current === null) {
+    try {
+      const b = new Uint8Array(8)
+      crypto.getRandomValues(b)
+      selfRef.current = Array.from(b, (x) =>
+        x.toString(16).padStart(2, '0'),
+      ).join('')
+    } catch {
+      selfRef.current = `p-${Date.now().toString(36)}${Math.floor(Math.random() * 1e9).toString(36)}`
+    }
+  }
+  const [foreign, setForeign] = useState<Set<string>>(() =>
+    readForeignSids(selfRef.current as string),
+  )
+
+  useEffect(() => {
+    const self = selfRef.current as string
+    const sync = () => {
+      try {
+        let obj: Record<string, { ts: number; sids: string[] }> = {}
+        try {
+          obj =
+            (JSON.parse(
+              localStorage.getItem(PRESENCE_KEY) ?? '{}',
+            ) as Record<string, { ts: number; sids: string[] }>) ?? {}
+        } catch {
+          obj = {}
+        }
+        const now = Date.now()
+        for (const [id, v] of Object.entries(obj)) {
+          if (!v || typeof v.ts !== 'number' || now - v.ts > PRESENCE_TTL_MS) {
+            delete obj[id]
+          }
+        }
+        obj[self] = { ts: now, sids: ownKey ? ownKey.split('\n') : [] }
+        try {
+          localStorage.setItem(PRESENCE_KEY, JSON.stringify(obj))
+        } catch {
+          // Storage unavailable — presence just won't filter.
+        }
+      } catch {
+        // Malformed presence map — the read below still filters by TTL.
+      }
+      setForeign((prev) => {
+        const next = readForeignSids(self)
+        return sameStrSet(prev, next) ? prev : next
+      })
+    }
+    sync()
+    const iv = window.setInterval(sync, PRESENCE_BEAT_MS)
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === PRESENCE_KEY || e.key === null) {
+        setForeign((prev) => {
+          const next = readForeignSids(self)
+          return sameStrSet(prev, next) ? prev : next
+        })
+      }
+    }
+    window.addEventListener('storage', onStorage)
+    return () => {
+      window.clearInterval(iv)
+      window.removeEventListener('storage', onStorage)
+      try {
+        const raw = localStorage.getItem(PRESENCE_KEY)
+        if (raw) {
+          const obj = JSON.parse(raw) as Record<string, unknown>
+          if (obj && typeof obj === 'object' && self in obj) {
+            delete obj[self]
+            localStorage.setItem(PRESENCE_KEY, JSON.stringify(obj))
+          }
+        }
+      } catch {
+        // Best effort only.
+      }
+    }
+  }, [ownKey])
+
+  return foreign
+}
+
+/**
+ * Other terminals living on this host (SQLite `--db`, shared on purpose).
+ *
+ * Your own open tabs are hidden here — this lists only sessions you have
+ * NOT attached in this browser, so a fresh page no longer scares you with
+ * "anyone can attach" rows that are actually your own tabs. Live shells
+ * reattach, ended ones replay their saved output. Hidden when the backend
+ * has no list endpoint (relay view, old backend) or when there is nothing
+ * else on the host.
+ */
+function HostTerms({
+  sessions,
+  splits,
+  onAttach,
+  refreshKey,
+}: {
+  sessions: TermSession[]
+  splits: Record<string, TermSession>
+  onAttach: (sid: string) => void
+  refreshKey: number
+}) {
+  const { host, killing, load, onKill } = useHostList(refreshKey)
 
   const attached = new Set(
     [
@@ -390,19 +550,14 @@ function HostTerms({
   )
   // Hide your own open tabs — only show *other* host sessions. This is the
   // fix for "I didn't open these": previously your own tabs appeared here
-  // as scary "shared — anyone can attach" rows.
-  const others = (host ?? []).filter((h) => !attached.has(h.id))
+  // as scary "shared — anyone can attach" rows. `foreign` extends the same
+  // hiding to tabs owned by other live windows of this browser.
+  const foreign = useForeignSids([...attached].sort().join('\n'))
+  const others = (host ?? []).filter(
+    (h) => !attached.has(h.id) && !foreign.has(h.id),
+  )
   if (!host) return null
   if (others.length === 0) return null
-  const onKill = async (sid: string) => {
-    setKilling(sid)
-    try {
-      await killHostTerm(sid)
-      await load()
-    } finally {
-      setKilling((cur) => (cur === sid ? null : cur))
-    }
-  }
   return (
     <div className="host-terms" aria-label="Other terminals on this host">
       <div className="host-terms-head">
