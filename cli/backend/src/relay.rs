@@ -163,6 +163,7 @@ fn https_base(ws_base: &str) -> String {
 /// (the verifier stays in `relay_pin`; the string is display-only).
 /// `public_url`: local UI URL (`Some` when serving alongside, `None` pure agent).
 /// `auth_on`: local login gate on/off (panel row only).
+#[allow(clippy::too_many_arguments)] // startup wiring: explicit params avoid mega-struct churn
 pub async fn run_agent(
     relay: &str,
     token: &str,
