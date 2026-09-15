@@ -730,7 +730,138 @@ function SSHPage({
   }, [e2eKeys])
   const [connectingId, setConnectingId] = useState<string | null>(null)
   const [banner, setBanner] = useState<string | null>(null)
+  const [refreshing, setRefreshing] = useState(false)
   const socketsRef = useRef(new Map<string, WebSocket>())
+  const didInitialRefresh = useRef(false)
+
+  const openWatchSocket = (entry: SshEntry) => {
+    const t = entry.token.trim().toUpperCase()
+    if (!TOKEN_EXACT_RE.test(t)) return
+    if (socketsRef.current.has(entry.id)) return
+    const scheme = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+    let ws: WebSocket
+    try {
+      ws = new WebSocket(`${scheme}//${wsHost}/v1/client?token=${t}`)
+    } catch {
+      return
+    }
+    socketsRef.current.set(entry.id, ws)
+    ws.onopen = () => {
+      const k = e2eKeys[entry.id] ?? parseFragmentKey()
+      ws.send(
+        JSON.stringify(
+          k
+            ? { type: 'hello', role: 'client', token: t, e2e: E2E_ALG }
+            : { type: 'hello', role: 'client', token: t },
+        ),
+      )
+    }
+    ws.onmessage = (e) => {
+      if (socketsRef.current.get(entry.id) !== ws) return
+      try {
+        const msg = JSON.parse(String(e.data)) as {
+          type?: string
+          online?: boolean
+          agent?: boolean
+        }
+        if (msg?.type === 'enc') return
+        if (msg?.type === 'paired') {
+          const agentPresent = msg.agent === true
+          onChange((prev) =>
+            prev.map((x) => (x.id === entry.id ? { ...x, online: agentPresent } : x)),
+          )
+          if (!agentPresent) closeSocket(entry.id)
+        } else if (msg?.type === 'agent') {
+          const isOnline = msg.online === true
+          if (isOnline) {
+            onChange((prev) =>
+              prev.map((x) => (x.id === entry.id ? { ...x, online: true } : x)),
+            )
+          } else {
+            closeSocket(entry.id)
+            onChange((prev) =>
+              prev.map((x) => (x.id === entry.id ? { ...x, online: false } : x)),
+            )
+          }
+        }
+      } catch {
+        // Non-JSON or opaque — ignore.
+      }
+    }
+    ws.onclose = () => {
+      if (socketsRef.current.get(entry.id) !== ws) return
+      socketsRef.current.delete(entry.id)
+      onChange((prev) =>
+        prev.map((x) => (x.id === entry.id ? { ...x, online: false } : x)),
+      )
+    }
+    ws.onerror = () => {
+      if (socketsRef.current.get(entry.id) !== ws) return
+      closeSocket(entry.id)
+      onChange((prev) =>
+        prev.map((x) => (x.id === entry.id ? { ...x, online: false } : x)),
+      )
+    }
+  }
+
+  const refreshStatuses = async () => {
+    if (entries.length === 0) return
+    setRefreshing(true)
+    setBanner(null)
+    try {
+      const results = await Promise.all(
+        entries.map(async (e) => {
+          const t = e.token.trim().toUpperCase()
+          if (!TOKEN_EXACT_RE.test(t)) return { id: e.id, online: false }
+          try {
+            const res = await fetch(
+              `${relayBase}/api/ssh/status?token=${encodeURIComponent(t)}`,
+              { cache: 'no-store' },
+            )
+            if (!res.ok) return { id: e.id, online: false }
+            const data = (await res.json()) as {
+              ok?: boolean
+              agentOnline?: boolean
+            }
+            return { id: e.id, online: data.agentOnline === true }
+          } catch {
+            return { id: e.id, online: false }
+          }
+        }),
+      )
+      const map = new Map(results.map((r) => [r.id, r.online]))
+      let newlyOnline: SshEntry[] = []
+      onChange((prev) => {
+        const next = prev.map((x) => {
+          const v = map.get(x.id)
+          if (v === undefined) return x
+          if (x.online !== v) {
+            if (!v) closeSocket(x.id)
+            return { ...x, online: v }
+          }
+          return x
+        })
+        newlyOnline = next.filter((x) => x.online && !socketsRef.current.has(x.id))
+        return next
+      })
+      // Give React a tick to flush state, then open watches for online entries.
+      // Use the freshly computed list.
+      setTimeout(() => {
+        for (const e of newlyOnline) openWatchSocket(e)
+      }, 0)
+    } finally {
+      setRefreshing(false)
+    }
+  }
+
+  // On page load / refresh, recheck relay so stale persisted `online:true` never shows.
+  useEffect(() => {
+    if (didInitialRefresh.current) return
+    didInitialRefresh.current = true
+    if (entries.length === 0) return
+    void refreshStatuses()
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- run once on mount
+  }, [])
 
   // Parsed key for the form (derived during render — no cascading render).
   const parsedFormKey = e2eOn ? extractKeyFromText(e2eKey) : null
@@ -1003,24 +1134,50 @@ function SSHPage({
   return (
     <section className="page page-ssh" aria-labelledby="page-title-ssh">
       <div className="page-head">
-        <h1 id="page-title-ssh">SSH</h1>        <button
-          type="button"
-          className="btn btn-primary ssh-connect-btn"
-          onClick={openNew}
-        >
-          <svg
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2.2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            aria-hidden="true"
+        <h1 id="page-title-ssh">SSH</h1>
+        <div className="row-actions" style={{ marginTop: 0, paddingTop: 0, marginLeft: 'auto' }}>
+          <button
+            type="button"
+            className="btn ssh-refresh-btn"
+            onClick={() => void refreshStatuses()}
+            disabled={refreshing || entries.length === 0}
+            aria-label="Refresh status"
+            title={refreshing ? 'Refreshing…' : 'Refresh — recheck relay for live status'}
           >
-            <path d="M12 5v14M5 12h14" />
-          </svg>
-          <span className="btn-label">Connect</span>
-        </button>
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+              style={refreshing ? { animation: 'spin 0.9s linear infinite' } : undefined}
+            >
+              <polyline points="23 4 23 10 17 10" />
+              <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
+            </svg>
+            <span className="btn-label">{refreshing ? 'Refreshing…' : 'Refresh'}</span>
+          </button>
+          <button
+            type="button"
+            className="btn btn-primary ssh-connect-btn"
+            onClick={openNew}
+          >
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <path d="M12 5v14M5 12h14" />
+            </svg>
+            <span className="btn-label">Connect</span>
+          </button>
+        </div>
       </div>
 
       <Reveal delay={60}>
@@ -2286,14 +2443,18 @@ export default function App() {
     const saved = readJSON<unknown>('ks-ssh:ssh', null)
     if (!Array.isArray(saved)) return []
     // Drop demo seeds and malformed rows — only real user data survives.
-    return (saved as SshEntry[]).filter(
-      (x) =>
-        x &&
-        typeof x.id === 'string' &&
-        !x.id.startsWith('seed-') &&
-        typeof x.name === 'string' &&
-        x.name.trim() !== '',
-    )
+    // Force offline on load: persisted `online` is stale after reload/close.
+    // Real presence is rechecked from the relay (SSH page refresh).
+    return (saved as SshEntry[])
+      .filter(
+        (x) =>
+          x &&
+          typeof x.id === 'string' &&
+          !x.id.startsWith('seed-') &&
+          typeof x.name === 'string' &&
+          x.name.trim() !== '',
+      )
+      .map((x) => ({ ...x, online: false }))
   })
   const [theme, setTheme] = useState<Theme>(initialTheme)
 
