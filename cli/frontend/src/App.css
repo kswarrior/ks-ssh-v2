@@ -2211,25 +2211,65 @@
 .file-list .file-card {
   flex-direction: row;
   align-items: center;
-  gap: 10px;
+  flex-wrap: wrap;
+  gap: 10px 12px;
   padding: 10px 14px;
   cursor: pointer;
 }
 
+/* Flatten the top row so its children become flex items of the card.
+   This lets us order: name (left) · meta (center) · dots/kill (right end). */
 .file-list .file-card-top {
-  flex: 1 1 auto;
+  display: contents;
+}
+
+.file-list .files-select-checkbox,
+.file-list .file-icon {
+  order: 0;
+  flex-shrink: 0;
+}
+
+.file-list .file-name,
+.file-list .file-rename-form {
+  order: 1;
+  flex: 1 1 0;
   min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-list .ports-top-pill {
+  order: 1;
+  flex-shrink: 0;
+  margin-left: 0;
 }
 
 .file-list .file-meta {
+  order: 2;
+  flex: 1 1 0;
+  min-width: 0;
+  max-width: none;
   padding-left: 0;
+  text-align: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-list .file-menu-wrap,
+.file-list .ports-kill {
+  order: 3;
   flex-shrink: 0;
-  max-width: 40%;
+  margin-left: 0;
 }
 
 .file-list .file-inline-actions,
 .file-list .file-confirm {
   flex-basis: 100%;
+  order: 4;
+  width: 100%;
+  min-width: 0;
 }
 
 /* ---------- Preview + properties dialogs ---------- */
@@ -3550,8 +3590,14 @@ a.file-link {
     flex: 1 1 auto;
   }
 
+  .file-list .file-card {
+    gap: 8px 10px;
+    padding: 10px 12px;
+  }
+
   .file-list .file-meta {
     max-width: none;
+    font-size: 11px;
   }
 }
 
