@@ -196,6 +196,23 @@ export default function PortsPage() {
             </label>
             <button
               type="button"
+              className="btn btn-sm"
+              onClick={() => setView((v) => (v === 'grid' ? 'list' : 'grid'))}
+              title={view === 'grid' ? 'Switch to list view' : 'Switch to grid view'}
+              aria-label={view === 'grid' ? 'List view' : 'Grid view'}
+              aria-pressed={view === 'list'}
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                {view === 'grid' ? (
+                  <path d="M8 6h13M8 12h13M8 18h13M3.5 6h.01M3.5 12h.01M3.5 18h.01" />
+                ) : (
+                  <path d="M3 3h7v7H3zM14 3h7v7h-7zM3 14h7v7H3zM14 14h7v7h-7z" />
+                )}
+              </svg>
+              <span className="btn-label">{view === 'grid' ? 'List' : 'Grid'}</span>
+            </button>
+            <button
+              type="button"
               className="btn btn-sm btn-primary"
               onClick={() => void load()}
               disabled={loading}
@@ -277,7 +294,7 @@ export default function PortsPage() {
             </p>
           </div>
         ) : (
-          <ul className="file-grid" aria-label={`Open ports on ${data?.hostname ?? 'host'}`}>
+          <ul className={view === 'grid' ? 'file-grid' : 'file-list'} aria-label={`Open ports on ${data?.hostname ?? 'host'}`}>
             {visible.map((p, i) => {
               const svc = serviceName(p.port)
               const tcp = isTcp(p.proto)

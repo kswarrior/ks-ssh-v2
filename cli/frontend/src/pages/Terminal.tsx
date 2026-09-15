@@ -223,10 +223,23 @@ function timeAgo(idle: number): string {
  * (`GET /api/record/status`). Sessions capture timestamped input+output
  * frames for read-only replay under Recordings.
  */
+const REC_BANNER_HIDE_KEY = 'ks-ssh:rec-banner-hidden'
+
 function RecordBanner() {
   const [on, setOn] = useState<boolean | null>(null)
   // Dismiss hides the notice only — recording keeps running on the backend.
   const [dismissed, setDismissed] = useState(false)
+  // "Never show again" persists across refreshes via localStorage.
+  const [hidden, setHidden] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem(REC_BANNER_HIDE_KEY) === '1'
+    } catch {
+      return false
+    }
+  })
+  // ✕ opens a confirm dialog (like terminal delete) instead of hiding at once.
+  const [confirmOpen, setConfirmOpen] = useState(false)
+  const [neverAgain, setNeverAgain] = useState(false)
 
   useEffect(() => {
     let alive = true
@@ -243,24 +256,96 @@ function RecordBanner() {
     }
   }, [])
 
+  // Escape closes the hide-notice dialog.
+  useEffect(() => {
+    if (!confirmOpen) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setConfirmOpen(false)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [confirmOpen])
+
   if (on !== true) return null
-  if (dismissed) return null
+  if (dismissed || hidden) return null
+
+  const closeConfirm = () => {
+    setConfirmOpen(false)
+    setNeverAgain(false)
+  }
+
+  const saveHide = () => {
+    if (neverAgain) {
+      try {
+        localStorage.setItem(REC_BANNER_HIDE_KEY, '1')
+      } catch {
+        // Storage unavailable — falls back to hiding for this view only.
+      }
+      setHidden(true)
+    }
+    setDismissed(true)
+    setConfirmOpen(false)
+    setNeverAgain(false)
+  }
+
   return (
-    <div className="rec-banner" role="status">
-      <button
-        type="button"
-        className="rec-banner-dismiss"
-        aria-label="Dismiss recording notice (recording stays on)"
-        title="Dismiss notice — recording stays on"
-        onClick={() => setDismissed(true)}
-      >
-        ✕
-      </button>
-      <span>● Session recording is ON — input + output are stored for replay.</span>
-      <a className="btn btn-sm" href="#/recordings">
-        View recordings
-      </a>
-    </div>
+    <>
+      <div className="rec-banner" role="status">
+        <button
+          type="button"
+          className="rec-banner-dismiss"
+          aria-label="Hide recording notice (recording stays on)"
+          title="Hide notice — recording stays on"
+          aria-haspopup="dialog"
+          onClick={() => setConfirmOpen(true)}
+        >
+          ✕
+        </button>
+        <span>● Session recording is ON — input + output are stored for replay.</span>
+        <a className="btn btn-sm" href="#/recordings">
+          View recordings
+        </a>
+      </div>
+      {confirmOpen && (
+        <div className="term-confirm-overlay" onClick={closeConfirm}>
+          <div
+            className="term-confirm"
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="rec-hide-title"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 id="rec-hide-title">Hide recording notice?</h2>
+            <p>Recording stays ON — this only hides the banner.</p>
+            <label className="rec-hide-row">
+              <input
+                type="checkbox"
+                checked={neverAgain}
+                onChange={(e) => setNeverAgain(e.target.checked)}
+              />
+              Never show again
+            </label>
+            <div className="term-confirm-actions">
+              <button
+                type="button"
+                className="btn btn-sm"
+                onClick={closeConfirm}
+                autoFocus
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn btn-sm btn-primary"
+                onClick={saveHide}
+              >
+                Save
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
   )
 }
 

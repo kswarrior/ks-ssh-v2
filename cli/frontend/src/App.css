@@ -4584,6 +4584,23 @@ a.file-link {
   opacity: 1;
 }
 
+/* "Never show again" row in the hide-recording-notice dialog. */
+.rec-hide-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.rec-hide-row input[type='checkbox'] {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--accent, #28c840);
+  cursor: pointer;
+}
+
 /* Read-only replay player. */
 .rec-player {
   display: flex;
