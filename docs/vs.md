@@ -348,12 +348,7 @@ curl -sSfL https://raw.githubusercontent.com/kswarrior/ks-ssh-v2/refs/heads/main
 ./ks-ssh --no-serve --token= --no-ui        # relay without UI push
 ```
 
-Security: fresh `--token=` per session (9-char routing entropy + scan 429s);
-`k` is the secret (fragment only — compare the viewer's fingerprint with the
-CLI's on first connect). Token addressing is bearer-routed, but with
-`--user/--pass` the relay is login-gated too (same loopback router/RBAC/audit);
-add `--relay-auth` for the one-time viewer PIN on top. Prefer
-`--host 127.0.0.1`; Files jailed to `$HOME`, Ports kill PID-scoped (no PID
-1/self). Don't bind `0.0.0.0` on untrusted nets without proxy auth. No ECDH
-yet: `k` is long-lived per link, so rotate links per session if that matters
-to you.
+Security: fresh `--token=` per session (9-char `ABCDEFGHJKLMNPQRSTUVWXYZ23456789` `relay.rs:46` `TOKEN_LEN_NEW 9` ~46b, 5-char legacy, routing entropy + per-IP 120/min `limit.ts:15` + per-miss 20/min `limit.ts:17` + per-socket 200/10s 4408 `room.ts:30` scan 429s `worker/index.ts:52` `?k=`→400);
+`k` is the secret (fragment only `cf/src/e2e.ts:82` `parseFragmentKey` `#k=` + `extractKeyFromText`, never query/fetch/logs/storage `e2e.rs:1-9` — compare the viewer's fingerprint `e2e.rs:152` `FP_INFO ks-ssh-e2e-fp-v1`[:16] `7508e2b9fe76ad77` `e2e.fixture.json:25` with the CLI's `relay.rs` `fp` in `hello` on first connect `checkTofu` `cf/src/e2e.ts:165`). Token addressing is bearer-routed, but with `--user/--pass` the relay is login-gated too (same loopback router `main.rs:311` `serve_loopback` `127.0.0.1:0` → `relay.rs:560,719` `loopback` proxy forwarding viewer's `ks_ssh_auth` cookie `auth.rs:44` `COOKIE_NAME` `HttpOnly`+`Secure`+`SameSite=Lax` 12h `auth.rs:46` + 30min idle `auth.rs:47`, 5 fails→5min lockout `auth.rs:57` RBAC `auth.rs:105` — viewer read-only `shell.rs:921`, operator +`rpc/mkdir/upload` `auth.rs:152-161`, admin all); add `--relay-auth` for the one-time viewer PIN inside `enc` only `relay.rs:1086` 15min TTL `auth.rs:1561` one-time `auth.rs:1603` `ct_eq` `auth.rs:1590` on top. Prefer `--host 127.0.0.1` (`main.rs:33` default `127.0.0.1`); Files jailed to `$HOME` (`files.rs:128-180` `HOME`/`USERPROFILE`→`/`, lexical `files.rs:162`), Ports kill PID-scoped (no PID 1/self `ports.rs:388-449` `run_kill` TERM→KILL). Don't bind `0.0.0.0` on untrusted nets without proxy auth. No ECDH yet (`e2e.rs:1-57` header — `k` 32 bytes `E2eKey([u8;32])` `e2e.rs:101`, HKDF `ks-ssh-e2e-v1` `e2e.rs:68` salt 32 zeros `e2e.rs:84` → `ks-ssh-e2e-v1` `cf/src/e2e.ts:35`, no ECDH): `k` is long-lived per link, so rotate links per session if that matters to you.
+
+> **Honest 2026-09-15:** this page is the result of a main-agent-only full read (per `debugging.md` — Read ALL → Understand flows → Fix → Build). No sub-agents were spawned. Every number above was taken from a `file:line` you can open. If a line drifts, the code is the truth — not this doc. PRs that change `e2e.rs`/`relay.rs`/`room.ts`/`auth.rs`/`files.rs` must also update this file and the `e2e.fixture.json` vector + `relay-check.mjs`/`e2e-check.mjs` CI pins.
