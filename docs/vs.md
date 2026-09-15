@@ -1,4 +1,4 @@
-# KS SSH vs Web SSH Tools — Codebase Comparison
+# KS SSH VS Web SSH Tools — Codebase Comparison
 
 > Scope: browser-first remote shell access. Classic OpenSSH (`ssh user@host`,
 > `~/.ssh/config`, `scp`) is the baseline — this page compares what you get when
