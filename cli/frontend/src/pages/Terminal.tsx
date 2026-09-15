@@ -1259,6 +1259,42 @@ function ShellSession({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [active])
 
+  // The App shell hides the whole Terminal page via `hidden` on .tab-panel
+  // (display:none). ResizeObserver on the xterm container may not fire for
+  // display:none parents, so watch for the page becoming visible again via
+  // hash/focus/visibility + IntersectionObserver and refit. Without this the
+  // shell keeps its old (stale) size and the prompt can appear blank/wrapped
+  // after switching App tabs — the "green dot but blank" symptom.
+  useEffect(() => {
+    if (!active) return
+    const refit = () => requestAnimationFrame(() => sendResize())
+    window.addEventListener('hashchange', refit)
+    window.addEventListener('focus', refit)
+    document.addEventListener('visibilitychange', refit)
+    let io: IntersectionObserver | null = null
+    try {
+      const el = containerRef.current
+      if (el && typeof IntersectionObserver !== 'undefined') {
+        io = new IntersectionObserver((entries) => {
+          for (const e of entries) if (e.isIntersecting) refit()
+        })
+        io.observe(el)
+      }
+    } catch {
+      // Observer unsupported — hash/focus listeners still cover the tab switch.
+    }
+    return () => {
+      window.removeEventListener('hashchange', refit)
+      window.removeEventListener('focus', refit)
+      document.removeEventListener('visibilitychange', refit)
+      try {
+        io?.disconnect()
+      } catch {
+        // Already gone — ignore.
+      }
+    }
+  }, [active, sendResize])
+
   // Apply the global font size live (touch bar A−/A+, ⋮ menu).
   useEffect(() => {
     const term = termRef.current
@@ -1357,6 +1393,19 @@ function ShellSession({
             if (msg.v === 2) {
               v2Ref.current = true
               lastMsgRef.current = Date.now()
+              // If the client watermark is ahead of the server head (e.g., after
+              // a kill+reuse of the same id, a server restart with ring overflow,
+              // or a stale localStorage entry from another user), all future
+              // live frames would be trimmed as "already seen" and the terminal
+              // stays blank while the tab shows online/green + ms.
+              // Sync down to the server head so the next live frame is contiguous.
+              if (typeof msg.seq === 'number' && Number.isFinite(msg.seq)) {
+                const srvSeq = Math.max(0, Math.floor(msg.seq))
+                if (offRef.current > srvSeq) {
+                  offRef.current = srvSeq
+                  saveOffset()
+                }
+              }
               // offRef stays at our watermark — the replayed tail advances
               // it frame by frame (overlap-trimmed), so nothing duplicates
               // and nothing is skipped.

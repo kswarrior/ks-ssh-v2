@@ -171,7 +171,8 @@ pub fn init(path: Option<&Path>) -> usize {
            created_at  INTEGER NOT NULL,
            last_active INTEGER NOT NULL,
            dead        INTEGER NOT NULL DEFAULT 0,
-           scrollback  BLOB NOT NULL DEFAULT x''
+           scrollback  BLOB NOT NULL DEFAULT x'',
+           seq         INTEGER NOT NULL DEFAULT 0
          );
          CREATE INDEX IF NOT EXISTS idx_sessions_last_active
            ON sessions(last_active);
@@ -206,6 +207,11 @@ pub fn init(path: Option<&Path>) -> usize {
         eprintln!("ks-ssh db: cannot migrate {}: {e:#} — persistence OFF", path.display());
         return 0;
     }
+    // Migrate old DBs that lack `seq` (pre-persisted-offset builds): add column
+    // if missing, and backfill from scrollback length so existing rows keep
+    // working (offset == len for non-overflow, otherwise client will sync on
+    // next reconnect via `ready.seq` clamp — no blank screen).
+    let _ = conn.execute("ALTER TABLE sessions ADD COLUMN seq INTEGER NOT NULL DEFAULT 0", []);
     // Drop ancient history and enforce the row cap.
     let cutoff = now_secs().saturating_sub(PERSIST_TTL_SECS) as i64;
     let _ = conn.execute("DELETE FROM sessions WHERE last_active < ?1", [cutoff]);
