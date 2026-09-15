@@ -298,6 +298,9 @@ type SshEntry = {
   token: string
   note: string
   online: boolean
+  // E2E expected for this connection (persisted flag only — the raw `k`
+  // itself lives in SSHPage memory (`e2eKeys`), never in localStorage).
+  e2e?: boolean
 }
 
 function HomePage() {
@@ -443,9 +446,43 @@ function SSHPage({
   const [name, setName] = useState('')
   const [token, setToken] = useState('')
   const [note, setNote] = useState('')
+  // Per-connection E2E (form state). The raw `k` is memory-only by design:
+  // it never enters `SshEntry` (which is persisted to localStorage) — only
+  // the `e2e` flag persists. Keys live in `e2eKeys` below + the URL fragment.
+  const [e2eOn, setE2eOn] = useState(false)
+  const [e2eKey, setE2eKey] = useState('')
+  const [e2eError, setE2eError] = useState<string | null>(null)
+  const [showKey, setShowKey] = useState(false)
+  const [keyFp, setKeyFp] = useState<string | null>(null)
+  // Memory-only E2E keys by entry id (cleared on reload — never persisted).
+  const [e2eKeys, setE2eKeys] = useState<Record<string, string>>({})
   const [connectingId, setConnectingId] = useState<string | null>(null)
   const [banner, setBanner] = useState<string | null>(null)
   const socketsRef = useRef(new Map<string, WebSocket>())
+
+  // Fingerprint preview for the typed key (fp only, key never leaves memory).
+  useEffect(() => {
+    if (!e2eOn) {
+      setKeyFp(null)
+      return
+    }
+    const k = extractKeyFromText(e2eKey)
+    if (!k) {
+      setKeyFp(null)
+      return
+    }
+    let alive = true
+    void fingerprintK(k)
+      .then((f) => {
+        if (alive) setKeyFp(f)
+      })
+      .catch(() => {
+        if (alive) setKeyFp(null)
+      })
+    return () => {
+      alive = false
+    }
+  }, [e2eOn, e2eKey])
 
   useEffect(
     () => () => {
@@ -476,6 +513,10 @@ function SSHPage({
     setName('')
     setToken('')
     setNote('')
+    setE2eOn(false)
+    setE2eKey('')
+    setE2eError(null)
+    setShowKey(false)
   }
 
   const openNew = () => {
@@ -488,6 +529,12 @@ function SSHPage({
     setName(e.name)
     setToken(e.token)
     setNote(e.note)
+    setE2eOn(e.e2e === true)
+    // Memory-only: prefill only if the key is still in this session.
+    // After a reload it is intentionally empty (never persisted).
+    setE2eKey(e2eKeys[e.id] ?? '')
+    setE2eError(null)
+    setShowKey(false)
     setFormOpen(true)
   }
 
@@ -517,10 +564,10 @@ function SSHPage({
       setBanner('Relay timed out. Is the agent running (`ks-ssh --token=`)?')
     }, timeoutMs)
     ws.onopen = () => {
-      // Presence check only (no secrets). Include e2e capability when the
-      // fragment carries `k` so the agent can distinguish E2E vs legacy.
-      // `k` itself never leaves the fragment/memory.
-      const k = parseFragmentKey()
+      // Presence check only (no secrets). Include e2e capability when a key
+      // is available — per-entry memory key first, then the URL fragment.
+      // `k` itself never leaves memory/fragment.
+      const k = e2eKeys[entry.id] ?? parseFragmentKey()
       ws.send(
         JSON.stringify(
           k
