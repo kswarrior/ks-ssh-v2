@@ -319,14 +319,6 @@ function HomePage() {
   ]
 
   const count = features.length
-  const goTo = (i: number, direction?: 1 | -1) => {
-    setIndex((prev) => {
-      const nextIdx = ((i % count) + count) % count
-      if (direction) setDir(direction)
-      else setDir(nextIdx > prev ? 1 : -1)
-      return nextIdx
-    })
-  }
   const prev = () => {
     setDir(-1)
     setIndex((i) => (i - 1 + count) % count)
@@ -499,22 +491,6 @@ function HomePage() {
               </button>
             </div>
           </div>
-        </div>
-        <div className="showcase-dots" role="tablist" aria-label="Choose screenshot">
-          {features.map((f, i) => (
-            <button
-              key={f.title}
-              type="button"
-              role="tab"
-              aria-selected={i === index}
-              aria-label={`Show ${f.title}`}
-              title={f.title}
-              className={`showcase-dot${i === index ? ' is-active' : ''}`}
-              onClick={() => goTo(i)}
-            >
-              <span className="showcase-dot-label">{f.title}</span>
-            </button>
-          ))}
         </div>
       </div>
 
