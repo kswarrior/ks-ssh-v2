@@ -768,28 +768,7 @@ async fn spawn_shell_bridge(
         }
         // Connect with the viewer's session cookie (login over relay works:
         // the shim forwards `ks_ssh_auth` from its rpc cookie jar).
-        // NOTE: tungstenite 0.30 requires a hand-built Request to already
-        // carry every handshake header (Host/Connection/Upgrade/
-        // Sec-WebSocket-Version/Sec-WebSocket-Key) — a bare builder fails
-        // every dial with `sec-websocket-key` and relay terminals never
-        // open. Build via `IntoClientRequest` (adds all of them + a fresh
-        // key) and only append our Cookie afterwards.
-        let req = {
-            use tokio_tungstenite::tungstenite::client::IntoClientRequest;
-            use tokio_tungstenite::tungstenite::http::header::{COOKIE, HeaderValue};
-            let mut req = url
-                .as_str()
-                .into_client_request()
-                .map_err(|e| anyhow::anyhow!("loopback shell request: {e}"))?;
-            if let Some(c) = cookie.as_deref().filter(|c| !c.is_empty()) {
-                req.headers_mut().insert(
-                    COOKIE,
-                    HeaderValue::from_str(c)
-                        .map_err(|e| anyhow::anyhow!("bad cookie header: {e}"))?,
-                );
-            }
-            req
-        };
+        let req = loopback_shell_request(&url, cookie.as_deref())?;
         let (local_ws, _) = connect_async(req)
             .await
             .map_err(|e| anyhow::anyhow!("loopback shell dial failed: {e}"))?;
@@ -889,7 +868,29 @@ async fn spawn_shell_bridge(
     shells_fail.lock().await.remove(&id_fail);
 }
 
-/// Minimal percent-encoding for the `id` query value (alnum + `-_` only).
+/// Build the loopback `/v1/shell` dial request (same query shapes as the
+/// local UI). Built via `IntoClientRequest` so tungstenite injects every
+/// handshake header (Host/Connection/Upgrade/Sec-WebSocket-Version/
+/// Sec-WebSocket-Key) — a bare builder dial fails 100% of the time on
+/// tungstenite 0.30 (`sec-websocket-key`) and relay terminals never open.
+fn loopback_shell_request(
+    url: &str,
+    cookie: Option<&str>,
+) -> anyhow::Result<tokio_tungstenite::tungstenite::http::Request<()>> {
+    use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+    use tokio_tungstenite::tungstenite::http::header::{COOKIE, HeaderValue};
+    let mut req = url
+        .into_client_request()
+        .map_err(|e| anyhow::anyhow!("loopback shell request: {e}"))?;
+    // Viewer session cookie for login-over-relay (shim forwards ks_ssh_auth).
+    if let Some(c) = cookie.filter(|c| !c.is_empty()) {
+        req.headers_mut().insert(
+            COOKIE,
+            HeaderValue::from_str(c).map_err(|e| anyhow::anyhow!("bad cookie header: {e}"))?,
+        );
+    }
+    Ok(req)
+}
 fn urlencoding_lite(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for b in s.bytes() {
