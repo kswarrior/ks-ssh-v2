@@ -75,7 +75,7 @@ export default function PortsPage() {
   const [filter, setFilter] = useState<ProtoFilter>('all')
   const [query, setQuery] = useState('')
   const [view, setView] = useState<ViewMode>('grid')
-  const [confirmKill, setConfirmKill] = useState<string | null>(null)
+  const [confirmKill, setConfirmKill] = useState<{ key: string; port: PortEntry } | null>(null)
   const [killing, setKilling] = useState<string | null>(null)
   const [killError, setKillError] = useState<string | null>(null)
 
@@ -104,6 +104,16 @@ export default function PortsPage() {
   useEffect(() => {
     void load()
   }, [load])
+
+  // Escape closes the kill confirmation (when not killing).
+  useEffect(() => {
+    if (!confirmKill || killing) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setConfirmKill(null)
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [confirmKill, killing])
 
   const killPort = useCallback(
     async (p: PortEntry, key: string) => {
