@@ -37,15 +37,15 @@ function decodeFrame(frame: Uint8Array): { base: number; bytes: Uint8Array } | n
   return { base, bytes: frame.subarray(FRAME_OFF_LEN) }
 }
 
-/** Auto-reconnect backoff: 500ms doubling to a 5s cap. */
+/** Auto-reconnect backoff: 200ms doubling to 2s cap — reload after idle must be fast, not 36s. */
 function backoffMs(attempt: number): number {
-  return Math.min(500 * 2 ** Math.max(0, attempt), 5000)
+  return Math.min(200 * 2 ** Math.max(0, attempt), 2000)
 }
-const MAX_RETRIES = 10
+const MAX_RETRIES = 12
 /** Client ping every 5s doubles as keepalive + RTT probe (v2 only). */
 const PING_MS = 5000
-/** No traffic this long → assume the path died, recycle the socket. */
-const STALE_MS = 12000
+/** No traffic this long → assume the path died, recycle the socket. Empty idle terminals are expected silent, so use 45s (was 12s) to avoid killing a healthy idle shell. */
+const STALE_MS = 45000
 /** Predictive echo only engages above this smoothed RTT. */
 const PREDICT_RTT_MS = 50
 /** Server silence required before new predictions (conflict avoidance). */
