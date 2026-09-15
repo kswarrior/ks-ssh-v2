@@ -306,7 +306,10 @@ type SshEntry = {
 function HomePage() {
   const [expanded, setExpanded] = useState<string | null>(null)
   const [index, setIndex] = useState(0)
+  const [dir, setDir] = useState<1 | -1>(1)
   const touchX = useRef<number | null>(null)
+  const tiltRef = useRef<HTMLDivElement | null>(null)
+  const pausedRef = useRef(false)
 
   const features: Array<{ title: string; text: string; src: string; alt: string }> = [
     { title: 'Terminal', text: 'Real PTY, multi-tab + vertical split, gap-free resume, predictive echo, CJK/IME + search & export, touch bar.', src: '/images/terminal.png', alt: 'Terminal' },
@@ -316,20 +319,62 @@ function HomePage() {
   ]
 
   const count = features.length
-  const prev = () => setIndex((i) => (i - 1 + count) % count)
-  const next = () => setIndex((i) => (i + 1) % count)
+  const goTo = (i: number, direction?: 1 | -1) => {
+    setIndex((prev) => {
+      const nextIdx = ((i % count) + count) % count
+      if (direction) setDir(direction)
+      else setDir(nextIdx > prev ? 1 : -1)
+      return nextIdx
+    })
+  }
+  const prev = () => {
+    setDir(-1)
+    setIndex((i) => (i - 1 + count) % count)
+  }
+  const next = () => {
+    setDir(1)
+    setIndex((i) => (i + 1) % count)
+  }
   const current = features[index] ?? features[0]!
 
   // Arrow-key navigation for the carousel (ignored while lightbox is open).
   useEffect(() => {
     if (expanded) return
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'ArrowLeft') setIndex((i) => (i - 1 + count) % count)
-      else if (e.key === 'ArrowRight') setIndex((i) => (i + 1) % count)
+      if (e.key === 'ArrowLeft') prev()
+      else if (e.key === 'ArrowRight') next()
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [expanded, count])
+
+  // Auto-play: advance every 6s unless hovered/focused or lightbox open.
+  useEffect(() => {
+    if (expanded) return
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
+    const t = setInterval(() => {
+      if (pausedRef.current || document.hidden) return
+      setDir(1)
+      setIndex((i) => (i + 1) % count)
+    }, 6000)
+    return () => clearInterval(t)
+  }, [expanded, count])
+
+  const onTiltMove = (e: React.MouseEvent<HTMLDivElement>) => {
+    const el = tiltRef.current
+    if (!el) return
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
+    if (window.matchMedia('(pointer: coarse)').matches) return
+    const r = e.currentTarget.getBoundingClientRect()
+    const px = (e.clientX - r.left) / r.width - 0.5
+    const py = (e.clientY - r.top) / r.height - 0.5
+    el.style.transform = `rotateX(${(-py * 7).toFixed(2)}deg) rotateY(${(px * 10).toFixed(2)}deg) translateZ(0)`
+  }
+  const onTiltLeave = () => {
+    const el = tiltRef.current
+    if (!el) return
+    el.style.transform = 'rotateX(0deg) rotateY(0deg) translateZ(0)'
+  }
 
   if (expanded) {
     return (
@@ -353,10 +398,29 @@ function HomePage() {
   }
 
   return (
-    <section className="page" aria-labelledby="page-title-home">
-      <div className="card showcase-card" aria-roledescription="carousel" aria-label="App screenshots">
+    <section className="page page-home" aria-labelledby="page-title-home">
+      <div
+        className="showcase-3d"
+        aria-roledescription="carousel"
+        aria-label="App screenshots"
+        onMouseEnter={() => {
+          pausedRef.current = true
+        }}
+        onMouseLeave={() => {
+          pausedRef.current = false
+        }}
+        onFocus={() => {
+          pausedRef.current = true
+        }}
+        onBlur={() => {
+          pausedRef.current = false
+        }}
+      >
+        <div className="showcase-ambient" aria-hidden="true" />
         <div
-          className="showcase-stage"
+          className="showcase-viewport"
+          onMouseMove={onTiltMove}
+          onMouseLeave={onTiltLeave}
           onTouchStart={(e) => {
             touchX.current = e.touches[0]?.clientX ?? null
           }}
@@ -369,54 +433,67 @@ function HomePage() {
             else next()
           }}
         >
-          <div className="showcase-caption" aria-live="polite">
-            <strong className="showcase-caption-title">{current.title}</strong>
-            <span className="showcase-caption-text">{current.text}</span>
+          <div ref={tiltRef} className="showcase-tilt">
+            <div className="showcase-frame">
+              <div className={`showcase-stage${dir === 1 ? ' is-next' : ' is-prev'}`}>
+                <div className="showcase-caption" aria-live="polite">
+                  <strong key={`t-${index}`} className="showcase-caption-title showcase-rise">
+                    {current.title}
+                  </strong>
+                  <span key={`d-${index}`} className="showcase-caption-text showcase-rise showcase-rise-2">
+                    {current.text}
+                  </span>
+                </div>
+                <img
+                  key={current.src}
+                  src={current.src}
+                  alt={current.alt}
+                  className="showcase-image"
+                  onClick={() => setExpanded(current.src)}
+                  style={{ cursor: 'zoom-in' }}
+                  draggable={false}
+                />
+                <div className="showcase-shine" aria-hidden="true" />
+                <span className="showcase-counter" aria-hidden="true">
+                  {index + 1} / {count}
+                </span>
+                <div key={`p-${index}`} className="showcase-progress" aria-hidden="true" />
+              </div>
+              <button
+                type="button"
+                className="showcase-nav showcase-nav-prev"
+                onClick={prev}
+                aria-label={`Previous image: ${features[(index - 1 + count) % count]?.title}`}
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <polyline points="15 18 9 12 15 6" />
+                </svg>
+              </button>
+              <button
+                type="button"
+                className="showcase-nav showcase-nav-next"
+                onClick={next}
+                aria-label={`Next image: ${features[(index + 1) % count]?.title}`}
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <polyline points="9 18 15 12 9 6" />
+                </svg>
+              </button>
+              <button
+                type="button"
+                className="feature-image-expand-btn showcase-expand"
+                aria-label={`Expand ${current.title} image`}
+                onClick={() => setExpanded(current.src)}
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <polyline points="15 3 21 3 21 9" />
+                  <polyline points="9 21 3 21 3 15" />
+                  <line x1="21" y1="3" x2="14" y2="10" />
+                  <line x1="3" y1="21" x2="10" y2="14" />
+                </svg>
+              </button>
+            </div>
           </div>
-          <img
-            key={current.src}
-            src={current.src}
-            alt={current.alt}
-            className="showcase-image"
-            onClick={() => setExpanded(current.src)}
-            style={{ cursor: 'zoom-in' }}
-          />
-          <button
-            type="button"
-            className="showcase-nav showcase-nav-prev"
-            onClick={prev}
-            aria-label={`Previous image: ${features[(index - 1 + count) % count]?.title}`}
-          >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-              <polyline points="15 18 9 12 15 6" />
-            </svg>
-          </button>
-          <button
-            type="button"
-            className="showcase-nav showcase-nav-next"
-            onClick={next}
-            aria-label={`Next image: ${features[(index + 1) % count]?.title}`}
-          >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-              <polyline points="9 18 15 12 9 6" />
-            </svg>
-          </button>
-          <button
-            type="button"
-            className="feature-image-expand-btn showcase-expand"
-            aria-label={`Expand ${current.title} image`}
-            onClick={() => setExpanded(current.src)}
-          >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-              <polyline points="15 3 21 3 21 9" />
-              <polyline points="9 21 3 21 3 15" />
-              <line x1="21" y1="3" x2="14" y2="10" />
-              <line x1="3" y1="21" x2="10" y2="14" />
-            </svg>
-          </button>
-          <span className="showcase-counter" aria-hidden="true">
-            {index + 1} / {count}
-          </span>
         </div>
         <div className="showcase-dots" role="tablist" aria-label="Choose screenshot">
           {features.map((f, i) => (
@@ -428,8 +505,10 @@ function HomePage() {
               aria-label={`Show ${f.title}`}
               title={f.title}
               className={`showcase-dot${i === index ? ' is-active' : ''}`}
-              onClick={() => setIndex(i)}
-            />
+              onClick={() => goTo(i)}
+            >
+              <span className="showcase-dot-label">{f.title}</span>
+            </button>
           ))}
         </div>
       </div>
