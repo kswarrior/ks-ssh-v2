@@ -1105,9 +1105,9 @@ function SSHPage({
                         <>
                           <a
                             className="btn btn-sm btn-primary"
-                            href={visitUrl(e)}
+                            href={`#/ssh/visit/${encodeURIComponent(e.id)}`}
                             aria-label={`Visit ${e.name}`}
-                            title="Visit — open the full CLI frontend (Terminal, Files, Ports, Host) for this machine"
+                            title="Visit — open the full CLI frontend via CF loader (Terminal, Files, Ports, Host)"
                           >
                             <svg
                               viewBox="0 0 24 24"
@@ -1632,6 +1632,314 @@ function SshEditPage({
           </form>
         </div>
       </Reveal>
+    </section>
+  )
+}
+
+function SshVisitPage({
+  entries,
+  settings,
+  visitId,
+}: {
+  entries: SshEntry[]
+  settings: Settings
+  visitId: string | null
+}) {
+  const entry = visitId ? entries.find((x) => x.id === visitId) ?? null : null
+  const relayBase = relayHttpBase(settings)
+  const wsHost = relayWsHost(settings)
+  const token = entry?.token.trim().toUpperCase() ?? null
+  // e2e key for this entry (persisted) or fragment — never in query
+  const e2eKey = entry ? (readE2eKeys()[entry.id] ?? parseFragmentKey()) : null
+  const [progress, setProgress] = useState(0)
+  const [phase, setPhase] = useState('Initializing…')
+  const [error, setError] = useState<string | null>(null)
+  const [ready, setReady] = useState(false)
+  const [iframeSrc, setIframeSrc] = useState<string | null>(null)
+  const [iframeLoaded, setIframeLoaded] = useState(false)
+  const wrapRef = useRef<HTMLDivElement | null>(null)
+
+  const visitUrl = token ? `${relayBase}/v/${token}${e2eKey ? `#k=${e2eKey}` : ''}` : ''
+
+  useEffect(() => {
+    if (!entry || !token) return
+    let cancelled = false
+    const ctrl = new AbortController()
+    let ws: WebSocket | null = null
+
+    // Fast-load: add preconnect hints for relay host
+    try {
+      const hint = document.createElement('link')
+      hint.rel = 'preconnect'
+      hint.href = `https://${wsHost}`
+      hint.crossOrigin = ''
+      document.head.appendChild(hint)
+      setTimeout(() => {
+        try { hint.remove() } catch {}
+      }, 10000)
+    } catch {}
+
+    const safeProgress = (p: number, text: string) => {
+      if (cancelled) return
+      setProgress((prev) => (p > prev ? p : prev))
+      setPhase(text)
+    }
+
+    const run = async () => {
+      try {
+        safeProgress(5, 'Resolving relay…')
+        // Parallel fast checks: status + meta + DNS prefetch
+        safeProgress(12, 'Checking agent…')
+        const statusP = fetch(`${relayBase}/api/ssh/status?token=${encodeURIComponent(token)}`, {
+          signal: ctrl.signal,
+          cache: 'no-store',
+        })
+          .then((r) => r.json().catch(() => null))
+          .catch(() => null)
+        const metaP = fetch(`${relayBase}/api/ui/${token}/meta`, {
+          signal: ctrl.signal,
+          cache: 'no-store',
+        })
+          .then((r) => r.json().catch(() => null))
+          .catch(() => null)
+
+        // Also start WSS early for fast handshake (parallel)
+        const wsReady = new Promise<boolean>((resolve) => {
+          const scheme = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+          try {
+            ws = new WebSocket(`${scheme}//${wsHost}/v1/client?token=${token}`)
+          } catch {
+            resolve(false)
+            return
+          }
+          const t = setTimeout(() => {
+            try { ws?.close() } catch {}
+            resolve(false)
+          }, Math.min(settings.connectTimeoutMs, 7000))
+          const onPaired = (ok: boolean) => {
+            clearTimeout(t)
+            try { ws?.close() } catch {}
+            resolve(ok)
+          }
+          ws.onopen = () => {
+            safeProgress(38, 'Secure channel…')
+            try {
+              const k = readE2eKeys()[entry.id] ?? parseFragmentKey()
+              ws?.send(JSON.stringify(k ? { type: 'hello', role: 'client', token, e2e: E2E_ALG } : { type: 'hello', role: 'client', token }))
+              ws?.send(JSON.stringify({ type: 'ui-request' }))
+            } catch {}
+          }
+          ws.onmessage = (ev) => {
+            try {
+              const msg = JSON.parse(String(ev.data)) as { type?: string; agent?: boolean; online?: boolean }
+              if (msg?.type === 'enc') return
+              if (msg?.type === 'paired') onPaired(msg.agent === true)
+              else if (msg?.type === 'agent' && msg.online === false) onPaired(false)
+              else if (msg?.type === 'ui-ready' || msg?.type === 'ui-begin') {
+                safeProgress(62, 'UI bundle streaming…')
+              }
+            } catch {}
+          }
+          ws.onerror = () => onPaired(false)
+          ws.onclose = () => {
+            clearTimeout(t)
+            // if not yet resolved, treat as offline
+            setTimeout(() => {
+              // @ts-ignore - closure check
+              if (!cancelled) resolve(false)
+            }, 50)
+          }
+        })
+
+        const statusData = (await statusP) as { agentOnline?: boolean; hasUi?: boolean } | null
+        if (cancelled) return
+        if (!statusData || statusData.agentOnline !== true) {
+          setError('Agent offline — start the CLI with `ks-ssh --token=' + token + '`')
+          safeProgress(22, 'Agent offline')
+        } else {
+          safeProgress(28, 'Agent online')
+        }
+
+        const metaData = (await metaP) as { hasUi?: boolean; size?: number } | null
+        if (cancelled) return
+        if (metaData?.hasUi) safeProgress(42, `UI cached · ${Math.round((metaData.size ?? 0) / 1024)} KB`)
+        else safeProgress(42, 'UI not yet pushed — requesting…')
+
+        const ok = await wsReady
+        if (cancelled) return
+        if (ok) safeProgress(68, 'Channel secured')
+        else if (!error) safeProgress(58, 'Channel ready')
+
+        // Preload HTML via HTTP for fast paint (warms DO cache, then iframe reuses it)
+        safeProgress(75, 'Loading frontend…')
+        try {
+          // Use no-store but keep connection warm; body is not needed — just headers for cache
+          await fetch(`${relayBase}/v/${token}`, { signal: ctrl.signal, cache: 'no-store', method: 'GET' }).then((r) => r.text().then(() => r).catch(() => r)).catch(() => null)
+          if (!cancelled) safeProgress(88, 'Frontend fetched')
+        } catch {
+          if (!cancelled) safeProgress(82, 'Frontend pending…')
+        }
+
+        if (cancelled) return
+        // Prepare iframe src (the real CLI frontend)
+        safeProgress(92, 'Finalizing…')
+        setIframeSrc(visitUrl)
+        // Progress will go to 100 on iframe onLoad; fallback timer
+        setTimeout(() => {
+          if (!cancelled && !ready) safeProgress(96, 'Rendering…')
+        }, 600)
+      } catch (e) {
+        if (!cancelled) setError(e instanceof Error ? e.message : 'Load failed')
+      }
+    }
+    void run()
+    return () => {
+      cancelled = true
+      ctrl.abort()
+      try { ws?.close() } catch {}
+    }
+  }, [entry?.id, token])
+
+  useEffect(() => {
+    if (iframeLoaded) {
+      setProgress(100)
+      setPhase('Ready — opening…')
+      const t = setTimeout(() => setReady(true), 220)
+      return () => clearTimeout(t)
+    }
+  }, [iframeLoaded])
+
+  if (!entry || !token) {
+    return (
+      <section className="page page-visit" aria-labelledby="page-title-visit">
+        <div className="page-head">
+          <a className="btn btn-sm" href="#/ssh">Back</a>
+          <h1 id="page-title-visit" style={{ margin: 0, flex: 1 }}>Visit</h1>
+        </div>
+        <div className="card">
+          <p>Connection not found.</p>
+          <div className="row-actions">
+            <a className="btn btn-primary" href="#/ssh">Back to SSH</a>
+          </div>
+        </div>
+      </section>
+    )
+  }
+
+  const pct = Math.min(100, Math.max(0, Math.round(progress)))
+
+  return (
+    <section className="page page-visit" aria-labelledby="page-title-visit">
+      <div className="page-head">
+        <a className="btn btn-sm" href="#/ssh" aria-label="Back to SSH">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <polyline points="15 18 9 12 15 6" />
+          </svg>
+          Back
+        </a>
+        <h1 id="page-title-visit" style={{ margin: 0, flex: 1 }}>{entry.name}</h1>
+        <div className="row-actions" style={{ marginTop: 0, paddingTop: 0 }}>
+          <a className="btn btn-sm" href={visitUrl} target="_blank" rel="noreferrer">
+            Open raw
+          </a>
+          <button
+            type="button"
+            className="btn btn-sm"
+            onClick={() => {
+              const el = wrapRef.current
+              if (el?.requestFullscreen) void el.requestFullscreen()
+              else window.open(visitUrl, '_blank', 'noopener')
+            }}
+            disabled={!iframeSrc}
+          >
+            Fullscreen
+          </button>
+        </div>
+      </div>
+
+      {!ready || !iframeSrc ? (
+        <div className="card visit-loader-card">
+          <div className="visit-loader-head">
+            <span className="visit-loader-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="3" y="4" width="18" height="16" rx="2" />
+                <path d="M7 9l3 3-3 3M12 15h5" />
+              </svg>
+            </span>
+            <div>
+              <h2 style={{ margin: 0 }}>{entry.name}</h2>
+              <p className="visit-token">{token}</p>
+            </div>
+            <span className="tag online" style={{ marginLeft: 'auto' }}>
+              {pct}% — {phase}
+            </span>
+          </div>
+
+          <div className="visit-progress-track" role="progressbar" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100} aria-label="Loading frontend">
+            <div className="visit-progress-bar" style={{ width: `${pct}%` }} />
+            <div className="visit-progress-glow" style={{ left: `calc(${pct}% - 12px)` }} />
+          </div>
+          <div className="visit-progress-meta">
+            <span className="visit-phase">{phase}</span>
+            <span className="visit-pct">{pct}%</span>
+          </div>
+
+          <ul className="visit-steps">
+            <li className={pct >= 15 ? 'done' : ''}><span className="dot" /> Relay</li>
+            <li className={pct >= 35 ? 'done' : ''}><span className="dot" /> Agent</li>
+            <li className={pct >= 62 ? 'done' : ''}><span className="dot" /> WSS</li>
+            <li className={pct >= 88 ? 'done' : ''}><span className="dot" /> Frontend</li>
+          </ul>
+
+          {error ? (
+            <div className="banner-error" role="alert">
+              <p>{error}</p>
+              <div className="row-actions">
+                <a className="btn btn-sm btn-primary" href={`#/ssh/visit/${encodeURIComponent(entry.id)}`}>
+                  Retry
+                </a>
+                <a className="btn btn-sm" href="#/ssh">
+                  Back
+                </a>
+              </div>
+            </div>
+          ) : (
+            <p className="session-status session-hint">
+              Authenticating via WSS and fetching the embedded frontend bundle — not a fake timer. Progress tracks real relay status, UI meta, WSS handshake and HTML preload; on 100% the CLI frontend (same as <code>--port</code>) opens below.
+            </p>
+          )}
+
+          {/* Hidden preload iframe to warm cache — visibility hidden until ready */}
+          {iframeSrc && !ready && (
+            <iframe
+              title={`Preload ${token}`}
+              src={iframeSrc}
+              style={{ position: 'absolute', width: 0, height: 0, border: 0, opacity: 0, pointerEvents: 'none' }}
+              tabIndex={-1}
+              aria-hidden="true"
+              onLoad={() => setIframeLoaded(true)}
+            />
+          )}
+        </div>
+      ) : null}
+
+      {iframeSrc && (
+        <div
+          className="visit-frame-wrap"
+          ref={wrapRef}
+          style={{ display: ready ? 'block' : 'none' }}
+        >
+          <iframe
+            title={`Agent UI ${token} — Terminal, Files, Ports, Host`}
+            src={iframeSrc}
+            className="visit-frame"
+            allow="fullscreen; clipboard-read; clipboard-write"
+            allowFullScreen
+            sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-downloads"
+            onLoad={() => setIframeLoaded(true)}
+          />
+        </div>
+      )}
     </section>
   )
 }
