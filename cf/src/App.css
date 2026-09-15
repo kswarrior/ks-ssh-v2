@@ -2552,3 +2552,208 @@
   height: 100svh;
   min-height: 0;
 }
+
+/* ================= Visit loader (CF → CLI) ================= */
+
+.page-visit {
+  gap: 18px;
+}
+
+.page-visit .page-head h1 {
+  background: linear-gradient(115deg, var(--text-h) 55%, var(--accent-strong));
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: var(--text-h);
+}
+
+.visit-loader-card {
+  gap: 16px;
+  padding: 22px;
+  border-radius: 18px;
+  position: relative;
+  overflow: hidden;
+}
+
+.visit-loader-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 18px;
+  right: 18px;
+  height: 2px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, transparent, var(--accent-hi), var(--accent-glow), transparent);
+  opacity: 0.85;
+}
+
+.visit-loader-head {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.visit-loader-icon {
+  width: 46px;
+  height: 46px;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  background: linear-gradient(135deg, var(--accent-hi), var(--accent-lo));
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  box-shadow:
+    0 6px 16px -6px var(--accent-shadow),
+    inset 0 1px 0 rgba(255, 255, 255, 0.3);
+}
+
+.visit-loader-icon svg {
+  width: 24px;
+  height: 24px;
+  stroke: #fff;
+}
+
+.visit-token {
+  margin: 2px 0 0;
+  font-family: var(--mono);
+  font-size: 13px;
+  color: var(--text);
+  letter-spacing: 0.04em;
+}
+
+.visit-progress-track {
+  position: relative;
+  height: 10px;
+  border-radius: 999px;
+  background: var(--field-bg);
+  border: 1px solid var(--glass-border);
+  overflow: hidden;
+  box-shadow: inset 0 2px 8px rgba(0, 0, 0, 0.18);
+}
+
+.visit-progress-bar {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 0;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--accent-hi), var(--accent-lo) 65%, var(--accent-glow));
+  box-shadow:
+    0 0 18px var(--accent-shadow),
+    inset 0 1px 0 rgba(255, 255, 255, 0.25);
+  transition: width 0.45s cubic-bezier(0.22, 0.9, 0.28, 1);
+}
+
+.visit-progress-glow {
+  position: absolute;
+  top: -6px;
+  width: 24px;
+  height: 22px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(255, 255, 255, 0.9), transparent 65%);
+  filter: blur(6px);
+  opacity: 0.7;
+  pointer-events: none;
+  transition: left 0.45s cubic-bezier(0.22, 0.9, 0.28, 1);
+}
+
+.visit-progress-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 13px;
+  color: var(--text);
+}
+
+.visit-phase {
+  font-weight: 600;
+  color: var(--text-h);
+}
+
+.visit-pct {
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  color: var(--accent-strong);
+}
+
+.visit-steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.visit-steps li {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--glass-border);
+  background: var(--field-bg);
+  transition: background 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+}
+
+.visit-steps li.done {
+  color: var(--text-h);
+  background: var(--accent-soft);
+  border-color: rgba(139, 124, 255, 0.35);
+}
+
+.visit-steps .dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--text);
+  flex-shrink: 0;
+  transition: background 0.2s ease, box-shadow 0.2s ease;
+}
+
+.visit-steps li.done .dot {
+  background: var(--success);
+  box-shadow: 0 0 10px rgba(52, 211, 153, 0.6);
+}
+
+.visit-frame-wrap {
+  border: 1px solid var(--glass-border);
+  border-radius: 12px;
+  overflow: hidden;
+  background: #000;
+  box-shadow: var(--glow-line), var(--shadow-lg);
+  height: calc(100svh - 160px);
+  min-height: 520px;
+  display: flex;
+  flex-direction: column;
+}
+
+.visit-frame {
+  width: 100%;
+  height: 100%;
+  min-height: 520px;
+  border: 0;
+  background: #000;
+  flex: 1;
+}
+
+.visit-frame-wrap:fullscreen {
+  border-radius: 0;
+  height: 100svh;
+  min-height: 100svh;
+}
+
+@media (max-width: 640px) {
+  .visit-steps {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .visit-frame-wrap {
+    height: calc(100svh - 140px);
+    min-height: 420px;
+    border-radius: 8px;
+  }
+}
