@@ -631,88 +631,20 @@ function HostTermsMenu({
   sessions,
   splits,
   onAttach,
+  refreshKey,
 }: {
   sessions: TermSession[]
   splits: Record<string, TermSession>
   onAttach: (sid: string) => void
+  refreshKey: number
 }) {
-  const [host, setHost] = useState<HostTerm[] | null>(null)
-  const [killing, setKilling] = useState<string | null>(null)
+  const { host, killing, load, onKill } = useHostList(refreshKey)
   const [open, setOpen] = useState(false)
   const [anchor, setAnchor] = useState<{
     top: number | null
     bottom: number | null
     right: number
   } | null>(null)
-
-  const load = useCallback(async () => {
-    try {
-      const res = await fetch('/api/terms', {
-        cache: 'no-store',
-        credentials: 'same-origin',
-      })
-      if (!res.ok) {
-        setHost((prev) => prev ?? null)
-        return null
-      }
-      const data = (await res.json()) as {
-        sessions?: Partial<HostTerm>[]
-      }
-      const list = Array.isArray(data.sessions)
-        ? data.sessions.filter(
-            (s): s is HostTerm =>
-              !!s &&
-              typeof s.id === 'string' &&
-              typeof s.alive === 'boolean',
-          )
-        : []
-      setHost(list)
-      return list
-    } catch {
-      setHost((prev) => prev ?? null)
-      return null
-    }
-  }, [])
-
-  useEffect(() => {
-    let alive = true
-    let first = true
-    const tick = async () => {
-      try {
-        const res = await fetch('/api/terms', {
-          cache: 'no-store',
-          credentials: 'same-origin',
-        })
-        if (!res.ok) {
-          if (first && alive) setHost(null)
-          return
-        }
-        const data = (await res.json()) as {
-          sessions?: Partial<HostTerm>[]
-        }
-        const list = Array.isArray(data.sessions)
-          ? data.sessions.filter(
-              (s): s is HostTerm =>
-                !!s &&
-                typeof s.id === 'string' &&
-                typeof s.alive === 'boolean',
-            )
-          : []
-        if (alive) {
-          first = false
-          setHost(list)
-        }
-      } catch {
-        if (first && alive) setHost(null)
-      }
-    }
-    void tick()
-    const id = window.setInterval(tick, 15000)
-    return () => {
-      alive = false
-      window.clearInterval(id)
-    }
-  }, [])
 
   // Escape closes the dropdown.
   useEffect(() => {
@@ -727,27 +659,34 @@ function HostTermsMenu({
     return () => window.removeEventListener('keydown', onKey)
   }, [open])
 
+  // Navigation (e.g. Replay → #/recordings) must not leave a ghost dropdown
+  // + overlay floating over the new page.
+  useEffect(() => {
+    if (!open) return
+    const onHash = () => {
+      setOpen(false)
+      setAnchor(null)
+    }
+    window.addEventListener('hashchange', onHash)
+    return () => window.removeEventListener('hashchange', onHash)
+  }, [open])
+
   const attached = new Set(
     [
       ...sessions.map((t) => t.sid),
       ...Object.values(splits).map((t) => t.sid),
     ].filter((s): s is string => !!s),
   )
-  const others = (host ?? []).filter((h) => !attached.has(h.id))
+  // Same own-tab hiding as `HostTerms`, extended to tabs owned by other
+  // live windows of this browser (see `useForeignSids`).
+  const foreign = useForeignSids([...attached].sort().join('\n'))
+  const others = (host ?? []).filter(
+    (h) => !attached.has(h.id) && !foreign.has(h.id),
+  )
   // Hide only when the backend has no list endpoint (relay view, old
   // backend). When the endpoint exists but there is nothing else, keep the
   // header button with a 0 badge so the header layout stays stable.
   if (!host) return null
-
-  const onKill = async (sid: string) => {
-    setKilling(sid)
-    try {
-      await killHostTerm(sid)
-      await load()
-    } finally {
-      setKilling((cur) => (cur === sid ? null : cur))
-    }
-  }
 
   const close = () => {
     setOpen(false)
@@ -857,7 +796,10 @@ function HostTermsMenu({
                       <button
                         type="button"
                         className="btn btn-sm"
-                        onClick={() => requestReplay(h.id)}
+                        onClick={() => {
+                          close()
+                          requestReplay(h.id)
+                        }}
                         title="Read-only replay of this session's recording"
                       >
                         Replay
@@ -2120,6 +2062,11 @@ export default function TerminalPage({
   // never persisted — a refresh drops them, the main tabs reattach.
   const [splits, setSplits] = useState<Record<string, TermSession>>({})
   const splitCounter = useRef(0)
+  // Bumped after local mutations (tab close, attach, split toggle) so the
+  // Other-sessions list re-lists immediately instead of showing stale rows
+  // until the next 15s poll.
+  const [hostRefresh, setHostRefresh] = useState(0)
+  const pokeHost = useCallback(() => setHostRefresh((n) => n + 1), [])
 
   // Persist the font + prediction preferences.
   useEffect(() => {
@@ -2173,6 +2120,7 @@ export default function TerminalPage({
     setSessions((prev) => [...prev, t])
     setStatuses((prev) => ({ ...prev, [t.id]: 'connecting' }))
     setActiveId(t.id)
+    pokeHost()
   }
 
   // Vertical split: a second live shell beside this tab's own (own backend
@@ -2198,6 +2146,7 @@ export default function TerminalPage({
       }
       return { ...prev, [tabId]: pane }
     })
+    pokeHost()
   }
 
   const closeTerminal = (id: string) => {
@@ -2250,6 +2199,8 @@ export default function TerminalPage({
       delete next[id]
       return next
     })
+    // The killed backend session must drop out of Other-sessions at once.
+    pokeHost()
   }
 
   const requestClose = (id: string) => {
@@ -2406,7 +2357,7 @@ export default function TerminalPage({
           </svg>
           Terminal
         </button>
-        <HostTerms sessions={sessions} splits={splits} onAttach={attachHost} />
+        <HostTerms sessions={sessions} splits={splits} onAttach={attachHost} refreshKey={hostRefresh} />
       </section>
     )
   }
@@ -2614,7 +2565,7 @@ export default function TerminalPage({
           +
         </button>
         </div>
-        <HostTermsMenu sessions={sessions} splits={splits} onAttach={attachHost} />
+        <HostTermsMenu sessions={sessions} splits={splits} onAttach={attachHost} refreshKey={hostRefresh} />
       </div>
       <div className="term-opened">
         {sessions.map((t) => {
